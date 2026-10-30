@@ -31,6 +31,7 @@ func _ready() -> void:
 	add_child(_view)
 	_economy = NationEconomy.new()
 	_economy.setup(_view.hex_map)
+	_view.roster.economy = _economy
 	_panel = UnitPanel.new()
 	_panel.max_fortify = int(_view.roster.combat.max_fortify)
 	add_child(_panel)

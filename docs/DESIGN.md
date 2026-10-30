@@ -98,6 +98,13 @@ These factions secretly take over nations that still look neutral.
 - All numbers are in `data/combat_config.json`. Each division has an equipment_level (default 1), unused for now.
 - TBD: how a tech gap affects combat.
 
+## POWs
+
+- When a division surrenders, its remaining strength becomes POWs held by the captor (the nation that made the attack). Strength destroyed in combat does not become POWs.
+- Each nation tracks the POWs it holds, by owner nation. The player's nation panel shows POWs held and POWs lost.
+- POWs return to the owner's manpower pool on peace, or immediately if the captor joins the owner's side.
+- If a nation is eliminated, the POWs it holds and the POWs held from it stay recorded.
+- Later: POW exchanges, POWs as bargaining chips, and a soul-cost mistreatment option.
 ## First playable version
 
 - The Concord only, against simple AI
