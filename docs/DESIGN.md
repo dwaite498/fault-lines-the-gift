@@ -125,7 +125,7 @@ Status tags: **[Built]** is in the game now. **[Partial]** is partly built. **[P
 ### 4. Espionage [Planned, PROVISIONAL, parked]
 - To be built as a modular piece.
 - Control points work like Terra Invicta's.
-- Each nation has 3 agents. Agents have Persuasion, Investigation, and Security stats.
+- 3 starting agents (whether per player or per faction is TBD). Agents have Persuasion, Investigation, and Security stats.
 - Ops are Investigate, Propaganda, Coup, Purge, Sabotage (a candidate soul-cost op), and Protect.
 - Each op is a contested roll, and a failed op exposes the agent.
 
