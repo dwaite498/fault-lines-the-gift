@@ -29,6 +29,9 @@ func refresh(city: Dictionary) -> void:
 		"Population: %d / %d" % [city.population, max_population],
 		"Growth/turn: +%d" % growth,
 		"Claim radius: %d" % city.radius,
-		"Infrastructure: %d" % city.infrastructure,
+		"Infrastructure: %.1f" % float(city.infrastructure),
 	])
+	if city.has("rebuild_turns_left"):
+		label.text += "\nRebuilding: %d turns left (infra %.1f/%.1f)" % [
+				city.rebuild_turns_left, float(city.infrastructure), float(city.rebuild_target)]
 	panel.size = label.get_minimum_size() + Vector2(16, 12)

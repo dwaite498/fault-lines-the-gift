@@ -27,6 +27,7 @@ var cells: Dictionary = {}
 var territory: Dictionary = {}
 ## Each city is {"id", "nation", "cell": Vector2i, "population", "infrastructure",
 ## "radius"}, kept in ascending id order. radius is that city's claim radius.
+## A recently captured city also has "rebuild_target" and "rebuild_turns_left".
 var cities: Array[Dictionary] = []
 ## Nations that still have at least one city.
 var nations: Array[int] = []
@@ -35,6 +36,7 @@ var city_rules := {
 	"claim_radius": 1, "grown_claim_radius": 2, "grown_radius_population": 20,
 	"start_population": 10, "start_infrastructure": 10,
 	"growth_per_turn": 1, "max_population": 30,
+	"capture_pop_loss": 0.25, "capture_infra_loss": 0.3, "rebuild_turns": 26,
 }
 ## The seed passed to generate(); other systems derive their RNG from it.
 var seed_value := 0
@@ -54,7 +56,7 @@ static func from_config_file(map_path: String,
 	var hex_map := HexMap.new()
 	for key in hex_map.city_rules:
 		if city_cfg.has(key):
-			hex_map.city_rules[key] = int(city_cfg[key])
+			hex_map.city_rules[key] = city_cfg[key]
 	hex_map.generate(int(map_cfg.width), int(map_cfg.height), int(map_cfg.seed),
 			float(map_cfg.land_ratio), int(map_cfg.nation_count),
 			int(city_cfg.cities_per_nation), int(city_cfg.min_spacing))
@@ -160,6 +162,7 @@ func grow_cities() -> bool:
 	for city in cities:
 		city.population = mini(int(city.population) + int(city_rules.growth_per_turn),
 				int(city_rules.max_population))
+		_rebuild_step(city)
 		var radius := _radius_for(int(city.population))
 		if radius != int(city.radius):
 			city.radius = radius
@@ -167,6 +170,22 @@ func grow_cities() -> bool:
 	if changed:
 		update_ownership()
 	return changed
+
+
+## Regains (target - current) / turns_left infra. Lands exactly on the target
+## on the last turn, then clears the rebuild keys.
+func _rebuild_step(city: Dictionary) -> void:
+	if not city.has("rebuild_turns_left"):
+		return
+	var left := int(city.rebuild_turns_left)
+	var target := float(city.rebuild_target)
+	if left <= 1:
+		city.infrastructure = target
+		city.erase("rebuild_turns_left")
+		city.erase("rebuild_target")
+		return
+	city.infrastructure = float(city.infrastructure) + (target - float(city.infrastructure)) / left
+	city.rebuild_turns_left = left - 1
 
 
 func _radius_for(population: int) -> int:
@@ -189,10 +208,20 @@ func remove_city(city_id: int) -> Array[int]:
 
 ## Hands the city on cell to new_nation, reruns ownership, and removes any
 ## nation left with no cities. Returns the eliminated nation indexes.
+## The city loses capture_pop_loss of its pop (rounded down) and
+## capture_infra_loss of its infra, then rebuilds over rebuild_turns turns.
+## Re-capture during a rebuild keeps the original target and restarts the timer.
 func capture_city(cell: Vector2i, new_nation: int) -> Array[int]:
 	for city in cities:
 		if city.cell == cell:
 			city.nation = new_nation
+			if not city.has("rebuild_target"):
+				city.rebuild_target = float(city.infrastructure)
+			city.rebuild_turns_left = int(city_rules.rebuild_turns)
+			var pop := int(city.population)
+			city.population = pop - int(floor(pop * float(city_rules.capture_pop_loss)))
+			city.infrastructure = float(city.infrastructure) * (1.0 - float(city_rules.capture_infra_loss))
+			city.radius = _radius_for(int(city.population))
 	var eliminated := eliminate_nations_without_cities()
 	update_ownership()
 	return eliminated
