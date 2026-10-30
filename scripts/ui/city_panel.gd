@@ -40,5 +40,5 @@ func refresh(city: Dictionary) -> void:
 		label.text += "\nOutput/turn: cash +%.1f, manpower +%.1f, capacity +%.1f" % [
 				income.cash, income.manpower, income.capacity]
 		if economy.pending.has(city.id):
-			label.text += "\nRecruiting: infantry arrives next turn"
+			label.text += "\nRecruiting: " + NationEconomy.queue_text(economy.pending[city.id])
 	panel.size = label.get_minimum_size() + Vector2(16, 12)

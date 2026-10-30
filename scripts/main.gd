@@ -74,7 +74,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		var reason := _economy.recruit_block_reason(_city, PLAYER_NATION, roster)
 		if reason == "":
 			_economy.recruit(_city, PLAYER_NATION, roster)
-			print("Recruiting at city %d; arrives next turn" % _city.id)
+			print("Recruiting at city %d; arrives in %d turns" % [_city.id, int(_economy.config.training_turns)])
 		else:
 			message.text = "Cannot recruit: " + reason
 			print(message.text)

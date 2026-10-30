@@ -31,8 +31,8 @@ func refresh(nation: int, roster: DivisionRoster, economy: NationEconomy, top: f
 	var ids := economy.pending.keys()
 	ids.sort()
 	for id in ids:
-		if economy.pending[id] == nation:
-			lines.append("Recruiting at city %d: infantry next turn" % id)
+		if economy.pending[id].nation == nation:
+			lines.append("city %d: %s" % [id, NationEconomy.queue_text(economy.pending[id])])
 	label.text = "\n".join(lines)
 	panel.size = label.get_minimum_size() + Vector2(16, 12)
 	panel.position = Vector2(1280 - panel.size.x - 8, top)
