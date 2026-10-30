@@ -7,5 +7,8 @@
 	"start_population": 10,
 	"start_infrastructure": 10,
 	"growth_per_turn": 1,
-	"max_population": 30
+	"max_population": 30,
+	"capture_pop_loss": 0.25,
+	"capture_infra_loss": 0.3,
+	"rebuild_turns": 26
 }
