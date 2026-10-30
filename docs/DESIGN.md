@@ -93,6 +93,7 @@ These factions secretly take over nations that still look neutral.
 - Manpower is spent when a division is created and drawn over time to replace losses and attrition.
 - Divisions on home territory and not in combat take no attrition.
 - Strength loss is permanent (reinforcement is planned). A division at 0 strength is destroyed.
+- Supply: at end of turn, a division is in supply if a path of up to 8 passable hexes (no water, no hexes held by enemy divisions) reaches a city its nation owns. Out of supply (including encircled) divisions lose 10 org per turn (down to 0, no retreat) and recover no org or strength. Values are in `data/combat_config.json`.
 - The attacker never moves in. A city is captured only by moving into it when it is empty.
 - Battles last several turns: an even fight takes 4 to 5 attacks to break a division's organization.
 - All numbers are in `data/combat_config.json`. Each division has an equipment_level (default 1), unused for now.
