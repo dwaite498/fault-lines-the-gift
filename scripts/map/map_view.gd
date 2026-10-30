@@ -12,6 +12,8 @@ const NATION_COLORS: Array[Color] = [
 ]
 
 var hex_map: HexMap
+var roster: DivisionRoster
+var selected: Division
 
 
 func hex_to_pixel(cell: Vector2i) -> Vector2:
@@ -39,6 +41,33 @@ func _draw() -> void:
 		var center := hex_to_pixel(city.cell)
 		draw_circle(center, HEX_SIZE * 0.35, Color.WHITE)
 		draw_arc(center, HEX_SIZE * 0.35, 0.0, TAU, 24, Color.BLACK, 2.0)
+	if roster:
+		for d in roster.divisions:
+			_draw_counter(d)
+
+
+## A small rectangle in the owner's color; yellow outline when selected,
+## faded once it has no moves left.
+func _draw_counter(d: Division) -> void:
+	var rect := Rect2(hex_to_pixel(d.hex) + Vector2(-11, -2), Vector2(22, 14))
+	var color := _color_for(d.nation)
+	if d.moves_left <= 0:
+		color = color.darkened(0.4)
+	draw_rect(rect, color)
+	var outline := Color.YELLOW if d == selected else Color.BLACK
+	draw_rect(rect, outline, false, 2.0)
+
+
+## The cell under a pixel position, or Vector2i(-1, -1) if none.
+func pixel_to_hex(pos: Vector2) -> Vector2i:
+	var best := Vector2i(-1, -1)
+	var best_dist := HEX_SIZE
+	for cell in hex_map.cells:
+		var dist := pos.distance_to(hex_to_pixel(cell))
+		if dist < best_dist:
+			best_dist = dist
+			best = cell
+	return best
 
 
 func _draw_shared_edge(cell: Vector2i, other: Vector2i) -> void:
