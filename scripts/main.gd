@@ -68,7 +68,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if key.keycode == KEY_SPACE:
 		roster.run_ai(PLAYER_NATION, _view.hex_map)
 		_economy.run_ai(PLAYER_NATION, _view.hex_map, roster)
-		roster.end_turn()
+		roster.end_turn(_view.hex_map)
 		_view.hex_map.grow_cities()
 		_economy.end_turn(_view.hex_map, roster)
 		turn += 1

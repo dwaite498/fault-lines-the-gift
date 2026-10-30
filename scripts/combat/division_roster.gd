@@ -186,8 +186,6 @@ func _after_combat(d: Division, hex_map: HexMap, captor: int) -> String:
 		economy.add_pows(captor, d.nation, d.strength)
 	return "surrendered"
 
-# --- Turn ---
-
 ## Placeholder AI for every nation except player_nation: attack a random adjacent
 ## enemy if possible, otherwise move randomly or fortify.
 func run_ai(player_nation: int, hex_map: HexMap) -> void:
@@ -210,11 +208,53 @@ func run_ai(player_nation: int, hex_map: HexMap) -> void:
 			fortify(d)
 
 
-## Recovers org (morale * rate) for divisions not in combat, then resets actions.
-func end_turn() -> void:
+# --- Supply ---
+
+## True if a BFS over passable hexes not holding an enemy division reaches a city
+## d's nation owns within supply_max_path steps (d's own hex is step 0).
+func is_in_supply(d: Division, hex_map: HexMap) -> bool:
+	var max_steps := int(combat.supply_max_path)
+	var seen := {d.hex: 0}
+	var queue: Array[Vector2i] = [d.hex]
+	while not queue.is_empty():
+		var cell: Vector2i = queue.pop_front()
+		var city := hex_map.city_at(cell)
+		if not city.is_empty() and city.nation == d.nation:
+			return true
+		var steps: int = seen[cell]
+		if steps >= max_steps:
+			continue
+		for n in hex_map.neighbors(cell):
+			if seen.has(n) or not hex_map.terrain_of(n).passable:
+				continue
+			var other := division_at(n)
+			if other and other.nation != d.nation:
+				continue
+			seen[n] = steps + 1
+			queue.append(n)
+	return false
+
+
+## Sets supplied on every division. Out of supply and encircled are the same state for now.
+func update_supply(hex_map: HexMap) -> void:
+	for d in divisions:
+		d.supplied = is_in_supply(d, hex_map)
+
+
+# --- Turn ---
+
+## Checks supply first (if hex_map is given). Out-of-supply divisions lose
+## out_of_supply_org_drain org (clamped at 0, no retreat) and recover nothing.
+## Supplied divisions not in combat recover org (morale * rate). Then resets actions.
+## Strength never regenerates here.
+func end_turn(hex_map: HexMap = null) -> void:
+	if hex_map:
+		update_supply(hex_map)
 	var rate: float = combat.org_recovery_per_morale
 	for d in divisions:
-		if not d.in_combat:
+		if not d.supplied:
+			d.org = maxf(d.org - float(combat.out_of_supply_org_drain), 0.0)
+		elif not d.in_combat:
 			d.org = minf(d.org + d.morale * rate, d.max_org)
 		d.in_combat = false
 		d.attacked_from.clear()

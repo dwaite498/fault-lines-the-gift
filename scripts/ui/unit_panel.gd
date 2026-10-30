@@ -40,6 +40,8 @@ func refresh(d: Division, hex_map: HexMap) -> void:
 	])
 	## Current flank penalty from the distinct hexes that attacked d this turn.
 	var penalty := 1.0 - DivisionRoster.flank_mult_for(d.attacked_from.size(), flank_per_hex, flank_min_mult)
+	if not d.supplied:
+		label.text += "\nOut of supply"
 	if penalty > 0.0:
 		label.text += "\nFlanked: -%d%% def" % roundi(penalty * 100.0)
 	panel.size = label.get_minimum_size() + Vector2(16, 12)
