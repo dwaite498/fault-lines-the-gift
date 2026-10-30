@@ -11,8 +11,6 @@ var divisions: Array[Division] = []
 var templates: Dictionary = {}
 var combat: Dictionary = {}
 var rng := RandomNumberGenerator.new()
-## Set by main so surrenders can charge manpower. Optional.
-var economy: NationEconomy = null
 
 
 static func load_templates(path := CONFIG_PATH) -> Dictionary:
@@ -154,8 +152,7 @@ func _damage(d: Division, raw: float) -> Dictionary:
 
 
 ## Strength 0: destroyed. Org 0: retreat 1 hex to a free friendly or neutral
-## land hex. If boxed in, it surrenders: removed, and its nation loses
-## manpower = strength * surrender_manpower_factor (never below 0).
+## land hex. If boxed in, it surrenders and is removed.
 ## Returns "destroyed", "retreated", "surrendered", or "held".
 func _after_combat(d: Division, hex_map: HexMap) -> String:
 	if d.strength <= 0.0:
@@ -171,9 +168,6 @@ func _after_combat(d: Division, hex_map: HexMap) -> String:
 			d.fortify_level = 0
 			return "retreated"
 	divisions.erase(d)
-	if economy and economy.stocks.has(d.nation):
-		var stock: Dictionary = economy.stocks[d.nation]
-		stock.manpower = maxf(float(stock.manpower) - d.strength * float(combat.surrender_manpower_factor), 0.0)
 	return "surrendered"
 
 # --- Turn ---

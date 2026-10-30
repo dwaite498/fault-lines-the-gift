@@ -88,7 +88,10 @@ These factions secretly take over nations that still look neutral.
 - Combat is a grind. Each attack, both sides deal damage (the attacker rolls first): damage = base_dmg * (own attack / other side's defense) * rand(0.8..1.2).
 - The defender's defense includes its terrain's defense_mult, its fortify bonus (+10% per level), and a city bonus (x1.25) when it holds a city. The attacker uses its plain defense stat.
 - Damage taken is scaled by morale, * (1.5 - morale), then split 75% to organization and 25% to strength.
-- A division at 0 organization retreats 1 hex to a free friendly or neutral hex. If it is boxed in, it surrenders: it is removed and its nation loses manpower equal to its strength * 0.2.
+- A division at 0 organization retreats 1 hex to a free friendly or neutral hex.
+- A boxed-in division at 0 organization surrenders; its remaining strength becomes POWs held by the captor (see POWs).
+- Manpower is spent when a division is created and drawn over time to replace losses and attrition.
+- Divisions on home territory and not in combat take no attrition.
 - Strength loss is permanent (reinforcement is planned). A division at 0 strength is destroyed.
 - The attacker never moves in. A city is captured only by moving into it when it is empty.
 - Battles last several turns: an even fight takes 4 to 5 attacks to break a division's organization.
