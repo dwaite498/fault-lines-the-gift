@@ -2,7 +2,7 @@ extends Node2D
 ## Entry scene. Builds the map and divisions from data/ configs and shows them.
 ## Controls: click your division to select it, then click an adjacent land hex to
 ## move or an adjacent enemy to attack. F fortifies. Space ends the turn (the AI
-## nations act first). With your city panel open, R recruits infantry. Debug: D removes the newest city.
+## nations act first). With your city panel open, R recruits infantry. M toggles the military panel. Debug: D removes the newest city.
 
 const GAME_TITLE := "Fault Lines: The Gift"
 const MAP_CONFIG_PATH := "res://data/map_config.json"
@@ -15,6 +15,11 @@ var _city_panel: CityPanel
 var _economy: NationEconomy
 ## The city shown in the city panel, or {} when closed.
 var _city: Dictionary = {}
+var _nation_panel: NationPanel
+var _military_panel: MilitaryPanel
+## Brief on-screen message (e.g. why R was blocked). Cleared on the next action.
+var message := Label.new()
+var turn := 1
 
 
 func _ready() -> void:
@@ -34,6 +39,17 @@ func _ready() -> void:
 	_city_panel.max_population = int(_view.hex_map.city_rules.max_population)
 	_city_panel.economy = _economy
 	add_child(_city_panel)
+	_nation_panel = NationPanel.new()
+	add_child(_nation_panel)
+	_military_panel = MilitaryPanel.new()
+	_military_panel.max_fortify = _panel.max_fortify
+	add_child(_military_panel)
+	var layer := CanvasLayer.new()
+	message.position = Vector2(8, 690)
+	message.add_theme_color_override("font_color", Color(1, 0.4, 0.4))
+	layer.add_child(message)
+	add_child(layer)
+	_refresh_panels()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -44,6 +60,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
 	if not key or not key.pressed or key.echo:
 		return
+	message.text = ""
 	var roster := _view.roster
 	if key.keycode == KEY_SPACE:
 		roster.run_ai(PLAYER_NATION, _view.hex_map)
@@ -51,6 +68,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		roster.end_turn()
 		_view.hex_map.grow_cities()
 		_economy.end_turn(_view.hex_map, roster)
+		turn += 1
 		print("Turn ended")
 	elif key.keycode == KEY_R and not _city.is_empty() and _city.nation == PLAYER_NATION:
 		var reason := _economy.recruit_block_reason(_city, PLAYER_NATION, roster)
@@ -58,7 +76,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			_economy.recruit(_city, PLAYER_NATION, roster)
 			print("Recruiting at city %d; arrives next turn" % _city.id)
 		else:
-			print("Cannot recruit: ", reason)
+			message.text = "Cannot recruit: " + reason
+			print(message.text)
+	elif key.keycode == KEY_M:
+		_military_panel.toggle()
 	elif key.keycode == KEY_F and _view.selected:
 		roster.fortify(_view.selected)
 	elif key.keycode == KEY_D and OS.is_debug_build():
@@ -79,6 +100,9 @@ func _unhandled_input(event: InputEvent) -> void:
 func _refresh_panels() -> void:
 	_panel.refresh(_view.selected, _view.hex_map)
 	_city_panel.refresh(_city)
+	_nation_panel.refresh(PLAYER_NATION, turn, _view.hex_map, _economy)
+	var np := _nation_panel.panel
+	_military_panel.refresh(PLAYER_NATION, _view.roster, _economy, np.position.y + np.size.y + 8)
 	_view.queue_redraw()
 
 
@@ -86,6 +110,7 @@ func _on_hex_clicked(hex: Vector2i) -> void:
 	if hex == Vector2i(-1, -1):
 		return
 	var roster := _view.roster
+	message.text = ""
 	var target := roster.division_at(hex)
 	var selected := _view.selected
 	_city = {}
