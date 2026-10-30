@@ -23,6 +23,8 @@ var fortify_level := 0
 var in_combat := false
 ## Equipment tier. Unused for now.
 var equipment_level := 1
+## Distinct hexes that attacked this division this turn (for flanking). Reset at end_turn.
+var attacked_from: Array[Vector2i] = []
 
 
 static func from_template(new_id: int, owner_nation: int, start_hex: Vector2i,

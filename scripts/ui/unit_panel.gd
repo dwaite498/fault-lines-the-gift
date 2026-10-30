@@ -5,6 +5,8 @@ extends CanvasLayer
 var panel := Panel.new()
 var label := Label.new()
 var max_fortify := 3
+var flank_per_hex := 0.15
+var flank_min_mult := 0.4
 
 
 func _init() -> void:
@@ -36,4 +38,8 @@ func refresh(d: Division, hex_map: HexMap) -> void:
 		"Acted this turn: %s" % ("yes" if acted else "no"),
 		"Terrain: %s (def x%.2f)" % [terrain_name, float(hex_map.terrain_of(d.hex).defense_mult)],
 	])
+	## Current flank penalty from the distinct hexes that attacked d this turn.
+	var penalty := 1.0 - DivisionRoster.flank_mult_for(d.attacked_from.size(), flank_per_hex, flank_min_mult)
+	if penalty > 0.0:
+		label.text += "\nFlanked: -%d%% def" % roundi(penalty * 100.0)
 	panel.size = label.get_minimum_size() + Vector2(16, 12)
