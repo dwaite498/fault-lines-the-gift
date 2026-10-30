@@ -30,7 +30,7 @@ static func projected_income(nation: int, hex_map: HexMap, economy: NationEconom
 
 func refresh(nation: int, turn: int, hex_map: HexMap, economy: NationEconomy) -> void:
 	var city_count := hex_map.cities.filter(func(c): return c.nation == nation).size()
-	var tile_count := hex_map.territory.values().count(nation)
+	var tile_count := hex_map.cells.values().count(nation)
 	var lines: Array[String] = [
 		"Nation %d - Turn %d" % [nation, turn],
 		"Cities: %d   Tiles: %d" % [city_count, tile_count],
