@@ -99,46 +99,61 @@ func can_attack(attacker: Division, defender: Division, hex_map: HexMap) -> bool
 			and defender.hex in hex_map.neighbors(attacker.hex))
 
 
-## Resolves one attack. The higher roll wins (ties go to the defender).
-## Loser: strength -(base + margin), org -(base + margin * factor). Winner takes
-## winner_damage_factor of that. Returns the rolls and outcomes, or {} if not allowed.
+## The defender's effective defense: defense * terrain_mult * fortify * city bonus.
+func defense_of(defender: Division, hex_map: HexMap) -> float:
+	var fort_mult: float = 1.0 + float(combat.fortify_bonus_per_level) * defender.fortify_level
+	var terrain_mult: float = hex_map.terrain_of(defender.hex).defense_mult
+	var city_mult: float = float(combat.city_defense_mult) if not hex_map.city_at(defender.hex).is_empty() else 1.0
+	return defender.defense * terrain_mult * fort_mult * city_mult
+
+
+## Damage one side deals: base_dmg * (attack / other_defense) * rand(roll_min..roll_max).
+func roll_damage(attack_value: float, other_defense: float) -> float:
+	return (float(combat.base_dmg) * (attack_value / other_defense)
+			* rng.randf_range(float(combat.roll_min), float(combat.roll_max)))
+
+
+## Grind resolution: both sides deal damage each attack (attacker's roll first).
+## The attacker's own defense is its plain defense stat (no terrain, fortify or
+## city bonus). The attacker never moves in. Returns both damages and outcomes,
+## or {} if not allowed.
 func attack(attacker: Division, defender: Division, hex_map: HexMap) -> Dictionary:
 	if not can_attack(attacker, defender, hex_map):
 		return {}
-	var roll_min: float = combat.roll_min
-	var roll_max: float = combat.roll_max
-	var atk: float = attacker.attack * rng.randf_range(roll_min, roll_max)
-	var fort_mult: float = 1.0 + combat.fortify_bonus_per_level * defender.fortify_level
-	var terrain_mult: float = hex_map.terrain_of(defender.hex).defense_mult
-	var def: float = (defender.defense * fort_mult * terrain_mult
-			* rng.randf_range(roll_min, roll_max))
-	var attacker_won := atk > def
-	var margin := absf(atk - def)
-	var str_dmg: float = combat.base_strength_damage + margin
-	var org_dmg: float = combat.base_org_damage + margin * combat.org_margin_factor
-	var winner_share: float = combat.winner_damage_factor
-	var winner := attacker if attacker_won else defender
-	var loser := defender if attacker_won else attacker
-	_damage(loser, str_dmg, org_dmg)
-	_damage(winner, str_dmg * winner_share, org_dmg * winner_share)
+	var def_defense := defense_of(defender, hex_map)
+	var atk_defense := attacker.defense
+	var dmg_to_defender := roll_damage(attacker.attack, def_defense)
+	var dmg_to_attacker := roll_damage(defender.attack, atk_defense)
+	var taken_by_defender := _damage(defender, dmg_to_defender)
+	var taken_by_attacker := _damage(attacker, dmg_to_attacker)
 	attacker.moves_left = 0
 	attacker.fortify_level = 0
 	attacker.in_combat = true
 	defender.in_combat = true
 	return {
-		"atk": atk, "def": def, "terrain_mult": terrain_mult, "attacker_won": attacker_won, "margin": margin,
+		"defender_defense": def_defense, "attacker_defense": atk_defense,
+		"damage_to_defender": dmg_to_defender, "damage_to_attacker": dmg_to_attacker,
+		"defender_org_loss": taken_by_defender.org, "defender_strength_loss": taken_by_defender.strength,
+		"attacker_org_loss": taken_by_attacker.org, "attacker_strength_loss": taken_by_attacker.strength,
 		"attacker_outcome": _after_combat(attacker, hex_map),
 		"defender_outcome": _after_combat(defender, hex_map),
 	}
 
 
-func _damage(d: Division, str_dmg: float, org_dmg: float) -> void:
-	d.strength = maxf(d.strength - str_dmg, 0.0)
+## Applies raw damage scaled by morale (* (morale_offset - morale)), split between
+## org and strength. Returns the {"org", "strength"} amounts applied before clamping.
+func _damage(d: Division, raw: float) -> Dictionary:
+	var scaled: float = raw * maxf(float(combat.morale_offset) - d.morale, 0.0)
+	var org_dmg: float = scaled * float(combat.org_damage_share)
+	var str_dmg: float = scaled * (1.0 - float(combat.org_damage_share))
 	d.org = maxf(d.org - org_dmg, 0.0)
+	d.strength = maxf(d.strength - str_dmg, 0.0)
+	return {"org": org_dmg, "strength": str_dmg}
 
 
 ## Strength 0: destroyed. Org 0: retreat 1 hex to a free friendly or neutral
-## land hex, or destroyed if there is none. Returns "destroyed", "retreated", or "held".
+## land hex. If boxed in, it surrenders and is removed.
+## Returns "destroyed", "retreated", "surrendered", or "held".
 func _after_combat(d: Division, hex_map: HexMap) -> String:
 	if d.strength <= 0.0:
 		divisions.erase(d)
@@ -153,8 +168,7 @@ func _after_combat(d: Division, hex_map: HexMap) -> String:
 			d.fortify_level = 0
 			return "retreated"
 	divisions.erase(d)
-	return "destroyed"
-
+	return "surrendered"
 
 # --- Turn ---
 
