@@ -2,7 +2,7 @@ extends Node2D
 ## Entry scene. Builds the map and divisions from data/ configs and shows them.
 ## Controls: click your division to select it, then click an adjacent land hex to
 ## move or an adjacent enemy to attack. F fortifies. Space ends the turn (the AI
-## nations act first). Debug: D removes the newest city.
+## nations act first). With your city panel open, R recruits infantry. Debug: D removes the newest city.
 
 const GAME_TITLE := "Fault Lines: The Gift"
 const MAP_CONFIG_PATH := "res://data/map_config.json"
@@ -12,6 +12,7 @@ const PLAYER_NATION := 0
 var _view: MapView
 var _panel: UnitPanel
 var _city_panel: CityPanel
+var _economy: NationEconomy
 ## The city shown in the city panel, or {} when closed.
 var _city: Dictionary = {}
 
@@ -23,12 +24,15 @@ func _ready() -> void:
 	_view.roster = DivisionRoster.new()
 	_view.roster.spawn_at_cities(_view.hex_map)
 	add_child(_view)
+	_economy = NationEconomy.new()
+	_economy.setup(_view.hex_map)
 	_panel = UnitPanel.new()
 	_panel.max_fortify = int(_view.roster.combat.max_fortify)
 	add_child(_panel)
 	_city_panel = CityPanel.new()
 	_city_panel.growth_per_turn = int(_view.hex_map.city_rules.growth_per_turn)
 	_city_panel.max_population = int(_view.hex_map.city_rules.max_population)
+	_city_panel.economy = _economy
 	add_child(_city_panel)
 
 
@@ -43,9 +47,18 @@ func _unhandled_input(event: InputEvent) -> void:
 	var roster := _view.roster
 	if key.keycode == KEY_SPACE:
 		roster.run_ai(PLAYER_NATION, _view.hex_map)
+		_economy.run_ai(PLAYER_NATION, _view.hex_map, roster)
 		roster.end_turn()
 		_view.hex_map.grow_cities()
+		_economy.end_turn(_view.hex_map, roster)
 		print("Turn ended")
+	elif key.keycode == KEY_R and not _city.is_empty() and _city.nation == PLAYER_NATION:
+		var reason := _economy.recruit_block_reason(_city, PLAYER_NATION, roster)
+		if reason == "":
+			_economy.recruit(_city, PLAYER_NATION, roster)
+			print("Recruiting at city %d; arrives next turn" % _city.id)
+		else:
+			print("Cannot recruit: ", reason)
 	elif key.keycode == KEY_F and _view.selected:
 		roster.fortify(_view.selected)
 	elif key.keycode == KEY_D and OS.is_debug_build():

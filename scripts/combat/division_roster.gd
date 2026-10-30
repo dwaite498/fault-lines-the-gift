@@ -30,6 +30,16 @@ func spawn_at_cities(hex_map: HexMap, template_name := "infantry") -> void:
 				city.cell, templates[template_name]))
 
 
+## Adds one new division of template_name on hex with a fresh id.
+func spawn_division(nation: int, hex: Vector2i, template_name := "infantry") -> Division:
+	var next_id := 0
+	for d in divisions:
+		next_id = maxi(next_id, d.id + 1)
+	var d := Division.from_template(next_id, nation, hex, templates[template_name])
+	divisions.append(d)
+	return d
+
+
 func division_at(hex: Vector2i) -> Division:
 	for d in divisions:
 		if d.hex == hex:
