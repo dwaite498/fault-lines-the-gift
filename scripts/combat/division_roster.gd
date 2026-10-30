@@ -11,6 +11,8 @@ var divisions: Array[Division] = []
 var templates: Dictionary = {}
 var combat: Dictionary = {}
 var rng := RandomNumberGenerator.new()
+## Optional. When set, surrenders are recorded as POWs (main.gd sets it).
+var economy: NationEconomy = null
 
 
 static func load_templates(path := CONFIG_PATH) -> Dictionary:
@@ -135,8 +137,8 @@ func attack(attacker: Division, defender: Division, hex_map: HexMap) -> Dictiona
 		"damage_to_defender": dmg_to_defender, "damage_to_attacker": dmg_to_attacker,
 		"defender_org_loss": taken_by_defender.org, "defender_strength_loss": taken_by_defender.strength,
 		"attacker_org_loss": taken_by_attacker.org, "attacker_strength_loss": taken_by_attacker.strength,
-		"attacker_outcome": _after_combat(attacker, hex_map),
-		"defender_outcome": _after_combat(defender, hex_map),
+		"attacker_outcome": _after_combat(attacker, hex_map, defender.nation),
+		"defender_outcome": _after_combat(defender, hex_map, attacker.nation),
 	}
 
 
@@ -154,7 +156,7 @@ func _damage(d: Division, raw: float) -> Dictionary:
 ## Strength 0: destroyed. Org 0: retreat 1 hex to a free friendly or neutral
 ## land hex. If boxed in, it surrenders and is removed.
 ## Returns "destroyed", "retreated", "surrendered", or "held".
-func _after_combat(d: Division, hex_map: HexMap) -> String:
+func _after_combat(d: Division, hex_map: HexMap, captor: int) -> String:
 	if d.strength <= 0.0:
 		divisions.erase(d)
 		return "destroyed"
@@ -168,6 +170,8 @@ func _after_combat(d: Division, hex_map: HexMap) -> String:
 			d.fortify_level = 0
 			return "retreated"
 	divisions.erase(d)
+	if economy:
+		economy.add_pows(captor, d.nation, d.strength)
 	return "surrendered"
 
 # --- Turn ---

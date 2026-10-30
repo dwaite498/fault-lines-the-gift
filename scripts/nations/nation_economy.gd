@@ -14,6 +14,8 @@ var stocks: Dictionary = {}
 var pending: Dictionary = {}
 ## nation index -> true if that nation paid its upkeep on the last end_turn.
 var upkeep_paid: Dictionary = {}
+## POWs: captor nation -> {owner nation -> count (float)}. Kept after elimination.
+var pows: Dictionary = {}
 
 
 func _init(path := CONFIG_PATH) -> void:
@@ -24,6 +26,7 @@ func setup(hex_map: HexMap) -> void:
 	stocks.clear()
 	pending.clear()
 	upkeep_paid.clear()
+	pows.clear()
 	for nation in hex_map.nations:
 		stocks[nation] = {}
 		upkeep_paid[nation] = true
@@ -167,3 +170,45 @@ func end_turn(hex_map: HexMap, roster: DivisionRoster) -> void:
 	collect_income(hex_map)
 	pay_upkeep(hex_map, roster)
 	spawn_pending(hex_map, roster)
+
+# --- POWs ---
+
+## Records surrendered strength as POWs held by captor from owner.
+func add_pows(captor: int, owner: int, count: float) -> void:
+	if count <= 0.0:
+		return
+	if not pows.has(captor):
+		pows[captor] = {}
+	pows[captor][owner] = float(pows[captor].get(owner, 0.0)) + count
+
+
+## POWs captor holds from all nations.
+func pows_held(captor: int) -> float:
+	var total := 0.0
+	for owner in pows.get(captor, {}):
+		total += float(pows[captor][owner])
+	return total
+
+
+## POWs taken from owner by all captors.
+func pows_lost(owner: int) -> float:
+	var total := 0.0
+	for captor in pows:
+		total += float(pows[captor].get(owner, 0.0))
+	return total
+
+
+## Returns captor's POWs from owner to owner's manpower and clears them.
+## Not called yet; peace and alliance switching will call it. Works for
+## eliminated nations too. Returns the amount returned.
+func return_pows(captor: int, owner: int) -> float:
+	if not pows.has(captor) or not pows[captor].has(owner):
+		return 0.0
+	var count: float = pows[captor][owner]
+	pows[captor].erase(owner)
+	if pows[captor].is_empty():
+		pows.erase(captor)
+	if not stocks.has(owner):
+		stocks[owner] = {}
+	stocks[owner].manpower = float(stocks[owner].get("manpower", 0.0)) + count
+	return count
