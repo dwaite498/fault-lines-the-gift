@@ -1,0 +1,11 @@
+{
+	"start_stock": {"cash": 0, "influence": 0, "operations": 0, "manpower": 0, "capacity": 0},
+	"cash_per_pop": 0.5,
+	"manpower_per_pop": 0.2,
+	"capacity_per_infra": 0.5,
+	"influence_per_turn": 1,
+	"operations_per_turn": 1,
+	"recruit_cost": {"manpower": 20, "capacity": 15},
+	"recruit_template": "infantry",
+	"ai_recruit_chance": 0.3
+}

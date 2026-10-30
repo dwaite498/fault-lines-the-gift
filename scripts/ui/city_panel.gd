@@ -6,6 +6,7 @@ var panel := Panel.new()
 var label := Label.new()
 var growth_per_turn := 1
 var max_population := 30
+var economy: NationEconomy
 
 
 func _init() -> void:
@@ -34,4 +35,10 @@ func refresh(city: Dictionary) -> void:
 	if city.has("rebuild_turns_left"):
 		label.text += "\nRebuilding: %d turns left (infra %.1f/%.1f)" % [
 				city.rebuild_turns_left, float(city.infrastructure), float(city.rebuild_target)]
+	if economy:
+		var income := economy.city_income(city)
+		label.text += "\nOutput/turn: cash +%.1f, manpower +%.1f, capacity +%.1f" % [
+				income.cash, income.manpower, income.capacity]
+		if economy.pending.has(city.id):
+			label.text += "\nRecruiting: infantry arrives next turn"
 	panel.size = label.get_minimum_size() + Vector2(16, 12)
