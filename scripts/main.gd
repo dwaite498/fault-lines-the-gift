@@ -42,6 +42,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 		var city: Dictionary = hex_map.cities.back()
 		var eliminated := hex_map.remove_city(city.id)
+		roster.disband(eliminated)
 		print("Removed city %d; eliminated nations: %s" % [city.id, eliminated])
 	if _view.selected and not roster.divisions.has(_view.selected):
 		_view.selected = null

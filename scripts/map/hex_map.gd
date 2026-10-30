@@ -32,12 +32,17 @@ var nations: Array[int] = []
 var claim_radius := 2
 ## The seed passed to generate(); other systems derive their RNG from it.
 var seed_value := 0
+## Vector2i cell -> terrain name ("plains", "forest", ...). See generate_terrain().
+var terrain: Dictionary = {}
+## Terrain name -> {color, move_cost, defense_mult, passable} from terrain_config.json.
+var terrain_types: Dictionary = {}
 
 
 ## Builds a map from the map config (width, height, seed, land_ratio, nation_count)
 ## and the cities config (cities_per_nation, claim_radius, min_spacing).
 static func from_config_file(map_path: String,
-		cities_path := "res://data/cities_config.json") -> HexMap:
+		cities_path := "res://data/cities_config.json",
+		terrain_path := "res://data/terrain_config.json") -> HexMap:
 	var map_cfg: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(map_path))
 	var city_cfg: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(cities_path))
 	var hex_map := HexMap.new()
@@ -45,7 +50,42 @@ static func from_config_file(map_path: String,
 			float(map_cfg.land_ratio), int(map_cfg.nation_count),
 			int(city_cfg.cities_per_nation), int(city_cfg.claim_radius),
 			int(city_cfg.min_spacing))
+	hex_map.generate_terrain(JSON.parse_string(FileAccess.get_file_as_string(terrain_path)))
 	return hex_map
+
+
+## Picks a terrain for every land hex by weight; water hexes get "water" and
+## city hexes are always plains. Uses its own RNG derived from seed_value, so
+## land, nations, and cities don't change.
+func generate_terrain(config: Dictionary) -> void:
+	terrain_types = config.types
+	var weights: Dictionary = config.land_weights
+	var total := 0.0
+	for kind in weights:
+		total += float(weights[kind])
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_value * 7919 + 1
+	terrain.clear()
+	for y in height:
+		for x in width:
+			var cell := Vector2i(x, y)
+			if cells[cell] == WATER:
+				terrain[cell] = "water"
+				continue
+			var roll := rng.randf() * total
+			for kind in weights:
+				roll -= float(weights[kind])
+				if roll < 0.0:
+					terrain[cell] = kind
+					break
+			if not terrain.has(cell):
+				terrain[cell] = weights.keys().back()
+	for city in cities:
+		terrain[city.cell] = "plains"
+
+
+func terrain_of(cell: Vector2i) -> Dictionary:
+	return terrain_types[terrain[cell]]
 
 
 func generate(map_width: int, map_height: int, map_seed: int,

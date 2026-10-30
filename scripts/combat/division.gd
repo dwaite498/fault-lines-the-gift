@@ -12,9 +12,11 @@ var max_org: float
 var morale: float
 var attack: float
 var defense: float
-## Actions per turn. Moving, attacking, or fortifying each use the whole turn.
+## Move points per turn. Each step costs the entered hex's move_cost.
 var move: int
 var moves_left: int
+## True once it has moved this turn; it can keep moving but not attack or fortify.
+var has_moved := false
 var supplied := true
 var fortify_level := 0
 ## True if it attacked or was attacked this turn (blocks org recovery).

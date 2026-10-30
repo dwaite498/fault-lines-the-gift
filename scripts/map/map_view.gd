@@ -1,6 +1,6 @@
 class_name MapView
 extends Node2D
-## Draws a HexMap with placeholder colors. Holds no game logic.
+## Draws a HexMap: terrain colors with a tinted nation overlay and borders. No game logic.
 
 const HEX_SIZE := 30.0
 const ORIGIN := Vector2(50, 50)
@@ -26,17 +26,20 @@ func _draw() -> void:
 		return
 	for cell in hex_map.cells:
 		var corners := _corners(hex_to_pixel(cell))
-		draw_colored_polygon(corners, _color_for(hex_map.cells[cell]))
+		draw_colored_polygon(corners, Color.html(hex_map.terrain_of(cell).color))
+		var owner: int = hex_map.cells[cell]
+		if owner >= 0:
+			draw_colored_polygon(corners, Color(_color_for(owner), 0.3))
 		corners.append(corners[0])
 		draw_polyline(corners, Color(0, 0, 0, 0.2), 1.0)
-	# Thick lines where two different owners meet.
+	# Thick lines in the nation's color where two different owners meet.
 	for cell in hex_map.cells:
 		var owner: int = hex_map.cells[cell]
 		if owner < 0:
 			continue
 		for n in hex_map.neighbors(cell):
 			if hex_map.cells[n] != owner:
-				_draw_shared_edge(cell, n)
+				_draw_shared_edge(cell, n, _color_for(owner))
 	for city in hex_map.cities:
 		var center := hex_to_pixel(city.cell)
 		draw_circle(center, HEX_SIZE * 0.35, Color.WHITE)
@@ -70,11 +73,11 @@ func pixel_to_hex(pos: Vector2) -> Vector2i:
 	return best
 
 
-func _draw_shared_edge(cell: Vector2i, other: Vector2i) -> void:
+func _draw_shared_edge(cell: Vector2i, other: Vector2i, color: Color) -> void:
 	var other_center := hex_to_pixel(other)
 	var corners := Array(_corners(hex_to_pixel(cell)))
 	corners.sort_custom(func(a, b): return a.distance_to(other_center) < b.distance_to(other_center))
-	draw_line(corners[0], corners[1], Color(0.1, 0.1, 0.1), 3.0)
+	draw_line(corners[0], corners[1], color.darkened(0.3), 4.0)
 
 
 func _corners(center: Vector2) -> PackedVector2Array:

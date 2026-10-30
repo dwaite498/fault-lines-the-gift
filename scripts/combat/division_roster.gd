@@ -39,32 +39,42 @@ func division_at(hex: Vector2i) -> Division:
 
 # --- Move ---
 
-## True if d has its action left and hex is an adjacent, unoccupied land hex.
+## True if hex is an adjacent, unoccupied, passable hex and d can pay its
+## move_cost. The first step of a turn is always allowed (1-hex minimum).
 func can_move(d: Division, hex: Vector2i, hex_map: HexMap) -> bool:
-	return (d.moves_left > 0
-			and hex in hex_map.neighbors(d.hex)
-			and hex_map.cells[hex] != HexMap.WATER
-			and division_at(hex) == null)
+	if d.moves_left <= 0 or not hex in hex_map.neighbors(d.hex) or division_at(hex) != null:
+		return false
+	var terrain := hex_map.terrain_of(hex)
+	if not terrain.passable:
+		return false
+	return d.moves_left >= int(terrain.move_cost) or not d.has_moved
 
 
-## Moves d; moving onto an enemy city captures it.
+## Moves d one hex; moving onto an enemy city captures it.
 func try_move(d: Division, hex: Vector2i, hex_map: HexMap) -> bool:
 	if not can_move(d, hex, hex_map):
 		return false
 	d.hex = hex
-	d.moves_left = 0
+	d.moves_left = maxi(d.moves_left - int(hex_map.terrain_of(hex).move_cost), 0)
+	d.has_moved = true
 	d.fortify_level = 0
 	var city := hex_map.city_at(hex)
 	if not city.is_empty() and city.nation != d.nation:
 		var eliminated := hex_map.capture_city(hex, d.nation)
+		disband(eliminated)
 		print("Nation %d captured a city at %s; eliminated: %s" % [d.nation, hex, eliminated])
 	return true
+
+
+## Removes every division of the given nations.
+func disband(nations: Array[int]) -> void:
+	divisions.assign(divisions.filter(func(d): return not nations.has(d.nation)))
 
 
 # --- Fortify ---
 
 func fortify(d: Division) -> bool:
-	if d.moves_left <= 0:
+	if d.moves_left <= 0 or d.has_moved:
 		return false
 	d.fortify_level = mini(d.fortify_level + 1, int(combat.max_fortify))
 	d.moves_left = 0
@@ -74,7 +84,7 @@ func fortify(d: Division) -> bool:
 # --- Attack ---
 
 func can_attack(attacker: Division, defender: Division, hex_map: HexMap) -> bool:
-	return (attacker.moves_left > 0 and defender != null
+	return (attacker.moves_left > 0 and not attacker.has_moved and defender != null
 			and defender.nation != attacker.nation
 			and defender.hex in hex_map.neighbors(attacker.hex))
 
@@ -89,7 +99,9 @@ func attack(attacker: Division, defender: Division, hex_map: HexMap) -> Dictiona
 	var roll_max: float = combat.roll_max
 	var atk: float = attacker.attack * rng.randf_range(roll_min, roll_max)
 	var fort_mult: float = 1.0 + combat.fortify_bonus_per_level * defender.fortify_level
-	var def: float = defender.defense * fort_mult * rng.randf_range(roll_min, roll_max)
+	var terrain_mult: float = hex_map.terrain_of(defender.hex).defense_mult
+	var def: float = (defender.defense * fort_mult * terrain_mult
+			* rng.randf_range(roll_min, roll_max))
 	var attacker_won := atk > def
 	var margin := absf(atk - def)
 	var str_dmg: float = combat.base_strength_damage + margin
@@ -104,7 +116,7 @@ func attack(attacker: Division, defender: Division, hex_map: HexMap) -> Dictiona
 	attacker.in_combat = true
 	defender.in_combat = true
 	return {
-		"atk": atk, "def": def, "attacker_won": attacker_won, "margin": margin,
+		"atk": atk, "def": def, "terrain_mult": terrain_mult, "attacker_won": attacker_won, "margin": margin,
 		"attacker_outcome": _after_combat(attacker, hex_map),
 		"defender_outcome": _after_combat(defender, hex_map),
 	}
@@ -125,7 +137,8 @@ func _after_combat(d: Division, hex_map: HexMap) -> String:
 		return "held"
 	for n in hex_map.neighbors(d.hex):
 		var owner: int = hex_map.cells[n]
-		if (owner == d.nation or owner == HexMap.UNCLAIMED) and division_at(n) == null:
+		if ((owner == d.nation or owner == HexMap.UNCLAIMED) and division_at(n) == null
+				and hex_map.terrain_of(n).passable):
 			d.hex = n
 			d.fortify_level = 0
 			return "retreated"
@@ -165,3 +178,4 @@ func end_turn() -> void:
 			d.org = minf(d.org + d.morale * rate, d.max_org)
 		d.in_combat = false
 		d.moves_left = d.move
+		d.has_moved = false
