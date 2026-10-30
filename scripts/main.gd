@@ -21,6 +21,7 @@ func _ready() -> void:
 	_view.roster.spawn_at_cities(_view.hex_map)
 	add_child(_view)
 	_panel = UnitPanel.new()
+	_panel.max_fortify = int(_view.roster.combat.max_fortify)
 	add_child(_panel)
 
 

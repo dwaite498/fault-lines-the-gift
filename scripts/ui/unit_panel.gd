@@ -4,6 +4,7 @@ extends CanvasLayer
 
 var panel := Panel.new()
 var label := Label.new()
+var max_fortify := 3
 
 
 func _init() -> void:
@@ -30,8 +31,9 @@ func refresh(d: Division, hex_map: HexMap) -> void:
 		"Morale: %.2f" % d.morale,
 		"Attack: %.1f" % d.attack,
 		"Defense: %.1f" % d.defense,
-		"Fortify: %d/3" % d.fortify_level,
+		"Fortify: %d/%d" % [d.fortify_level, max_fortify],
 		"Moves left: %d / %d" % [d.moves_left, d.move],
 		"Acted this turn: %s" % ("yes" if acted else "no"),
 		"Terrain: %s (def x%.2f)" % [terrain_name, float(hex_map.terrain_of(d.hex).defense_mult)],
 	])
+	panel.size = label.get_minimum_size() + Vector2(16, 12)
