@@ -1,5 +1,11 @@
 {
 	"cities_per_nation": 2,
-	"claim_radius": 2,
-	"min_spacing": 3
+	"min_spacing": 3,
+	"claim_radius": 1,
+	"grown_claim_radius": 2,
+	"grown_radius_population": 20,
+	"start_population": 10,
+	"start_infrastructure": 10,
+	"growth_per_turn": 1,
+	"max_population": 30
 }

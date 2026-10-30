@@ -25,11 +25,17 @@ var height := 0
 var cells: Dictionary = {}
 ## Generated nation areas (same keys and values as cells). Cities are placed inside these.
 var territory: Dictionary = {}
-## Each city is {"id": int, "nation": int, "cell": Vector2i}, kept in ascending id order.
+## Each city is {"id", "nation", "cell": Vector2i, "population", "infrastructure",
+## "radius"}, kept in ascending id order. radius is that city's claim radius.
 var cities: Array[Dictionary] = []
 ## Nations that still have at least one city.
 var nations: Array[int] = []
-var claim_radius := 2
+## Growth rules from cities_config.json. Set before generate() so new cities use them.
+var city_rules := {
+	"claim_radius": 1, "grown_claim_radius": 2, "grown_radius_population": 20,
+	"start_population": 10, "start_infrastructure": 10,
+	"growth_per_turn": 1, "max_population": 30,
+}
 ## The seed passed to generate(); other systems derive their RNG from it.
 var seed_value := 0
 ## Vector2i cell -> terrain name ("plains", "forest", ...). See generate_terrain().
@@ -46,10 +52,12 @@ static func from_config_file(map_path: String,
 	var map_cfg: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(map_path))
 	var city_cfg: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(cities_path))
 	var hex_map := HexMap.new()
+	for key in hex_map.city_rules:
+		if city_cfg.has(key):
+			hex_map.city_rules[key] = int(city_cfg[key])
 	hex_map.generate(int(map_cfg.width), int(map_cfg.height), int(map_cfg.seed),
 			float(map_cfg.land_ratio), int(map_cfg.nation_count),
-			int(city_cfg.cities_per_nation), int(city_cfg.claim_radius),
-			int(city_cfg.min_spacing))
+			int(city_cfg.cities_per_nation), int(city_cfg.min_spacing))
 	hex_map.generate_terrain(JSON.parse_string(FileAccess.get_file_as_string(terrain_path)))
 	return hex_map
 
@@ -90,10 +98,9 @@ func terrain_of(cell: Vector2i) -> Dictionary:
 
 func generate(map_width: int, map_height: int, map_seed: int,
 		land_ratio: float, nation_count: int, cities_per_nation := 2,
-		city_claim_radius := 2, min_spacing := 3) -> void:
+		min_spacing := 3) -> void:
 	width = map_width
 	height = map_height
-	claim_radius = city_claim_radius
 	seed_value = map_seed
 	# If some nation can't fit a spaced city, retry with a derived seed.
 	# The last attempt accepts a city that breaks spacing.
@@ -128,21 +135,44 @@ static func _to_cube(cell: Vector2i) -> Vector3i:
 	return Vector3i(x, -x - cell.y, cell.y)
 
 
-## Each land tile goes to the nation of the closest city within claim_radius.
-## Ties go to the lowest city id. Unclaimed land is neutral.
+## Each land tile goes to the nation of the closest city whose own radius
+## reaches it. Ties go to the lowest city id. Unclaimed land is neutral.
 func update_ownership() -> void:
 	for cell in territory:
 		if territory[cell] == WATER:
 			cells[cell] = WATER
 			continue
 		var owner := UNCLAIMED
-		var best_dist := claim_radius + 1
+		var best_dist := 1 << 30
 		for city in cities:
 			var dist := hex_distance(cell, city.cell)
-			if dist < best_dist:
+			if dist <= int(city.radius) and dist < best_dist:
 				best_dist = dist
 				owner = city.nation
 		cells[cell] = owner
+
+
+## Adds growth_per_turn population to every city (up to max_population) and
+## sets each radius from its population. Reruns ownership if a radius changed.
+## Returns true if ownership was rerun. Called once per end turn.
+func grow_cities() -> bool:
+	var changed := false
+	for city in cities:
+		city.population = mini(int(city.population) + int(city_rules.growth_per_turn),
+				int(city_rules.max_population))
+		var radius := _radius_for(int(city.population))
+		if radius != int(city.radius):
+			city.radius = radius
+			changed = true
+	if changed:
+		update_ownership()
+	return changed
+
+
+func _radius_for(population: int) -> int:
+	if population >= int(city_rules.grown_radius_population):
+		return int(city_rules.grown_claim_radius)
+	return int(city_rules.claim_radius)
 
 
 ## Removes a city, then removes any nation left with no cities.
@@ -213,7 +243,10 @@ func _place_cities(rng: RandomNumberGenerator, per_nation: int, min_spacing: int
 				# Every nation needs at least one city, even if spacing can't be met.
 				push_warning("Nation %d: no hex meets city spacing" % nation)
 				spot = land_by_nation[nation][0]
-			cities.append({"id": cities.size(), "nation": nation, "cell": spot})
+			var pop := int(city_rules.start_population)
+			cities.append({"id": cities.size(), "nation": nation, "cell": spot,
+					"population": pop, "radius": _radius_for(pop),
+					"infrastructure": int(city_rules.start_infrastructure)})
 	return true
 
 
