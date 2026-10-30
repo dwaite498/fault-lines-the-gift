@@ -101,12 +101,22 @@ func can_attack(attacker: Division, defender: Division, hex_map: HexMap) -> bool
 			and defender.hex in hex_map.neighbors(attacker.hex))
 
 
-## The defender's effective defense: defense * terrain_mult * fortify * city bonus.
+## Flank multiplier for a defender hit from hex_count distinct hexes this turn:
+## max(floor, 1 - per_hex * (hex_count - 1)).
+static func flank_mult_for(hex_count: int, per_hex: float, floor_mult: float) -> float:
+	return maxf(floor_mult, 1.0 - per_hex * maxi(hex_count - 1, 0))
+
+
+func flank_mult(d: Division) -> float:
+	return flank_mult_for(d.attacked_from.size(), float(combat.flank_penalty_per_hex), float(combat.flank_min_mult))
+
+
+## The defender's effective defense: defense * terrain_mult * fortify * city bonus * flank.
 func defense_of(defender: Division, hex_map: HexMap) -> float:
 	var fort_mult: float = 1.0 + float(combat.fortify_bonus_per_level) * defender.fortify_level
 	var terrain_mult: float = hex_map.terrain_of(defender.hex).defense_mult
 	var city_mult: float = float(combat.city_defense_mult) if not hex_map.city_at(defender.hex).is_empty() else 1.0
-	return defender.defense * terrain_mult * fort_mult * city_mult
+	return defender.defense * terrain_mult * fort_mult * city_mult * flank_mult(defender)
 
 
 ## Damage one side deals: base_dmg * (attack / other_defense) * rand(roll_min..roll_max).
@@ -122,6 +132,8 @@ func roll_damage(attack_value: float, other_defense: float) -> float:
 func attack(attacker: Division, defender: Division, hex_map: HexMap) -> Dictionary:
 	if not can_attack(attacker, defender, hex_map):
 		return {}
+	if not defender.attacked_from.has(attacker.hex):
+		defender.attacked_from.append(attacker.hex)
 	var def_defense := defense_of(defender, hex_map)
 	var atk_defense := attacker.defense
 	var dmg_to_defender := roll_damage(attacker.attack, def_defense)
@@ -133,7 +145,7 @@ func attack(attacker: Division, defender: Division, hex_map: HexMap) -> Dictiona
 	attacker.in_combat = true
 	defender.in_combat = true
 	return {
-		"defender_defense": def_defense, "attacker_defense": atk_defense,
+		"defender_defense": def_defense, "flank_mult": flank_mult(defender), "attacker_defense": atk_defense,
 		"damage_to_defender": dmg_to_defender, "damage_to_attacker": dmg_to_attacker,
 		"defender_org_loss": taken_by_defender.org, "defender_strength_loss": taken_by_defender.strength,
 		"attacker_org_loss": taken_by_attacker.org, "attacker_strength_loss": taken_by_attacker.strength,
@@ -205,5 +217,6 @@ func end_turn() -> void:
 		if not d.in_combat:
 			d.org = minf(d.org + d.morale * rate, d.max_org)
 		d.in_combat = false
+		d.attacked_from.clear()
 		d.moves_left = d.move
 		d.has_moved = false

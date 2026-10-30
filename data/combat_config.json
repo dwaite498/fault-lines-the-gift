@@ -5,6 +5,8 @@
 	"org_damage_share": 0.75,
 	"morale_offset": 1.5,
 	"city_defense_mult": 1.25,
+	"flank_penalty_per_hex": 0.15,
+	"flank_min_mult": 0.4,
 	"fortify_bonus_per_level": 0.1,
 	"max_fortify": 3,
 	"org_recovery_per_morale": 5

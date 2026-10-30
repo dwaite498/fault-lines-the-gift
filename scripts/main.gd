@@ -34,6 +34,8 @@ func _ready() -> void:
 	_view.roster.economy = _economy
 	_panel = UnitPanel.new()
 	_panel.max_fortify = int(_view.roster.combat.max_fortify)
+	_panel.flank_per_hex = float(_view.roster.combat.flank_penalty_per_hex)
+	_panel.flank_min_mult = float(_view.roster.combat.flank_min_mult)
 	add_child(_panel)
 	_city_panel = CityPanel.new()
 	_city_panel.growth_per_turn = int(_view.hex_map.city_rules.growth_per_turn)
