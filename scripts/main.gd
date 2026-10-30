@@ -11,6 +11,9 @@ const PLAYER_NATION := 0
 
 var _view: MapView
 var _panel: UnitPanel
+var _city_panel: CityPanel
+## The city shown in the city panel, or {} when closed.
+var _city: Dictionary = {}
 
 
 func _ready() -> void:
@@ -23,6 +26,10 @@ func _ready() -> void:
 	_panel = UnitPanel.new()
 	_panel.max_fortify = int(_view.roster.combat.max_fortify)
 	add_child(_panel)
+	_city_panel = CityPanel.new()
+	_city_panel.growth_per_turn = int(_view.hex_map.city_rules.growth_per_turn)
+	_city_panel.max_population = int(_view.hex_map.city_rules.max_population)
+	add_child(_city_panel)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -37,6 +44,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if key.keycode == KEY_SPACE:
 		roster.run_ai(PLAYER_NATION, _view.hex_map)
 		roster.end_turn()
+		_view.hex_map.grow_cities()
 		print("Turn ended")
 	elif key.keycode == KEY_F and _view.selected:
 		roster.fortify(_view.selected)
@@ -50,7 +58,14 @@ func _unhandled_input(event: InputEvent) -> void:
 		print("Removed city %d; eliminated nations: %s" % [city.id, eliminated])
 	if _view.selected and not roster.divisions.has(_view.selected):
 		_view.selected = null
+	if not _view.hex_map.cities.has(_city):
+		_city = {}
+	_refresh_panels()
+
+
+func _refresh_panels() -> void:
 	_panel.refresh(_view.selected, _view.hex_map)
+	_city_panel.refresh(_city)
 	_view.queue_redraw()
 
 
@@ -60,13 +75,15 @@ func _on_hex_clicked(hex: Vector2i) -> void:
 	var roster := _view.roster
 	var target := roster.division_at(hex)
 	var selected := _view.selected
+	_city = {}
 	if selected and roster.can_attack(selected, target, _view.hex_map):
 		print("Attack: ", roster.attack(selected, target, _view.hex_map))
 	elif selected and roster.try_move(selected, hex, _view.hex_map):
 		pass
 	else:
 		_view.selected = target if target and target.nation == PLAYER_NATION else null
+		if selected == null and _view.selected == null:
+			_city = _view.hex_map.city_at(hex)
 	if _view.selected and not roster.divisions.has(_view.selected):
 		_view.selected = null
-	_panel.refresh(_view.selected, _view.hex_map)
-	_view.queue_redraw()
+	_refresh_panels()
