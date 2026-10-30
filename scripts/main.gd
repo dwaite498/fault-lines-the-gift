@@ -10,6 +10,7 @@ const MAP_CONFIG_PATH := "res://data/map_config.json"
 const PLAYER_NATION := 0
 
 var _view: MapView
+var _panel: UnitPanel
 
 
 func _ready() -> void:
@@ -19,6 +20,9 @@ func _ready() -> void:
 	_view.roster = DivisionRoster.new()
 	_view.roster.spawn_at_cities(_view.hex_map)
 	add_child(_view)
+	_panel = UnitPanel.new()
+	_panel.max_fortify = int(_view.roster.combat.max_fortify)
+	add_child(_panel)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -46,6 +50,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		print("Removed city %d; eliminated nations: %s" % [city.id, eliminated])
 	if _view.selected and not roster.divisions.has(_view.selected):
 		_view.selected = null
+	_panel.refresh(_view.selected, _view.hex_map)
 	_view.queue_redraw()
 
 
@@ -63,4 +68,5 @@ func _on_hex_clicked(hex: Vector2i) -> void:
 		_view.selected = target if target and target.nation == PLAYER_NATION else null
 	if _view.selected and not roster.divisions.has(_view.selected):
 		_view.selected = null
+	_panel.refresh(_view.selected, _view.hex_map)
 	_view.queue_redraw()
