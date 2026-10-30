@@ -35,6 +35,10 @@ func _draw() -> void:
 		for n in hex_map.neighbors(cell):
 			if hex_map.cells[n] != owner:
 				_draw_shared_edge(cell, n)
+	for city in hex_map.cities:
+		var center := hex_to_pixel(city.cell)
+		draw_circle(center, HEX_SIZE * 0.35, Color.WHITE)
+		draw_arc(center, HEX_SIZE * 0.35, 0.0, TAU, 24, Color.BLACK, 2.0)
 
 
 func _draw_shared_edge(cell: Vector2i, other: Vector2i) -> void:
