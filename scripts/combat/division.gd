@@ -7,15 +7,18 @@ var nation: int
 var hex: Vector2i
 var strength: float
 var org: float
+var max_org: float
 ## Multiplier for how fast organization recovers.
 var morale: float
 var attack: float
 var defense: float
-## Hexes it may move per turn.
+## Actions per turn. Moving, attacking, or fortifying each use the whole turn.
 var move: int
 var moves_left: int
 var supplied := true
 var fortify_level := 0
+## True if it attacked or was attacked this turn (blocks org recovery).
+var in_combat := false
 
 
 static func from_template(new_id: int, owner_nation: int, start_hex: Vector2i,
@@ -26,6 +29,7 @@ static func from_template(new_id: int, owner_nation: int, start_hex: Vector2i,
 	d.hex = start_hex
 	d.strength = float(template.strength)
 	d.org = float(template.organization)
+	d.max_org = d.org
 	d.morale = float(template.morale)
 	d.attack = float(template.attack)
 	d.defense = float(template.defense)

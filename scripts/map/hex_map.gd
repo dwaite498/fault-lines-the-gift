@@ -30,6 +30,8 @@ var cities: Array[Dictionary] = []
 ## Nations that still have at least one city.
 var nations: Array[int] = []
 var claim_radius := 2
+## The seed passed to generate(); other systems derive their RNG from it.
+var seed_value := 0
 
 
 ## Builds a map from the map config (width, height, seed, land_ratio, nation_count)
@@ -52,6 +54,7 @@ func generate(map_width: int, map_height: int, map_seed: int,
 	width = map_width
 	height = map_height
 	claim_radius = city_claim_radius
+	seed_value = map_seed
 	# If some nation can't fit a spaced city, retry with a derived seed.
 	# The last attempt accepts a city that breaks spacing.
 	for attempt in MAX_MAP_ATTEMPTS:
@@ -112,6 +115,24 @@ func remove_city(city_id: int) -> Array[int]:
 	var eliminated := eliminate_nations_without_cities()
 	update_ownership()
 	return eliminated
+
+
+## Hands the city on cell to new_nation, reruns ownership, and removes any
+## nation left with no cities. Returns the eliminated nation indexes.
+func capture_city(cell: Vector2i, new_nation: int) -> Array[int]:
+	for city in cities:
+		if city.cell == cell:
+			city.nation = new_nation
+	var eliminated := eliminate_nations_without_cities()
+	update_ownership()
+	return eliminated
+
+
+func city_at(cell: Vector2i) -> Dictionary:
+	for city in cities:
+		if city.cell == cell:
+			return city
+	return {}
 
 
 ## Removes every nation that has 0 cities. Returns the removed nation indexes.

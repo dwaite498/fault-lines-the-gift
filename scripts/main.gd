@@ -1,7 +1,8 @@
 extends Node2D
 ## Entry scene. Builds the map and divisions from data/ configs and shows them.
-## Controls: click your division to select it, click an adjacent land hex to move.
-## Space ends the turn. Debug: D removes the newest city.
+## Controls: click your division to select it, then click an adjacent land hex to
+## move or an adjacent enemy to attack. F fortifies. Space ends the turn (the AI
+## nations act first). Debug: D removes the newest city.
 
 const GAME_TITLE := "Fault Lines: The Gift"
 const MAP_CONFIG_PATH := "res://data/map_config.json"
@@ -28,10 +29,13 @@ func _unhandled_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
 	if not key or not key.pressed or key.echo:
 		return
+	var roster := _view.roster
 	if key.keycode == KEY_SPACE:
-		_view.roster.end_turn()
+		roster.run_ai(PLAYER_NATION, _view.hex_map)
+		roster.end_turn()
 		print("Turn ended")
-		_view.queue_redraw()
+	elif key.keycode == KEY_F and _view.selected:
+		roster.fortify(_view.selected)
 	elif key.keycode == KEY_D and OS.is_debug_build():
 		var hex_map := _view.hex_map
 		if hex_map.cities.is_empty():
@@ -39,16 +43,23 @@ func _unhandled_input(event: InputEvent) -> void:
 		var city: Dictionary = hex_map.cities.back()
 		var eliminated := hex_map.remove_city(city.id)
 		print("Removed city %d; eliminated nations: %s" % [city.id, eliminated])
-		_view.queue_redraw()
+	if _view.selected and not roster.divisions.has(_view.selected):
+		_view.selected = null
+	_view.queue_redraw()
 
 
 func _on_hex_clicked(hex: Vector2i) -> void:
 	if hex == Vector2i(-1, -1):
 		return
 	var roster := _view.roster
-	if _view.selected and roster.try_move(_view.selected, hex, _view.hex_map):
+	var target := roster.division_at(hex)
+	var selected := _view.selected
+	if selected and roster.can_attack(selected, target, _view.hex_map):
+		print("Attack: ", roster.attack(selected, target, _view.hex_map))
+	elif selected and roster.try_move(selected, hex, _view.hex_map):
 		pass
 	else:
-		var d := roster.division_at(hex)
-		_view.selected = d if d and d.nation == PLAYER_NATION else null
+		_view.selected = target if target and target.nation == PLAYER_NATION else null
+	if _view.selected and not roster.divisions.has(_view.selected):
+		_view.selected = null
 	_view.queue_redraw()
