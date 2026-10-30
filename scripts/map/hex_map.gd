@@ -6,6 +6,8 @@ extends RefCounted
 
 const WATER := -2
 const UNCLAIMED := -1
+## How many seeds to try before accepting a city that breaks spacing.
+const MAX_MAP_ATTEMPTS := 20
 
 const _EVEN_ROW_DIRS: Array[Vector2i] = [
 	Vector2i(1, 0), Vector2i(0, -1), Vector2i(-1, -1),
@@ -50,15 +52,21 @@ func generate(map_width: int, map_height: int, map_seed: int,
 	width = map_width
 	height = map_height
 	claim_radius = city_claim_radius
-	cells.clear()
-	cities.clear()
-	nations.clear()
-	var rng := RandomNumberGenerator.new()
-	rng.seed = map_seed
-	_make_land(map_seed, land_ratio)
-	_make_nations(rng, nation_count)
-	territory = cells.duplicate()
-	_place_cities(rng, maxi(cities_per_nation, 1), min_spacing)
+	# If some nation can't fit a spaced city, retry with a derived seed.
+	# The last attempt accepts a city that breaks spacing.
+	for attempt in MAX_MAP_ATTEMPTS:
+		var attempt_seed := map_seed if attempt == 0 else map_seed * 31 + attempt
+		cells.clear()
+		cities.clear()
+		nations.clear()
+		var rng := RandomNumberGenerator.new()
+		rng.seed = attempt_seed
+		_make_land(attempt_seed, land_ratio)
+		_make_nations(rng, nation_count)
+		territory = cells.duplicate()
+		var last_try := attempt == MAX_MAP_ATTEMPTS - 1
+		if _place_cities(rng, maxi(cities_per_nation, 1), min_spacing, last_try):
+			break
 	for city in cities:
 		if not nations.has(city.nation):
 			nations.append(city.nation)
@@ -118,7 +126,10 @@ func eliminate_nations_without_cities() -> Array[int]:
 
 ## Places cities on each nation's land, one round per city so every nation gets
 ## its first city before any gets a second. Cities keep min_spacing from all others.
-func _place_cities(rng: RandomNumberGenerator, per_nation: int, min_spacing: int) -> void:
+## Returns false if a nation had no spaced hex for its first city and
+## allow_fallback is off. With allow_fallback, places it anyway and warns.
+func _place_cities(rng: RandomNumberGenerator, per_nation: int, min_spacing: int,
+		allow_fallback: bool) -> bool:
 	var land_by_nation := {}
 	for cell in territory:
 		var nation: int = territory[cell]
@@ -136,10 +147,13 @@ func _place_cities(rng: RandomNumberGenerator, per_nation: int, min_spacing: int
 			if spot == null:
 				if pass_index > 0:
 					continue
+				if not allow_fallback:
+					return false
 				# Every nation needs at least one city, even if spacing can't be met.
 				push_warning("Nation %d: no hex meets city spacing" % nation)
 				spot = land_by_nation[nation][0]
 			cities.append({"id": cities.size(), "nation": nation, "cell": spot})
+	return true
 
 
 func _first_spaced_cell(candidates: Array, min_spacing: int) -> Variant:
