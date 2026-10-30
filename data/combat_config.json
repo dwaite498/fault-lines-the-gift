@@ -1,10 +1,11 @@
 {
-	"roll_min": 0.5,
-	"roll_max": 1.5,
-	"base_strength_damage": 10,
-	"base_org_damage": 8,
-	"org_margin_factor": 0.5,
-	"winner_damage_factor": 0.5,
+	"base_dmg": 12,
+	"roll_min": 0.8,
+	"roll_max": 1.2,
+	"org_damage_share": 0.75,
+	"morale_offset": 1.5,
+	"city_defense_mult": 1.25,
+	"surrender_manpower_factor": 0.2,
 	"fortify_bonus_per_level": 0.1,
 	"max_fortify": 3,
 	"org_recovery_per_morale": 5

@@ -85,9 +85,15 @@ These factions secretly take over nations that still look neutral.
   3. Management and research
   4. Movement and combat
   5. Events and doom
-- Clashes go to contested rolls. Bigger forces get better dice, but a large enough tech gap overrides numbers.
-- Battles can last several turns and are driven by cohesion and morale.
-- TBD: the dice formulas and the size of tech gap that overrides numbers.
+- Combat is a grind. Each attack, both sides deal damage (the attacker rolls first): damage = base_dmg * (own attack / other side's defense) * rand(0.8..1.2).
+- The defender's defense includes its terrain's defense_mult, its fortify bonus (+10% per level), and a city bonus (x1.25) when it holds a city. The attacker uses its plain defense stat.
+- Damage taken is scaled by morale, * (1.5 - morale), then split 75% to organization and 25% to strength.
+- A division at 0 organization retreats 1 hex to a free friendly or neutral hex. If it is boxed in, it surrenders: it is removed and its nation loses manpower equal to its strength * 0.2.
+- Strength loss is permanent (reinforcement is planned). A division at 0 strength is destroyed.
+- The attacker never moves in. A city is captured only by moving into it when it is empty.
+- Battles last several turns: an even fight takes 4 to 5 attacks to break a division's organization.
+- All numbers are in `data/combat_config.json`. Each division has an equipment_level (default 1), unused for now.
+- TBD: how a tech gap affects combat.
 
 ## First playable version
 
