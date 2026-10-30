@@ -96,3 +96,50 @@ These factions secretly take over nations that still look neutral.
 - Influence-based diplomacy
 - Unity with a few requests and events
 - The Gift's impact plus the first doom stages
+
+## MVP Systems Spec (Oct 29)
+
+Status tags: **[Built]** is in the game now. **[Partial]** is partly built. **[Planned]** is not built yet.
+
+### 1. Cities and territory
+- **[Partial]** Each city claims the hexes around it, and unclaimed land is neutral. The target claim radius is 1 (the city plus its 6 neighbors), growing to 2 as the city grows. Today every city uses a fixed radius of 2 (`data/cities_config.json`), and growth is **[Planned]**.
+- **[Built]** A nation is eliminated when it loses its last city, and its divisions are disbanded.
+- **[Partial]** A city is captured when an enemy division moves onto it with no defender there. All of the city's claimed tiles flip with it. Capture works today.
+- **[Planned]** Cities are captured intact. Population drops by about 25%, some infrastructure is lost, and rebuilding takes about 26 turns (1 turn is 1 week).
+- **Later:** gradual and contested tile flipping.
+
+### 2. Popularity and unrest [Planned]
+- Each city tracks a 0-100 popularity for every faction.
+- Unrest is the best rival faction's popularity minus the owner's popularity.
+- A small gap gives an output penalty. A large gap causes riots and a bloodless defection of the city to the most popular faction.
+
+### 3. Resources [Planned]
+- **Cash.**
+- **Influence.**
+- **Operations.**
+- **Manpower** comes from population and caps recruiting and reinforcement.
+- **Capacity** builds divisions and infrastructure, and later launch and orbital work.
+- **Faction meters.**
+- **Research** is funded with cash. Parked.
+
+### 4. Espionage [Planned, PROVISIONAL, parked]
+- To be built as a modular piece.
+- Control points work like Terra Invicta's.
+- 3 starting agents (whether per player or per faction is TBD). Agents have Persuasion, Investigation, and Security stats.
+- Ops are Investigate, Propaganda, Coup, Purge, Sabotage (a candidate soul-cost op), and Protect.
+- Each op is a contested roll, and a failed op exposes the agent.
+
+### 5. Player info screens
+- **[Partial]** A unit panel (selected-unit info) is built. Ownership shows as a nation-color tint and borders on the map.
+- **[Planned]** Turn summary, city panel, nation panel, military panel, and map overlays by owner and by unrest.
+- **Later:** faction, espionage, doom log, and diplomacy screens.
+
+### 6. Hidden-information rule [Planned]
+- A nation secretly run by a minor faction shows as neutral everywhere.
+- Its actions are logged with no actor.
+- A successful Investigate reveals the controller and relabels the earlier log entries.
+- The UI must never leak hidden control.
+
+### 7. Parked
+- A space race pivot around the Engaged stage.
+- Strategic materials.
