@@ -6,6 +6,10 @@ var id: int
 var nation: int
 var hex: Vector2i
 var strength: float
+## Template strength; reinforcement refills up to this.
+var max_strength: float
+## Strength gained from reinforcement on the last end_turn.
+var last_reinforce := 0.0
 var org: float
 var max_org: float
 ## Multiplier for how fast organization recovers.
@@ -34,6 +38,7 @@ static func from_template(new_id: int, owner_nation: int, start_hex: Vector2i,
 	d.nation = owner_nation
 	d.hex = start_hex
 	d.strength = float(template.strength)
+	d.max_strength = d.strength
 	d.org = float(template.organization)
 	d.max_org = d.org
 	d.morale = float(template.morale)

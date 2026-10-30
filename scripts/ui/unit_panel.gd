@@ -24,7 +24,7 @@ func refresh(d: Division, hex_map: HexMap) -> void:
 	if d == null:
 		label.text = ""
 		return
-	var terrain_name: String = hex_map.terrain[d.hex]
+	var terrain_name := hex_map.terrain_name(d.hex)
 	var acted := d.moves_left < d.move
 	label.text = "\n".join([
 		"Nation: %d" % d.nation,
@@ -40,6 +40,8 @@ func refresh(d: Division, hex_map: HexMap) -> void:
 	])
 	## Current flank penalty from the distinct hexes that attacked d this turn.
 	var penalty := 1.0 - DivisionRoster.flank_mult_for(d.attacked_from.size(), flank_per_hex, flank_min_mult)
+	if d.last_reinforce > 0.0:
+		label.text += "\nReinforcing +%.1f" % d.last_reinforce
 	if not d.supplied:
 		label.text += "\nOut of supply"
 	if penalty > 0.0:

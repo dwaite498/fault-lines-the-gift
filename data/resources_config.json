@@ -10,6 +10,8 @@
 	"training_turns": 3,
 	"upkeep_per_division": {"cash": 2, "capacity": 1},
 	"unpaid_upkeep_org_loss": 5,
+	"reinforce_cap_per_turn": 10,
+	"reinforce_manpower_per_strength": 1,
 	"ai_recruit_chance": 0.3,
 	"ai_max_divisions": 6
 }
