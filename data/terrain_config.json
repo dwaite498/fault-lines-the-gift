@@ -1,0 +1,10 @@
+{
+	"types": {
+		"plains": {"color": "#a8c070", "move_cost": 1, "defense_mult": 1.0, "passable": true},
+		"forest": {"color": "#3f7a3a", "move_cost": 2, "defense_mult": 1.25, "passable": true},
+		"hills": {"color": "#b09060", "move_cost": 2, "defense_mult": 1.5, "passable": true},
+		"mountains": {"color": "#8a8580", "move_cost": 3, "defense_mult": 2.0, "passable": true},
+		"water": {"color": "#29528c", "move_cost": 1, "defense_mult": 1.0, "passable": false}
+	},
+	"land_weights": {"plains": 50, "forest": 25, "hills": 15, "mountains": 10}
+}
