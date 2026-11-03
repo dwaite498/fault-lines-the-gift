@@ -1,8 +1,9 @@
 extends Node2D
 ## Entry scene. Builds the map and divisions from data/ configs and shows them.
-## Controls: click your division to select it, then click an adjacent land hex to
-## move or an adjacent enemy to attack. F fortifies. Space ends the turn (the AI
-## nations act first). With your city panel open, R recruits infantry. M toggles the military panel. Debug: D removes the newest city.
+## Controls: click your division to select it, then click a reachable hex to order
+## a move or an adjacent enemy to order an attack (right-click or Esc clears the
+## order). F fortifies. Space ends the turn and executes all orders (AI orders are
+## issued at the start of each turn, before yours). With your city panel open, R recruits infantry. M toggles the military panel. Debug: D removes the newest city.
 
 const GAME_TITLE := "Fault Lines: The Gift"
 const MAP_CONFIG_PATH := "res://data/map_config.json"
@@ -52,6 +53,7 @@ func _ready() -> void:
 	message.add_theme_color_override("font_color", Color(1, 0.4, 0.4))
 	layer.add_child(message)
 	add_child(layer)
+	_view.roster.run_ai(PLAYER_NATION, _view.hex_map)
 	_refresh_panels()
 
 
@@ -60,18 +62,24 @@ func _unhandled_input(event: InputEvent) -> void:
 	if click and click.pressed and click.button_index == MOUSE_BUTTON_LEFT:
 		_on_hex_clicked(_view.pixel_to_hex(click.position))
 		return
+	if click and click.pressed and click.button_index == MOUSE_BUTTON_RIGHT:
+		if _view.selected:
+			_view.roster.clear_order(_view.selected)
+		_refresh_panels()
+		return
 	var key := event as InputEventKey
 	if not key or not key.pressed or key.echo:
 		return
 	message.text = ""
 	var roster := _view.roster
 	if key.keycode == KEY_SPACE:
-		roster.run_ai(PLAYER_NATION, _view.hex_map)
 		_economy.run_ai(PLAYER_NATION, _view.hex_map, roster)
+		roster.execute_orders(_view.hex_map)
 		roster.end_turn(_view.hex_map)
 		_view.hex_map.grow_cities()
 		_economy.end_turn(_view.hex_map, roster)
 		turn += 1
+		roster.run_ai(PLAYER_NATION, _view.hex_map)
 		print("Turn ended")
 	elif key.keycode == KEY_R and not _city.is_empty() and _city.nation == PLAYER_NATION:
 		var reason := _economy.recruit_block_reason(_city, PLAYER_NATION, roster)
@@ -81,6 +89,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		else:
 			message.text = "Cannot recruit: " + reason
 			print(message.text)
+	elif key.keycode == KEY_ESCAPE and _view.selected:
+		roster.clear_order(_view.selected)
 	elif key.keycode == KEY_M:
 		_military_panel.toggle()
 	elif key.keycode == KEY_F and _view.selected:
@@ -117,9 +127,7 @@ func _on_hex_clicked(hex: Vector2i) -> void:
 	var target := roster.division_at(hex)
 	var selected := _view.selected
 	_city = {}
-	if selected and roster.can_attack(selected, target, _view.hex_map):
-		print("Attack: ", roster.attack(selected, target, _view.hex_map))
-	elif selected and roster.try_move(selected, hex, _view.hex_map):
+	if selected and (target == null or target.nation != PLAYER_NATION) and roster.set_order(selected, hex, _view.hex_map):
 		pass
 	else:
 		_view.selected = target if target and target.nation == PLAYER_NATION else null

@@ -14,6 +14,10 @@ const NATION_COLORS: Array[Color] = [
 var hex_map: HexMap
 var roster: DivisionRoster
 var selected: Division
+var player_nation := 0
+const ORDER_COLOR := Color(1, 1, 1, 0.9)
+const ATTACK_COLOR := Color(1, 0.3, 0.2, 0.9)
+const CLASH_COLOR := Color(1, 0.85, 0.0, 1.0)
 
 
 func hex_to_pixel(cell: Vector2i) -> Vector2:
@@ -47,6 +51,26 @@ func _draw() -> void:
 	if roster:
 		for d in roster.divisions:
 			_draw_counter(d)
+		_draw_orders()
+
+
+## Arrows for the player's pending orders. Orders ending on the same hex are
+## drawn in CLASH_COLOR. AI orders are not shown.
+func _draw_orders() -> void:
+	var clashes := roster.clash_hexes(player_nation)
+	for d in roster.divisions:
+		if d.nation != player_nation or d.order_path.is_empty():
+			continue
+		var color := CLASH_COLOR if clashes.has(d.order_path.back()) else (
+				ATTACK_COLOR if d.order_attack else ORDER_COLOR)
+		var points := PackedVector2Array([hex_to_pixel(d.hex)])
+		for cell in d.order_path:
+			points.append(hex_to_pixel(cell))
+		draw_polyline(points, color, 3.0)
+		var tip := points[points.size() - 1]
+		var dir := (tip - points[points.size() - 2]).normalized()
+		var side := Vector2(-dir.y, dir.x)
+		draw_colored_polygon(PackedVector2Array([tip, tip - dir * 10 + side * 6, tip - dir * 10 - side * 6]), color)
 
 
 ## A small rectangle in the owner's color; yellow outline when selected,
