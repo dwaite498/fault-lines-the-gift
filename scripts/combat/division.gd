@@ -18,6 +18,8 @@ var attack: float
 var defense: float
 ## Move points per turn. Each step costs the entered hex's move_cost.
 var move: int
+## "infantry", "armor" or "artillery" (template "type", default infantry).
+var unit_type := "infantry"
 var moves_left: int
 ## True once it has moved this turn; it can keep moving but not attack or fortify.
 var has_moved := false
@@ -43,6 +45,7 @@ static func from_template(new_id: int, owner_nation: int, start_hex: Vector2i,
 	d.id = new_id
 	d.nation = owner_nation
 	d.hex = start_hex
+	d.unit_type = str(template.get("type", "infantry"))
 	d.strength = float(template.strength)
 	d.max_strength = d.strength
 	d.org = float(template.organization)

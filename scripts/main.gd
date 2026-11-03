@@ -31,6 +31,7 @@ func _ready() -> void:
 	_view.hex_map = HexMap.from_config_file(MAP_CONFIG_PATH)
 	_view.roster = DivisionRoster.new()
 	_view.roster.spawn_at_cities(_view.hex_map)
+	_view.hidden_nations = _view.roster.neutral_nations
 	add_child(_view)
 	_economy = NationEconomy.new()
 	_economy.setup(_view.hex_map)

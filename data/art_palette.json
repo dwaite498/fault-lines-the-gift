@@ -9,9 +9,54 @@
 		"crater": "#2A2626",
 		"scorched": "#5A524A"
 	},
-	"grid": {"color": "#000000", "alpha": 0.18, "width": 1.0},
+	"grid": {
+		"color": "#000000",
+		"alpha": 0.18,
+		"width": 1.0
+	},
 	"tint_alpha": 0.35,
-	"border": {"width": 2.0, "dash": 6.0, "gap": 4.0, "alpha": 1.0},
-	"nations": ["#3E5C8A", "#9A4A3E", "#B08A3A", "#5E7F4F", "#6E5A8A", "#3F7F7A", "#8A5A72", "#7A6A4A",
-		"#4F6F9A", "#A0663E", "#6A8A3E", "#5A4A6E", "#8E7A3A", "#3E6E5A", "#9A5A5A", "#4A5A7A"]
+	"border": {
+		"width": 2.0,
+		"dash": 6.0,
+		"gap": 4.0,
+		"alpha": 1.0
+	},
+	"nations": [
+		"#3E5C8A",
+		"#9A4A3E",
+		"#B08A3A",
+		"#5E7F4F",
+		"#6E5A8A",
+		"#3F7F7A",
+		"#8A5A72",
+		"#7A6A4A",
+		"#4F6F9A",
+		"#A0663E",
+		"#6A8A3E",
+		"#5A4A6E",
+		"#8E7A3A",
+		"#3E6E5A",
+		"#9A5A5A",
+		"#4A5A7A"
+	],
+	"counter": {
+		"player_fill": "#1E3550",
+		"neutral_fill": "#6F6F6A",
+		"darken": 0.3,
+		"frame": "#F2F0E8",
+		"symbol": "#F2F0E8",
+		"size_text": "#F2F0E8",
+		"size_outline": "#1F2A33",
+		"org": "#E8E2D0",
+		"str": "#C9B37E",
+		"track": "#1F2A33",
+		"selected": "#C9B37E"
+	},
+	"city": {
+		"fill": "#1A1A1A",
+		"ring": "#E8E2D0",
+		"star": "#C9B37E",
+		"label": "#E8E2D0",
+		"plate": "#1F2A33"
+	}
 }
