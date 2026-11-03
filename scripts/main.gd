@@ -21,6 +21,8 @@ var _military_panel: MilitaryPanel
 ## Brief on-screen message (e.g. why R was blocked). Cleared on the next action.
 var message := Label.new()
 var turn := 1
+## Active target mode: "", "move", "attack" or "follow".
+var _mode := ""
 
 
 func _ready() -> void:
@@ -47,6 +49,7 @@ func _ready() -> void:
 	_city_panel.recruit_pressed.connect(_on_recruit_pressed)
 	_panel.roster = _view.roster
 	_panel.economy = _economy
+	_panel.action_pressed.connect(do_action)
 	add_child(_city_panel)
 	_nation_panel = NationPanel.new()
 	add_child(_nation_panel)
@@ -68,9 +71,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		_on_hex_clicked(_view.pixel_to_hex(click.position))
 		return
 	if click and click.pressed and click.button_index == MOUSE_BUTTON_RIGHT:
-		if _view.selected:
-			_view.roster.clear_order(_view.selected)
-		_refresh_panels()
+		do_action("cancel")
 		return
 	var key := event as InputEventKey
 	if not key or not key.pressed or key.echo:
@@ -78,6 +79,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	message.text = ""
 	var roster := _view.roster
 	if key.keycode == KEY_SPACE:
+		_set_mode("")
 		_economy.run_ai(PLAYER_NATION, _view.hex_map, roster)
 		roster.execute_orders(_view.hex_map)
 		roster.end_turn(_view.hex_map)
@@ -86,15 +88,16 @@ func _unhandled_input(event: InputEvent) -> void:
 		turn += 1
 		roster.run_ai(PLAYER_NATION, _view.hex_map)
 		print("Turn ended")
+	elif ACTION_KEYS.has(key.keycode):
+		do_action(ACTION_KEYS[key.keycode])
+		return
+	elif key.keycode == KEY_TAB:
+		select_unit(next_idle_unit(_view.selected))
 	elif key.keycode == KEY_R and not _city.is_empty() and _city.nation == PLAYER_NATION:
 		_try_recruit()
-	elif key.keycode == KEY_ESCAPE and _view.selected:
-		roster.clear_order(_view.selected)
-	elif key.keycode == KEY_M:
+	elif key.keycode == KEY_N:
 		_military_panel.toggle()
-	elif key.keycode == KEY_F and _view.selected:
-		roster.fortify(_view.selected)
-	elif key.keycode == KEY_D and OS.is_debug_build():
+	elif key.keycode == KEY_K and OS.is_debug_build():
 		var hex_map := _view.hex_map
 		if hex_map.cities.is_empty():
 			return
@@ -103,14 +106,69 @@ func _unhandled_input(event: InputEvent) -> void:
 		roster.disband(eliminated)
 		print("Removed city %d; eliminated nations: %s" % [city.id, eliminated])
 	if _view.selected and not roster.divisions.has(_view.selected):
-		_view.selected = null
+		select_unit(null)
 	if not _view.hex_map.cities.has(_city):
 		_city = {}
 	_refresh_panels()
 
 
+## Hotkeys for the unit panel's action buttons (Task 26). N toggles the military
+## panel (was M); K is the debug remove-city key (was D).
+const ACTION_KEYS := {KEY_M: "move", KEY_A: "attack", KEY_D: "dig_in", KEY_F: "follow", KEY_ESCAPE: "cancel"}
+
+
+## Selects d (or nothing) and leaves any target mode.
+func select_unit(d: Division) -> void:
+	_view.selected = d
+	_set_mode("")
+
+
+func _set_mode(mode: String) -> void:
+	_mode = mode
+	_view.highlights.clear()
+	if mode != "" and _view.selected:
+		_view.highlights = _view.roster.action_targets(_view.selected, mode, _view.hex_map)
+
+
+## Button or hotkey for one of the selected unit's actions. Move/Attack/Follow
+## enter a target mode; Dig in replaces the order with fortify; Cancel leaves a
+## target mode if one is active, otherwise clears the order. Invalid actions do nothing.
+func do_action(action: String) -> void:
+	var d := _view.selected
+	message.text = ""
+	if action == "cancel" and _mode != "":
+		_set_mode("")
+	elif d and d.nation == PLAYER_NATION and _view.roster.valid_actions(d, _view.hex_map).has(action):
+		if action == "cancel":
+			_view.roster.clear_order(d)
+		elif action == "dig_in":
+			_view.roster.clear_order(d)
+			_view.roster.fortify(d)
+		else:
+			_set_mode(action)
+	_refresh_panels()
+
+
+## Next player division with no order after `after` in id order, wrapping; null if none.
+func next_idle_unit(after: Division) -> Division:
+	var idle: Array[Division] = []
+	for d in _view.roster.divisions:
+		if d.nation == PLAYER_NATION and d.order_path.is_empty():
+			idle.append(d)
+	if idle.is_empty():
+		return null
+	idle.sort_custom(func(x: Division, y: Division) -> bool: return x.id < y.id)
+	for d in idle:
+		if after == null or d.id > after.id:
+			return d
+	return idle[0]
+
+
 func _refresh_panels() -> void:
-	_panel.refresh(_view.selected, _view.hex_map)
+	var acts: Array[String] = []
+	if _view.selected and _view.selected.nation == PLAYER_NATION:
+		acts = _view.roster.valid_actions(_view.selected, _view.hex_map)
+	_panel.refresh(_view.selected, _view.hex_map, acts, _mode)
 	_city_panel.refresh(_city)
 	_nation_panel.refresh(PLAYER_NATION, turn, _view.hex_map, _economy)
 	var np := _nation_panel.panel
@@ -118,30 +176,33 @@ func _refresh_panels() -> void:
 	_view.queue_redraw()
 
 
+## Left-click. In a target mode, a highlighted hex sets the order (selection
+## stays) and any other hex just leaves the mode. With no mode, a click only
+## selects: a unit (any nation; a second click on it shows the city under it),
+## else the city there, else nothing. It never creates an order.
 func _on_hex_clicked(hex: Vector2i) -> void:
 	if hex == Vector2i(-1, -1):
 		return
 	var roster := _view.roster
 	message.text = ""
-	var target := roster.division_at(hex)
 	var selected := _view.selected
+	if _mode != "":
+		if selected and _view.highlights.has(hex):
+			var target := roster.division_at(hex)
+			if _mode == "follow" and target and not roster.is_leaving(target):
+				roster.set_swap(selected, target, _view.hex_map)
+			else:
+				roster.set_order(selected, hex, _view.hex_map)
+		_set_mode("")
+		_refresh_panels()
+		return
+	var unit := roster.division_at(hex)
 	_city = {}
-	if selected and target == selected:
-		# Second click on the selected unit: switch to the city under it, else deselect.
-		_view.selected = null
-		_city = _view.hex_map.city_at(hex)
-	elif selected and target and target.nation == PLAYER_NATION and not roster.is_leaving(target) \
-			and roster.set_swap(selected, target, _view.hex_map):
-		pass  # Adjacent idle friendly: paired swap order for both.
-	elif selected and (target == null or target.nation != PLAYER_NATION or roster.is_leaving(target)) \
-			and roster.set_order(selected, hex, _view.hex_map):
-		pass
+	if unit and unit != selected:
+		select_unit(unit)
 	else:
-		_view.selected = target if target and target.nation == PLAYER_NATION else null
-		if _view.selected == null:
-			_city = _view.hex_map.city_at(hex)
-	if _view.selected and not roster.divisions.has(_view.selected):
-		_view.selected = null
+		select_unit(null)
+		_city = _view.hex_map.city_at(hex)
 	_refresh_panels()
 
 
