@@ -223,6 +223,25 @@ func set_order(d: Division, dest: Vector2i, hex_map: HexMap) -> bool:
 	return true
 
 
+## Paired swap: a and b (same nation, adjacent, both without orders) each get a
+## one-hex move into the other's hex; execute_orders resolves it as a friendly swap.
+## Cancelling either clears both (clear_order's follower cascade). False if not allowed.
+func set_swap(a: Division, b: Division, hex_map: HexMap) -> bool:
+	if a == b or a.nation != b.nation or not a.order_path.is_empty() or not b.order_path.is_empty():
+		return false
+	if not hex_map.neighbors(a.hex).has(b.hex):
+		return false
+	if not hex_map.terrain_of(a.hex).passable or not hex_map.terrain_of(b.hex).passable:
+		return false
+	if a.moves_left <= 0 or b.moves_left <= 0:
+		return false
+	a.order_path.assign([b.hex])
+	a.order_attack = false
+	b.order_path.assign([a.hex])
+	b.order_attack = false
+	return true
+
+
 ## True if d has a move (not attack) order, so it is leaving its hex.
 func is_leaving(d: Division) -> bool:
 	return d != null and not d.order_path.is_empty() and not d.order_attack
@@ -490,11 +509,12 @@ func _meeting(a: Division, b: Division, terrain_a: Vector2i, terrain_b: Vector2i
 	return res
 
 
-## Order endpoints of nation's divisions shared by two or more orders (possible clash).
+## Endpoints shared by two or more of nation's MOVE orders (possible clash). Attacks on
+## the same enemy are a combined (flanking) attack, not a clash.
 func clash_hexes(nation: int) -> Array[Vector2i]:
 	var counts := {}
 	for d in divisions:
-		if d.nation == nation and not d.order_path.is_empty():
+		if d.nation == nation and not d.order_path.is_empty() and not d.order_attack:
 			counts[d.order_path.back()] = int(counts.get(d.order_path.back(), 0)) + 1
 	var out: Array[Vector2i] = []
 	for cell in counts:
