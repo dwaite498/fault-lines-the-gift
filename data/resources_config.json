@@ -12,6 +12,7 @@
 	"unpaid_upkeep_org_loss": 5,
 	"reinforce_cap_per_turn": 10,
 	"reinforce_manpower_per_strength": 1,
+	"reinforce_mult": {"own": 1.0, "in_combat": 0.5, "neutral": 0.25, "enemy": 0.1},
 	"ai_recruit_chance": 0.3,
 	"ai_max_divisions": 6
 }
