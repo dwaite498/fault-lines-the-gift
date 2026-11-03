@@ -12,6 +12,8 @@ var panel := Panel.new()
 var buttons := {}
 var _box := VBoxContainer.new()
 var label := Label.new()
+var swatch := MapView.make_swatch()
+var player_nation := 0
 const WIDTH := 240.0
 ## ORG / STR bars (6px, counter colors) with % values.
 var bars := Control.new()
@@ -41,7 +43,10 @@ func _init() -> void:
 	col.size = Vector2(WIDTH - 16, 0)
 	panel.add_child(col)
 	col.add_child(_header("SELECTED UNIT"))
-	col.add_child(label)
+	var row := HBoxContainer.new()
+	row.add_child(swatch)
+	row.add_child(label)
+	col.add_child(row)
 	bars.custom_minimum_size = Vector2(WIDTH - 16, 34)
 	bars.draw.connect(_draw_bars)
 	col.add_child(bars)
@@ -73,13 +78,16 @@ func refresh(d: Division, hex_map: HexMap, actions: Array[String] = [], mode := 
 		buttons[a].visible = d != null and actions.has(a)
 	if d == null:
 		label.text = "None"
+		swatch.visible = false
 		details.text = ""
 		orders.text = ""
 		bars.queue_redraw()
 		return
 	_shown = d
 	bars.queue_redraw()
-	label.text = "Div %d - %s, nation %d" % [d.id, d.unit_type.capitalize(), d.nation]
+	label.text = "Div %d - %s, %s" % [d.id, d.unit_type.capitalize(), MapView.nation_name(_pal, d.nation, player_nation)]
+	swatch.visible = true
+	swatch.color = MapView.nation_color(_pal, d.nation)
 	var penalty := 1.0 - DivisionRoster.flank_mult_for(d.attacked_from.size(), flank_per_hex, flank_min_mult)
 	var dim: String = _pal.ui.dim
 	var lines: Array[String] = [

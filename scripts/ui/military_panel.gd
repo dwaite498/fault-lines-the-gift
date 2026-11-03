@@ -4,11 +4,15 @@ extends CanvasLayer
 
 var panel := Panel.new()
 var label := Label.new()
+var swatch := MapView.make_swatch()
+var _pal: Dictionary = MapView.load_palette()
 var max_fortify := 3
 
 
 func _init() -> void:
-	label.position = Vector2(8, 6)
+	label.position = Vector2(22, 6)
+	swatch.position = Vector2(8, 10)
+	panel.add_child(swatch)
 	panel.add_child(label)
 	add_child(panel)
 	panel.visible = false
@@ -19,7 +23,7 @@ func toggle() -> void:
 
 
 func refresh(nation: int, roster: DivisionRoster, economy: NationEconomy, top: float) -> void:
-	var lines: Array[String] = ["Military (M to close)"]
+	var lines: Array[String] = ["%s - Military (M to close)" % MapView.nation_name(_pal, nation, nation)]
 	for d in roster.divisions:
 		if d.nation != nation:
 			continue
@@ -39,5 +43,6 @@ func refresh(nation: int, roster: DivisionRoster, economy: NationEconomy, top: f
 		if economy.pending[id].nation == nation:
 			lines.append("city %d: %s" % [id, NationEconomy.queue_text(economy.pending[id])])
 	label.text = "\n".join(lines)
-	panel.size = label.get_minimum_size() + Vector2(16, 12)
+	swatch.color = MapView.nation_color(_pal, nation)
+	panel.size = label.get_minimum_size() + Vector2(30, 12)
 	panel.position = Vector2(1040 - panel.size.x - 8, top)

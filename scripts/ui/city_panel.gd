@@ -11,13 +11,17 @@ var economy: NationEconomy
 var roster: DivisionRoster
 var player_nation := 0
 var button := Button.new()
+var swatch := MapView.make_swatch()
+var _pal: Dictionary = MapView.load_palette()
 ## Emitted when the Recruit button is clicked (same action as the R key).
 signal recruit_pressed
 
 
 func _init() -> void:
 	panel.position = Vector2(8, 40)
-	label.position = Vector2(8, 6)
+	label.position = Vector2(22, 6)
+	swatch.position = Vector2(8, 10)
+	panel.add_child(swatch)
 	panel.add_child(label)
 	panel.add_child(button)
 	button.focus_mode = Control.FOCUS_NONE
@@ -32,10 +36,10 @@ func refresh(city: Dictionary) -> void:
 	if city.is_empty():
 		label.text = ""
 		return
+	swatch.color = MapView.nation_color(_pal, int(city.nation))
 	var growth := growth_per_turn if int(city.population) < max_population else 0
 	label.text = "\n".join([
-		"City: %d" % city.id,
-		"Owner: Nation %d" % city.nation,
+		"%s - City %d" % [MapView.nation_name(_pal, int(city.nation), player_nation), city.id],
 		"Population: %d / %d" % [city.population, max_population],
 		"Growth/turn: +%d" % growth,
 		"Claim radius: %d" % city.radius,
@@ -51,7 +55,7 @@ func refresh(city: Dictionary) -> void:
 		if economy.pending.has(city.id):
 			label.text += "\nRecruiting: " + NationEconomy.queue_text(economy.pending[city.id])
 	button.visible = economy != null and roster != null and city.nation == player_nation
-	var psize := label.get_minimum_size() + Vector2(16, 12)
+	var psize := label.get_minimum_size() + Vector2(30, 12)
 	if button.visible:
 		var reason := economy.recruit_block_reason(city, player_nation, roster)
 		button.disabled = reason != ""

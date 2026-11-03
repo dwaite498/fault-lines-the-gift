@@ -39,6 +39,9 @@
 		"#9A5A5A",
 		"#4A5A7A"
 	],
+	"nation_names": ["Blue", "Red", "Ochre", "Green", "Purple", "Teal", "Plum", "Umber",
+		"Steel", "Rust", "Olive", "Indigo", "Mustard", "Pine", "Rose", "Slate"],
+	"player_name": "Concord",
 	"counter": {
 		"player_fill": "#1E3550",
 		"neutral_fill": "#6F6F6A",
