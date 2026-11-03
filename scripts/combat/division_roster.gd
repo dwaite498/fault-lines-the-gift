@@ -449,7 +449,8 @@ func clash_hexes(nation: int) -> Array[Vector2i]:
 
 
 ## Placeholder AI for every nation except player_nation: order an attack on a random
-## adjacent enemy if possible, otherwise order a random 1-hex move or fortify.
+## adjacent enemy if possible, otherwise order a random 1-hex move (70%) or
+## fortify on the spot (fortify is immediate, not an order).
 ## Reads only the board, never other divisions' orders, so call it before the
 ## player gives orders.
 func run_ai(player_nation: int, hex_map: HexMap) -> void:
