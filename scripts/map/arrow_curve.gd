@@ -17,33 +17,43 @@ static func single_hop(a: Vector2, b: Vector2, samples := 20, stop := 6.0) -> Pa
 	return _trim(pts, stop)
 
 
-## Uniform Catmull-Rom through centers, ends duplicated.
-## One point = nothing; two = single_hop.
-static func through(centers: PackedVector2Array, samples := 24, stop := 6.0) -> PackedVector2Array:
+## Uniform Catmull-Rom through centers (ends duplicated), with each segment bowed
+## BOW*length to the right of travel at its middle. The bow uses 16t^2(1-t)^2, which
+## has zero slope at the centers, so the path stays smooth through them.
+## One point = nothing; two = single_hop. samples = points per segment.
+static func through(centers: PackedVector2Array, samples := 16, stop := 6.0) -> PackedVector2Array:
 	if centers.size() < 2:
 		return PackedVector2Array()
 	if centers.size() == 2:
 		return single_hop(centers[0], centers[1], samples, stop)
 	var segs := centers.size() - 1
 	var pts := PackedVector2Array()
-	for i in samples:
-		var u := float(i) / (samples - 1) * segs
-		var k := mini(int(u), segs - 1)
-		var t := u - k
+	for k in segs:
 		var p0 := centers[maxi(k - 1, 0)]
 		var p1 := centers[k]
 		var p2 := centers[k + 1]
 		var p3 := centers[mini(k + 2, segs)]
-		pts.append(0.5 * (2.0 * p1 + (p2 - p0) * t + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t * t
-				+ (3.0 * p1 - p0 - 3.0 * p2 + p3) * t * t * t))
+		var dir := (p2 - p1).normalized()
+		var bow := Vector2(-dir.y, dir.x) * p1.distance_to(p2) * BOW
+		for i in samples:
+			var t := float(i) / samples
+			var cr := 0.5 * (2.0 * p1 + (p2 - p0) * t + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t * t
+					+ (3.0 * p1 - p0 - 3.0 * p2 + p3) * t * t * t)
+			pts.append(cr + bow * 16.0 * t * t * (1.0 - t) * (1.0 - t))
+	pts.append(centers[segs])
 	return _trim(pts, stop)
 
 
-## Pulls the last point `stop` px back along the end tangent.
+## Ends the polyline `stop` px short of its last point, along the final tangent.
+## Points closer than that are dropped first, so the last segment never reverses
+## (that reversal made arrowheads point backwards).
 static func _trim(pts: PackedVector2Array, stop: float) -> PackedVector2Array:
 	var n := pts.size()
-	var dir := (pts[n - 1] - pts[n - 2]).normalized()
-	pts[n - 1] = pts[n - 1] - dir * stop
+	var end := pts[n - 1]
+	var dir := (end - pts[n - 2]).normalized()
+	while pts.size() > 2 and pts[pts.size() - 2].distance_to(end) <= stop:
+		pts.remove_at(pts.size() - 1)
+	pts[pts.size() - 1] = end - dir * stop
 	return pts
 
 
