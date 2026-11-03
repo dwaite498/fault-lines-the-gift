@@ -20,6 +20,7 @@ func _init() -> void:
 	label.position = Vector2(8, 6)
 	panel.add_child(label)
 	panel.add_child(button)
+	button.focus_mode = Control.FOCUS_NONE
 	button.pressed.connect(func(): recruit_pressed.emit())
 	add_child(panel)
 	panel.visible = false

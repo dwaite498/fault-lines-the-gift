@@ -33,6 +33,7 @@ func _init() -> void:
 	add_child(_box)
 	for a in ACTION_LABELS:
 		var b := Button.new()
+		b.focus_mode = Control.FOCUS_NONE
 		b.text = ACTION_LABELS[a]
 		b.pressed.connect(func() -> void: action_pressed.emit(a))
 		b.visible = false
