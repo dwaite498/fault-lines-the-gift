@@ -14,6 +14,8 @@ const NATION_COLORS: Array[Color] = [
 var hex_map: HexMap
 var roster: DivisionRoster
 var selected: Division
+## Valid target hexes for the active action mode, outlined.
+var highlights: Array[Vector2i] = []
 var player_nation := 0
 const ORDER_COLOR := Color(1, 1, 1, 0.9)
 const ATTACK_COLOR := Color(0.9, 0.1, 0.1, 0.95)
@@ -48,6 +50,10 @@ func _draw() -> void:
 		var center := hex_to_pixel(city.cell)
 		draw_circle(center, HEX_SIZE * 0.35, Color.WHITE)
 		draw_arc(center, HEX_SIZE * 0.35, 0.0, TAU, 24, Color.BLACK, 2.0)
+	for cell in highlights:
+		var hc := _corners(hex_to_pixel(cell))
+		hc.append(hc[0])
+		draw_polyline(hc, Color(1, 1, 1, 0.9), 3.0)
 	if roster:
 		for d in roster.divisions:
 			_draw_counter(d)

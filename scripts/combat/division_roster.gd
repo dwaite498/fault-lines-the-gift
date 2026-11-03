@@ -227,19 +227,60 @@ func set_order(d: Division, dest: Vector2i, hex_map: HexMap) -> bool:
 ## one-hex move into the other's hex; execute_orders resolves it as a friendly swap.
 ## Cancelling either clears both (clear_order's follower cascade). False if not allowed.
 func set_swap(a: Division, b: Division, hex_map: HexMap) -> bool:
-	if a == b or a.nation != b.nation or not a.order_path.is_empty() or not b.order_path.is_empty():
-		return false
-	if not hex_map.neighbors(a.hex).has(b.hex):
-		return false
-	if not hex_map.terrain_of(a.hex).passable or not hex_map.terrain_of(b.hex).passable:
-		return false
-	if a.moves_left <= 0 or b.moves_left <= 0:
+	if not can_swap(a, b, hex_map):
 		return false
 	a.order_path.assign([b.hex])
 	a.order_attack = false
 	b.order_path.assign([a.hex])
 	b.order_attack = false
 	return true
+
+
+func can_swap(a: Division, b: Division, hex_map: HexMap) -> bool:
+	if a == b or a.nation != b.nation or not a.order_path.is_empty() or not b.order_path.is_empty():
+		return false
+	if not hex_map.neighbors(a.hex).has(b.hex):
+		return false
+	if not hex_map.terrain_of(a.hex).passable or not hex_map.terrain_of(b.hex).passable:
+		return false
+	return a.moves_left > 0 and b.moves_left > 0
+
+
+## Valid target hexes for d's actions (Task 26), sorted for determinism.
+## "move": empty hexes with a path; "attack": attackable enemies; "follow": a
+## friendly moving out that d can reach, or an adjacent idle friendly to swap with.
+func action_targets(d: Division, action: String, hex_map: HexMap) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	if action == "move":
+		for cell in hex_map.cells:
+			if division_at(cell) == null and not plan_path(d, cell, hex_map).is_empty():
+				out.append(cell)
+	else:
+		for o in divisions:
+			if o == d:
+				continue
+			if action == "attack" and o.nation != d.nation and not neutral_nations.has(o.nation) \
+					and can_attack(d, o, hex_map):
+				out.append(o.hex)
+			elif action == "follow" and o.nation == d.nation:
+				if (is_leaving(o) and not plan_path(d, o.hex, hex_map).is_empty()) \
+						or (o.order_path.is_empty() and can_swap(d, o, hex_map)):
+					out.append(o.hex)
+	out.sort()
+	return out
+
+
+## Actions valid for d right now, in button order.
+func valid_actions(d: Division, hex_map: HexMap) -> Array[String]:
+	var out: Array[String] = []
+	for a in ["move", "attack", "follow"]:
+		if not action_targets(d, a, hex_map).is_empty():
+			out.append(a)
+	if d.moves_left > 0 and not d.has_moved:
+		out.append("dig_in")
+	if not d.order_path.is_empty():
+		out.append("cancel")
+	return out
 
 
 ## True if d has a move (not attack) order, so it is leaving its hex.
