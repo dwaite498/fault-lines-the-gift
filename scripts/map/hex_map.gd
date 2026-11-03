@@ -94,8 +94,28 @@ func generate_terrain(config: Dictionary) -> void:
 		terrain[city.cell] = "plains"
 
 
+## Fallback terrain when generate_terrain() hasn't run or a name is unknown.
+const _DEFAULT_TERRAIN := {
+	"plains": {"color": "#a8c070", "move_cost": 1, "defense_mult": 1.0, "passable": true},
+	"water": {"color": "#29528c", "move_cost": 1, "defense_mult": 1.0, "passable": false},
+}
+
+
+## Terrain name for cell. Without generated terrain: "water" on water hexes, else "plains".
+func terrain_name(cell: Vector2i) -> String:
+	if terrain.has(cell):
+		return terrain[cell]
+	return "water" if cells.get(cell, WATER) == WATER else "plains"
+
+
+## Terrain stats for cell; safe before generate_terrain() (uses built-in plains/water).
 func terrain_of(cell: Vector2i) -> Dictionary:
-	return terrain_types[terrain[cell]]
+	var kind := terrain_name(cell)
+	if terrain_types.has(kind):
+		return terrain_types[kind]
+	if _DEFAULT_TERRAIN.has(kind):
+		return _DEFAULT_TERRAIN[kind]
+	return _DEFAULT_TERRAIN.plains
 
 
 func generate(map_width: int, map_height: int, map_seed: int,

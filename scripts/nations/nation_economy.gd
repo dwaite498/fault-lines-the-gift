@@ -16,6 +16,8 @@ var pending: Dictionary = {}
 var upkeep_paid: Dictionary = {}
 ## POWs: captor nation -> {owner nation -> count (float)}. Kept after elimination.
 var pows: Dictionary = {}
+## nation index -> manpower spent on reinforcement on the last end_turn.
+var reinforce_spent: Dictionary = {}
 
 
 func _init(path := CONFIG_PATH) -> void:
@@ -27,6 +29,7 @@ func setup(hex_map: HexMap) -> void:
 	pending.clear()
 	upkeep_paid.clear()
 	pows.clear()
+	reinforce_spent.clear()
 	for nation in hex_map.nations:
 		stocks[nation] = {}
 		upkeep_paid[nation] = true
@@ -165,11 +168,39 @@ func run_ai(player_nation: int, hex_map: HexMap, roster: DivisionRoster) -> void
 			recruit(city, city.nation, roster)
 
 
-## End-of-turn economy step: income, upkeep, then training ticks and recruits appear.
+## End-of-turn economy step: income, upkeep, reinforcement, then training ticks
+## and recruits appear.
 func end_turn(hex_map: HexMap, roster: DivisionRoster) -> void:
 	collect_income(hex_map)
 	pay_upkeep(hex_map, roster)
+	reinforce(roster)
 	spawn_pending(hex_map, roster)
+
+
+## Refills supplied divisions below max_strength from their nation's manpower,
+## by division id ascending. Each gains at most reinforce_cap_per_turn and only
+## what the pool can pay at reinforce_manpower_per_strength. Out-of-supply
+## divisions get nothing. Sets d.last_reinforce and reinforce_spent.
+func reinforce(roster: DivisionRoster) -> void:
+	var cap := float(config.reinforce_cap_per_turn)
+	var rate := float(config.reinforce_manpower_per_strength)
+	reinforce_spent.clear()
+	var order := roster.divisions.duplicate()
+	order.sort_custom(func(a, b): return a.id < b.id)
+	for d in order:
+		d.last_reinforce = 0.0
+		if not d.supplied or d.strength >= d.max_strength or not stocks.has(d.nation):
+			continue
+		var pool := float(stocks[d.nation].get("manpower", 0.0))
+		var gain := minf(cap, d.max_strength - d.strength)
+		if rate > 0.0:
+			gain = minf(gain, pool / rate)
+		if gain <= 0.0:
+			continue
+		d.strength += gain
+		d.last_reinforce = gain
+		stocks[d.nation].manpower = maxf(pool - gain * rate, 0.0)
+		reinforce_spent[d.nation] = float(reinforce_spent.get(d.nation, 0.0)) + gain * rate
 
 # --- POWs ---
 

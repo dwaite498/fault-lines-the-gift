@@ -28,6 +28,7 @@ func refresh(nation: int, roster: DivisionRoster, economy: NationEconomy, top: f
 				"supplied" if d.supplied else "unsupplied", d.fortify_level, max_fortify])
 	if lines.size() == 1:
 		lines.append("No divisions")
+	lines.append("Manpower spent on reinforcement last turn: %.1f" % float(economy.reinforce_spent.get(nation, 0.0)))
 	var ids := economy.pending.keys()
 	ids.sort()
 	for id in ids:
