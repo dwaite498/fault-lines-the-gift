@@ -7,12 +7,20 @@ var label := Label.new()
 var growth_per_turn := 1
 var max_population := 30
 var economy: NationEconomy
+## Set by main.gd. The Recruit button shows for this nation's cities.
+var roster: DivisionRoster
+var player_nation := 0
+var button := Button.new()
+## Emitted when the Recruit button is clicked (same action as the R key).
+signal recruit_pressed
 
 
 func _init() -> void:
 	panel.position = Vector2(8, 8)
 	label.position = Vector2(8, 6)
 	panel.add_child(label)
+	panel.add_child(button)
+	button.pressed.connect(func(): recruit_pressed.emit())
 	add_child(panel)
 	panel.visible = false
 
@@ -41,4 +49,13 @@ func refresh(city: Dictionary) -> void:
 				income.cash, income.manpower, income.capacity]
 		if economy.pending.has(city.id):
 			label.text += "\nRecruiting: " + NationEconomy.queue_text(economy.pending[city.id])
-	panel.size = label.get_minimum_size() + Vector2(16, 12)
+	button.visible = economy != null and roster != null and city.nation == player_nation
+	var psize := label.get_minimum_size() + Vector2(16, 12)
+	if button.visible:
+		var reason := economy.recruit_block_reason(city, player_nation, roster)
+		button.disabled = reason != ""
+		button.text = "Recruit (R)" if reason == "" else "Recruit: " + reason
+		button.position = Vector2(8, psize.y)
+		button.size = button.get_minimum_size()
+		psize = Vector2(maxf(psize.x, button.size.x + 16), psize.y + button.size.y + 8)
+	panel.size = psize

@@ -7,6 +7,9 @@ var label := Label.new()
 var max_fortify := 3
 var flank_per_hex := 0.15
 var flank_min_mult := 0.4
+## Set by main.gd; used only to preview this turn's recovery.
+var roster: DivisionRoster
+var economy: NationEconomy
 
 
 func _init() -> void:
@@ -40,6 +43,9 @@ func refresh(d: Division, hex_map: HexMap) -> void:
 	])
 	## Current flank penalty from the distinct hexes that attacked d this turn.
 	var penalty := 1.0 - DivisionRoster.flank_mult_for(d.attacked_from.size(), flank_per_hex, flank_min_mult)
+	if roster and economy:
+		var rec := projected_recovery(d)
+		label.text += "\nWill recover %+.1f org / +%.1f str this turn" % [rec.org, rec.strength]
 	if d.last_reinforce > 0.0:
 		label.text += "\nReinforcing +%.1f" % d.last_reinforce
 	if not d.supplied:
@@ -47,3 +53,34 @@ func refresh(d: Division, hex_map: HexMap) -> void:
 	if penalty > 0.0:
 		label.text += "\nFlanked: -%d%% def" % roundi(penalty * 100.0)
 	panel.size = label.get_minimum_size() + Vector2(16, 12)
+
+
+## Preview of d's org and strength change at the next end turn, using the same
+## rules as DivisionRoster.end_turn (supply drain or morale recovery) and
+## NationEconomy.reinforce (cap, cost, pool shared in division id order).
+## Uses d's current supply status and ignores unpaid-upkeep drain. Read-only.
+func projected_recovery(d: Division) -> Dictionary:
+	var c := roster.combat
+	var org := 0.0
+	if not d.supplied:
+		org = -minf(float(c.out_of_supply_org_drain), d.org)
+	elif not d.in_combat:
+		org = minf(d.morale * float(c.org_recovery_per_morale), d.max_org - d.org)
+	var cap := float(economy.config.reinforce_cap_per_turn)
+	var rate := float(economy.config.reinforce_manpower_per_strength)
+	var pool := float(economy.stocks.get(d.nation, {}).get("manpower", 0.0))
+	var order := roster.divisions.filter(func(x): return x.nation == d.nation)
+	order.sort_custom(func(a, b): return a.id < b.id)
+	var strength := 0.0
+	for x in order:
+		if not x.supplied or x.strength >= x.max_strength:
+			continue
+		var gain := minf(cap, x.max_strength - x.strength)
+		if rate > 0.0:
+			gain = minf(gain, pool / rate)
+		gain = maxf(gain, 0.0)
+		pool -= gain * rate
+		if x == d:
+			strength = gain
+			break
+	return {"org": org, "strength": strength}
