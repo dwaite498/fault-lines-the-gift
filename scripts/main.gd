@@ -130,7 +130,11 @@ func _on_hex_clicked(hex: Vector2i) -> void:
 		# Second click on the selected unit: switch to the city under it, else deselect.
 		_view.selected = null
 		_city = _view.hex_map.city_at(hex)
-	elif selected and (target == null or target.nation != PLAYER_NATION) and roster.set_order(selected, hex, _view.hex_map):
+	elif selected and target and target.nation == PLAYER_NATION and not roster.is_leaving(target) \
+			and roster.set_swap(selected, target, _view.hex_map):
+		pass  # Adjacent idle friendly: paired swap order for both.
+	elif selected and (target == null or target.nation != PLAYER_NATION or roster.is_leaving(target)) \
+			and roster.set_order(selected, hex, _view.hex_map):
 		pass
 	else:
 		_view.selected = target if target and target.nation == PLAYER_NATION else null
