@@ -50,6 +50,7 @@ func _ready() -> void:
 	_city_panel.player_nation = PLAYER_NATION
 	_city_panel.recruit_pressed.connect(_on_recruit_pressed)
 	_panel.roster = _view.roster
+	_panel.player_nation = PLAYER_NATION
 	_panel.economy = _economy
 	_panel.action_pressed.connect(do_action)
 	add_child(_city_panel)
@@ -173,7 +174,7 @@ func _refresh_panels() -> void:
 		acts = _view.roster.valid_actions(_view.selected, _view.hex_map)
 	_panel.refresh(_view.selected, _view.hex_map, acts, _mode)
 	_city_panel.refresh(_city)
-	_top_bar.refresh("Concord", turn)
+	_top_bar.refresh(MapView.nation_name(_view.palette, PLAYER_NATION, PLAYER_NATION), turn)
 	_nation_panel.refresh(PLAYER_NATION, turn, _view.hex_map, _economy)
 	var np := _nation_panel.panel
 	_military_panel.refresh(PLAYER_NATION, _view.roster, _economy, np.position.y + np.size.y + 8)

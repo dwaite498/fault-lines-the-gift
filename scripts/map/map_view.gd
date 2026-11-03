@@ -270,5 +270,33 @@ func _corners(center: Vector2) -> PackedVector2Array:
 func _color_for(owner: int) -> Color:
 	if owner < 0:
 		return Color.html(palette.terrain.water if owner == HexMap.WATER else palette.terrain.plains)
-	var nations: Array = palette.nations
-	return Color.html(nations[owner % nations.size()])
+	return nation_color(palette, owner)
+
+
+## Map palette color for a nation (territory tint and border). Swatches use this too.
+static func nation_color(pal: Dictionary, nation: int) -> Color:
+	var nations: Array = pal.nations
+	return Color.html(nations[nation % nations.size()])
+
+
+## Placeholder name from the nation's palette color, e.g. "Red Nation". The player
+## keeps its own name. Past the palette size a number keeps names unique.
+static func nation_name(pal: Dictionary, nation: int, player: int) -> String:
+	if nation == player:
+		return str(pal.player_name)
+	if nation < 0:
+		return "Neutral"
+	var names: Array = pal.nation_names
+	var n := "%s Nation" % names[nation % names.size()]
+	if nation >= names.size():
+		n += " %d" % (nation / names.size() + 1)
+	return n
+
+
+## 10px swatch in the nation's map color.
+static func make_swatch() -> ColorRect:
+	var r := ColorRect.new()
+	r.custom_minimum_size = Vector2(10, 10)
+	r.size = Vector2(10, 10)
+	r.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	return r
