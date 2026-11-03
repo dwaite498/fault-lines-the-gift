@@ -13,6 +13,10 @@ var combat: Dictionary = {}
 var rng := RandomNumberGenerator.new()
 ## Optional. When set, surrenders are recorded as POWs (main.gd sets it).
 var economy: NationEconomy = null
+## Clash/combat lines from the last execute_orders().
+var turn_log: Array[String] = []
+var _defer_after_combat := false
+var _pending_captor := {}
 
 
 static func load_templates(path := CONFIG_PATH) -> Dictionary:
@@ -149,9 +153,17 @@ func attack(attacker: Division, defender: Division, hex_map: HexMap) -> Dictiona
 		"damage_to_defender": dmg_to_defender, "damage_to_attacker": dmg_to_attacker,
 		"defender_org_loss": taken_by_defender.org, "defender_strength_loss": taken_by_defender.strength,
 		"attacker_org_loss": taken_by_attacker.org, "attacker_strength_loss": taken_by_attacker.strength,
-		"attacker_outcome": _after_combat(attacker, hex_map, defender.nation),
-		"defender_outcome": _after_combat(defender, hex_map, attacker.nation),
+		"attacker_outcome": _after_combat_or_defer(attacker, hex_map, defender.nation),
+		"defender_outcome": _after_combat_or_defer(defender, hex_map, attacker.nation),
 	}
+
+
+## While execute_orders runs, retreat/surrender waits until everything resolved.
+func _after_combat_or_defer(d: Division, hex_map: HexMap, captor: int) -> String:
+	if _defer_after_combat:
+		_pending_captor[d] = captor
+		return "pending"
+	return _after_combat(d, hex_map, captor)
 
 
 ## Applies raw damage scaled by morale (* (morale_offset - morale)), split between
@@ -244,25 +256,183 @@ func plan_path(d: Division, dest: Vector2i, hex_map: HexMap) -> Array[Vector2i]:
 	return path
 
 
-## Executes every pending order, by nation then division id. Each step uses the
-## normal move/attack rules; an order stops at the first step that fails (e.g. the
-## hex became occupied). All orders are cleared afterwards.
+## Simultaneous resolution (Task 21). All move orders advance together one hex
+## step at a time; each step resolves, in order: head-on swaps (meeting
+## engagement at the border; nobody passes), friendlies entering one hex (lowest
+## id gets in), enemies entering one hex (meeting engagement), then leavers move
+## before the units following them in. A mover blocked by an enemy that failed to
+## leave attacks it in the combat phase. Then attack orders resolve (an attack on
+## a target that moved away becomes a move into the vacated hex). Retreat and
+## surrender are checked after everything. Any move order resets fortify, even a
+## bounce. Clashes go to turn_log. All orders are cleared afterwards.
 func execute_orders(hex_map: HexMap) -> void:
+	turn_log.clear()
+	_defer_after_combat = true
+	_pending_captor.clear()
+	var by_id := func(a, b): return a.nation < b.nation or (a.nation == b.nation and a.id < b.id)
 	var order := divisions.duplicate()
-	order.sort_custom(func(a, b): return a.nation < b.nation or (a.nation == b.nation and a.id < b.id))
+	order.sort_custom(by_id)
+	var movers: Array = []
+	var attacks: Array = []  # [attacker, target]
 	for d in order:
-		if not divisions.has(d) or d.order_path.is_empty():
+		if d.order_path.is_empty():
 			continue
 		if d.order_attack:
-			var target := division_at(d.order_path[0])
-			if target and can_attack(d, target, hex_map):
-				attack(d, target, hex_map)
+			attacks.append([d, division_at(d.order_path[0])])
 		else:
-			for cell in d.order_path:
-				if not divisions.has(d) or not try_move(d, cell, hex_map):
-					break
+			d.fortify_level = 0
+			movers.append(d)
+	var step := {}
+	for d in movers:
+		step[d] = 0
+	var blocked_attacks: Array = []
+	while not movers.is_empty():
+		var active: Array = []
+		for d in movers:
+			if divisions.has(d) and step[d] < d.order_path.size() and d.moves_left > 0:
+				active.append(d)
+		var stopped := {}
+		var target_of := {}
+		for d in active:
+			target_of[d] = d.order_path[step[d]]
+		# Head-on swaps.
+		for i in active.size():
+			for j in range(i + 1, active.size()):
+				var a: Division = active[i]
+				var b: Division = active[j]
+				if target_of[a] == b.hex and target_of[b] == a.hex:
+					stopped[a] = true
+					stopped[b] = true
+					if a.nation != b.nation:
+						_meeting(a, b, a.hex, b.hex, hex_map, "head-on at %s|%s" % [a.hex, b.hex])
+		# Group the rest by target hex.
+		var groups := {}
+		for d in active:
+			if not stopped.has(d):
+				if not groups.has(target_of[d]):
+					groups[target_of[d]] = []
+				groups[target_of[d]].append(d)
+		var candidates: Array = []
+		for hex in groups:
+			var champs: Array = []  # lowest id per nation
+			for d in groups[hex]:
+				if champs.is_empty() or champs.back().nation != d.nation:
+					champs.append(d)
+				else:
+					stopped[d] = true
+					turn_log.append("Div %d (n%d) stops short of %s: div %d enters first" % [d.id, d.nation, hex, champs.back().id])
+			var champ: Division = null
+			for d in champs:
+				if champ == null:
+					champ = d
+					continue
+				var res := _meeting(champ, d, hex, hex, hex_map, "meeting at %s" % [hex])
+				if res == 1:
+					stopped[d] = true
+				elif res == -1:
+					stopped[champ] = true
+					champ = d
+				else:
+					stopped[champ] = true
+					stopped[d] = true
+					champ = null
+			if champ and not stopped.get(champ, false):
+				candidates.append(champ)
+		# Leavers first: keep moving whoever has a free target until no progress.
+		var progress := true
+		while progress:
+			progress = false
+			for d in candidates.duplicate():
+				if divisions.has(d) and try_move(d, target_of[d], hex_map):
+					step[d] += 1
+					candidates.erase(d)
+					progress = true
+		for d in candidates:
+			stopped[d] = true
+			var occ := division_at(target_of[d])
+			if occ and occ.nation != d.nation:
+				blocked_attacks.append([d, occ])
+				turn_log.append("Div %d (n%d) blocked at %s by div %d (n%d); attacks" % [d.id, d.nation, target_of[d], occ.id, occ.nation])
+		var still: Array = []
+		for d in movers:
+			if divisions.has(d) and not stopped.has(d) and active.has(d):
+				still.append(d)
+		movers = still
+	# Combat phase.
+	for pair in blocked_attacks:
+		var a: Division = pair[0]
+		var t: Division = pair[1]
+		if divisions.has(a) and divisions.has(t) and t.hex in hex_map.neighbors(a.hex):
+			_log_attack(a, t, attack_unchecked(a, t, hex_map))
+	for pair in attacks:
+		var a: Division = pair[0]
+		var t = pair[1]
+		var vacated: Vector2i = a.order_path[0]
+		if not divisions.has(a):
+			continue
+		if t != null and divisions.has(t) and t.hex in hex_map.neighbors(a.hex):
+			_log_attack(a, t, attack_unchecked(a, t, hex_map))
+		elif division_at(vacated) == null:
+			a.fortify_level = 0
+			if try_move(a, vacated, hex_map):
+				turn_log.append("Div %d (n%d): target moved away; moves into %s" % [a.id, a.nation, vacated])
+	# Retreat / surrender after everything.
+	_defer_after_combat = false
+	var hit := _pending_captor.keys()
+	hit.sort_custom(by_id)
+	for d in hit:
+		if divisions.has(d):
+			var outcome := _after_combat(d, hex_map, _pending_captor[d])
+			if outcome != "held":
+				turn_log.append("Div %d (n%d) %s" % [d.id, d.nation, outcome])
+	_pending_captor.clear()
 	for d in divisions:
 		clear_order(d)
+	for line in turn_log:
+		print(line)
+
+
+## Attack without the can_attack gate (resolution already checked adjacency).
+func attack_unchecked(a: Division, t: Division, hex_map: HexMap) -> Dictionary:
+	var ml := a.moves_left
+	var hm := a.has_moved
+	a.moves_left = 1
+	a.has_moved = false
+	var r := attack(a, t, hex_map)
+	if r.is_empty():
+		a.moves_left = ml
+		a.has_moved = hm
+	return r
+
+
+func _log_attack(a: Division, t: Division, r: Dictionary) -> void:
+	turn_log.append("Div %d (n%d) attacks div %d (n%d) at %s: -%.1f/-%.1f str" % [a.id, a.nation, t.id,
+			t.nation, t.hex, float(r.get("defender_strength_loss", 0.0)), float(r.get("attacker_strength_loss", 0.0))])
+
+
+## One meeting-engagement round: no fortify/city/flank bonus, each side's
+## defense uses the terrain of hex_for_terrain (its own hex for a head-on).
+## Returns 1 if a wins (higher strength*org afterwards), -1 if b wins, 0 on tie.
+func _meeting(a: Division, b: Division, terrain_a: Vector2i, terrain_b: Vector2i,
+		hex_map: HexMap, where: String) -> int:
+	var ta: float = hex_map.terrain_of(terrain_a).defense_mult
+	var tb: float = hex_map.terrain_of(terrain_b).defense_mult
+	var to_b := roll_damage(a.attack, b.defense * tb)
+	var to_a := roll_damage(b.attack, a.defense * ta)
+	_damage(b, to_b)
+	_damage(a, to_a)
+	a.in_combat = true
+	b.in_combat = true
+	a.fortify_level = 0
+	b.fortify_level = 0
+	_pending_captor[a] = b.nation
+	_pending_captor[b] = a.nation
+	var sa := a.strength * a.org
+	var sb := b.strength * b.org
+	var res := 0 if is_equal_approx(sa, sb) else (1 if sa > sb else -1)
+	var result := "tie, both bounce" if res == 0 else ("div %d wins" % (a.id if res == 1 else b.id))
+	turn_log.append("Clash %s: div %d (n%d) vs div %d (n%d): %s" % [where, a.id, a.nation, b.id, b.nation, result])
+	return res
 
 
 ## Order endpoints of nation's divisions shared by two or more orders (possible clash).
