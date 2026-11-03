@@ -47,4 +47,4 @@ func refresh(nation: int, turn: int, hex_map: HexMap, economy: NationEconomy) ->
 		lines.append("Closest to falling: %d %s left" % [city_count, "city" if city_count == 1 else "cities"])
 	label.text = "\n".join(lines)
 	panel.size = label.get_minimum_size() + Vector2(16, 12)
-	panel.position = Vector2(1280 - panel.size.x - 8, 8)
+	panel.position = Vector2(1040 - panel.size.x - 8, 40)

@@ -16,7 +16,7 @@ signal recruit_pressed
 
 
 func _init() -> void:
-	panel.position = Vector2(8, 8)
+	panel.position = Vector2(8, 40)
 	label.position = Vector2(8, 6)
 	panel.add_child(label)
 	panel.add_child(button)
