@@ -57,17 +57,27 @@ func _draw() -> void:
 ## Arrows for the player's pending orders. Orders ending on the same hex are
 ## drawn in CLASH_COLOR. AI orders are not shown.
 func _draw_orders() -> void:
-	var clashes := roster.clash_hexes(player_nation)
+	var clashes := roster.clash_hexes(player_nation, hex_map)
 	for d in roster.divisions:
 		if d.nation != player_nation or d.order_path.is_empty():
 			continue
-		var color := CLASH_COLOR if not d.order_attack and clashes.has(d.order_path.back()) else (
+		var now := roster.steps_this_turn(d, hex_map)
+		var color := CLASH_COLOR if not d.order_attack and now > 0 and clashes.has(d.order_path[now - 1]) else (
 				ATTACK_COLOR if d.order_attack else ORDER_COLOR)
 		var centers := PackedVector2Array([hex_to_pixel(d.hex)])
 		for cell in d.order_path:
 			centers.append(hex_to_pixel(cell))
 		var points := ArrowCurve.through(centers)
-		draw_polyline(points, color, 4.0 if d.order_attack else 3.0, true)
+		var width := 4.0 if d.order_attack else 3.0
+		# This turn's part solid; later turns dimmer and thinner (Task 25).
+		var cut := ArrowCurve.split_index(centers.size(), now, points.size())
+		if cut >= 1:
+			draw_polyline(points.slice(0, cut + 1), color, width, true)
+		if cut < points.size() - 1:
+			var later := Color(color, 0.4)
+			draw_polyline(points.slice(maxi(cut, 0)), later, width - 1.0, true)
+			if cut < points.size() - 1:
+				color = later
 		var tip := points[points.size() - 1]
 		var dir := (tip - points[points.size() - 2]).normalized()
 		var side := Vector2(-dir.y, dir.x)

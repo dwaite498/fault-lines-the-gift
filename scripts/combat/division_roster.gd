@@ -203,8 +203,8 @@ func _after_combat(d: Division, hex_map: HexMap, captor: int) -> String:
 # --- Orders ---
 
 ## Stores an order for d toward dest instead of acting now. An adjacent enemy is
-## an attack order; otherwise a move along the shortest free path d can afford
-## this turn. Returns false (order unchanged) if dest is unreachable.
+## an attack order; otherwise a move along the shortest free path, which may take
+## several turns (Task 25). Returns false (order unchanged) if dest is unreachable.
 func set_order(d: Division, dest: Vector2i, hex_map: HexMap) -> bool:
 	var target := division_at(dest)
 	if target and neutral_nations.has(target.nation):
@@ -289,16 +289,50 @@ func plan_path(d: Division, dest: Vector2i, hex_map: HexMap) -> Array[Vector2i]:
 	while cur != d.hex:
 		path.push_front(cur)
 		cur = came[cur]
-	# Same cost rule as can_move: the first step is always allowed.
+	return path
+
+
+## How many steps of path d can take per turn, starting this turn: one int per
+## turn until the path is covered (Task 25). Same cost rule as can_move: the first
+## step of a turn is always allowed. This turn uses d.moves_left/has_moved,
+## later turns d.move. Deterministic, read-only.
+func turn_split(d: Division, path: Array[Vector2i], hex_map: HexMap) -> Array[int]:
+	var out: Array[int] = []
 	var moves := d.moves_left
 	var moved := d.has_moved
-	for cell in path:
-		var cost := int(hex_map.terrain_of(cell).move_cost)
+	var steps := 0
+	var i := 0
+	while i < path.size():
+		var cost := int(hex_map.terrain_of(path[i]).move_cost)
 		if moves <= 0 or (moves < cost and moved):
-			return none
+			out.append(steps)
+			steps = 0
+			moves = d.move
+			moved = false
+			continue
 		moves = maxi(moves - cost, 0)
 		moved = true
-	return path
+		steps += 1
+		i += 1
+	out.append(steps)
+	return out
+
+
+## Steps of d's order it will take this turn (0 if none or an attack order counts as 1).
+func steps_this_turn(d: Division, hex_map: HexMap) -> int:
+	if d.order_path.is_empty():
+		return 0
+	if d.order_attack:
+		return 1
+	return turn_split(d, d.order_path, hex_map)[0]
+
+
+## Turns until d's move order arrives (0 if no move order).
+func turns_to_arrive(d: Division, hex_map: HexMap) -> int:
+	if not is_leaving(d):
+		return 0
+	var split := turn_split(d, d.order_path, hex_map)
+	return split.size() - (1 if split[0] == 0 else 0)
 
 
 ## Simultaneous resolution (Task 21). All move orders advance together one hex
@@ -328,13 +362,16 @@ func execute_orders(hex_map: HexMap) -> void:
 			d.fortify_level = 0
 			movers.append(d)
 	var step := {}
+	var limit := {}
 	for d in movers:
 		step[d] = 0
+		limit[d] = steps_this_turn(d, hex_map)
+	var ended := {}  # movers whose order ended early (clash, bounce, blocked)
 	var blocked_attacks: Array = []
 	while not movers.is_empty():
 		var active: Array = []
 		for d in movers:
-			if divisions.has(d) and step[d] < d.order_path.size() and d.moves_left > 0:
+			if divisions.has(d) and step[d] < limit[d]:
 				active.append(d)
 		var stopped := {}
 		var swapped := {}
@@ -415,8 +452,10 @@ func execute_orders(hex_map: HexMap) -> void:
 		for d in movers:
 			if divisions.has(d) and not stopped.has(d) and active.has(d):
 				still.append(d)
-			elif divisions.has(d) and not active.has(d) and step[d] < d.order_path.size():
-				turn_log.append("Div %d (n%d) stops short of %s: out of moves" % [d.id, d.nation, d.order_path.back()])
+		for d in stopped:
+			if not ended.has(d) and step.has(d) and step[d] < d.order_path.size():
+				ended[d] = true
+				turn_log.append("Div %d (n%d) order to %s ends at %s" % [d.id, d.nation, d.order_path.back(), d.hex])
 		movers = still
 	# Combat phase.
 	for pair in blocked_attacks:
@@ -446,8 +485,17 @@ func execute_orders(hex_map: HexMap) -> void:
 			if outcome != "held":
 				turn_log.append("Div %d (n%d) %s" % [d.id, d.nation, outcome])
 	_pending_captor.clear()
+	# Unfinished multi-turn moves keep the rest of their path; everything else clears.
+	var keep := {}
+	for d in step:
+		if divisions.has(d) and not ended.has(d) and step[d] < d.order_path.size() \
+				and d.hex == (d.order_path[step[d] - 1] if step[d] > 0 else d.hex):
+			keep[d] = d.order_path.slice(step[d])
 	for d in divisions:
-		clear_order(d)
+		d.order_path.clear()
+		d.order_attack = false
+		if keep.has(d):
+			d.order_path.assign(keep[d])
 	for line in turn_log:
 		print(line)
 
@@ -511,11 +559,16 @@ func _meeting(a: Division, b: Division, terrain_a: Vector2i, terrain_b: Vector2i
 
 ## Endpoints shared by two or more of nation's MOVE orders (possible clash). Attacks on
 ## the same enemy are a combined (flanking) attack, not a clash.
-func clash_hexes(nation: int) -> Array[Vector2i]:
+func clash_hexes(nation: int, hex_map: HexMap = null) -> Array[Vector2i]:
 	var counts := {}
 	for d in divisions:
 		if d.nation == nation and not d.order_path.is_empty() and not d.order_attack:
-			counts[d.order_path.back()] = int(counts.get(d.order_path.back(), 0)) + 1
+			# This turn's endpoint (Task 25); full path end if no map given.
+			var n := steps_this_turn(d, hex_map) if hex_map else d.order_path.size()
+			if n == 0:
+				continue
+			var end: Vector2i = d.order_path[n - 1]
+			counts[end] = int(counts.get(end, 0)) + 1
 	var out: Array[Vector2i] = []
 	for cell in counts:
 		if counts[cell] > 1:
