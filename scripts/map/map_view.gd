@@ -43,9 +43,7 @@ func _draw() -> void:
 	for e in border_edges():
 		_draw_border(e[0], e[1], _color_for(owner_of(e[0])))
 	for city in hex_map.cities:
-		var center := hex_to_pixel(city.cell)
-		draw_circle(center, HEX_SIZE * 0.35, Color.WHITE)
-		draw_arc(center, HEX_SIZE * 0.35, 0.0, TAU, 24, Color.BLACK, 2.0)
+		_draw_city(city)
 	for cell in highlights:
 		var hc := _corners(hex_to_pixel(cell))
 		hc.append(hc[0])
@@ -86,16 +84,109 @@ func _draw_orders() -> void:
 		draw_colored_polygon(PackedVector2Array([tip, tip - dir * 10 + side * 6, tip - dir * 10 - side * 6]), color)
 
 
-## A small rectangle in the owner's color; yellow outline when selected,
-## faded once it has no moves left.
+## Spec sizes are for a 64px-wide hex; scale to ours.
+func _k() -> float:
+	return HEX_SIZE * sqrt(3.0) / 64.0
+
+
+## Counter fill: player navy, other nations darkened, neutral/unknown grey.
+func counter_fill(nation: int) -> Color:
+	var c: Dictionary = palette.counter
+	if nation == player_nation:
+		return Color.html(c.player_fill)
+	if nation < 0 or hidden_nations.has(nation):
+		return Color.html(c.neutral_fill)
+	return _color_for(nation).darkened(float(c.darken))
+
+
+## "x" (infantry, default), "ellipse" (armor) or "dot" (artillery).
+static func symbol_for(unit_type: String) -> String:
+	return {"armor": "ellipse", "artillery": "dot"}.get(unit_type, "x")
+
+
+## [org, strength] bar fill fractions, clamped to 0..1.
+static func bar_fractions(d: Division) -> Array[float]:
+	return [clampf(d.org / maxf(d.max_org, 0.001), 0.0, 1.0),
+			clampf(d.strength / maxf(d.max_strength, 0.001), 0.0, 1.0)]
+
+
 func _draw_counter(d: Division) -> void:
-	var rect := Rect2(hex_to_pixel(d.hex) + Vector2(-11, -2), Vector2(22, 14))
-	var color := _color_for(d.nation)
-	if d.moves_left <= 0:
-		color = color.darkened(0.4)
-	draw_rect(rect, color)
-	var outline := Color.YELLOW if d == selected else Color.BLACK
-	draw_rect(rect, outline, false, 2.0)
+	var k := _k()
+	var c: Dictionary = palette.counter
+	var light := Color.html(c.frame)
+	var size := Vector2(40, 28) * k
+	var center := hex_to_pixel(d.hex) + Vector2(0, -4 * k)
+	var rect := Rect2(center - size / 2, size)
+	draw_rect(rect, counter_fill(d.nation))
+	draw_rect(rect, light, false, 2.0)
+	var inner := rect.grow(-4 * k)
+	match symbol_for(d.unit_type):
+		"x":
+			draw_line(inner.position, inner.end, light, 2.0)
+			draw_line(Vector2(inner.end.x, inner.position.y), Vector2(inner.position.x, inner.end.y), light, 2.0)
+		"ellipse":
+			var pts := PackedVector2Array()
+			for i in 33:
+				var a := TAU * i / 32.0
+				pts.append(center + Vector2(cos(a) * size.x * 0.35, sin(a) * size.y * 0.25))
+			draw_polyline(pts, light, 2.0)
+		"dot":
+			draw_circle(center, 5 * k, light)
+	var font := ThemeDB.fallback_font
+	var fs := int(round(10 * k))
+	var tw := font.get_string_size("XX", HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+	var tp := Vector2(center.x - tw / 2, rect.position.y - 2 * k)
+	draw_string_outline(font, tp, "XX", HORIZONTAL_ALIGNMENT_LEFT, -1, fs, 3, Color.html(c.size_outline))
+	draw_string(font, tp, "XX", HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color.html(c.size_text))
+	var fr := bar_fractions(d)
+	var bar := Vector2(40 * k, 3 * k)
+	var y := rect.end.y + 1 * k
+	for i in 2:
+		var track := Rect2(Vector2(rect.position.x, y), bar)
+		draw_rect(track, Color.html(c.track))
+		draw_rect(Rect2(track.position, Vector2(bar.x * fr[i], bar.y)), Color.html(c.org if i == 0 else c.str))
+		y += bar.y + 1 * k
+	if d == selected:
+		draw_rect(rect.grow(3.0), Color.html(c.selected), false, 2.0)
+
+
+## Capital: the lowest-id city of each nation (no capital flag exists yet).
+func is_capital(city: Dictionary) -> bool:
+	if city.has("capital"):
+		return bool(city.capital)
+	for other in hex_map.cities:
+		if other.nation == city.nation:
+			return other.id == city.id
+	return false
+
+
+func _draw_city(city: Dictionary) -> void:
+	var k := _k()
+	var c: Dictionary = palette.city
+	var center := hex_to_pixel(city.cell)
+	var half := 8 * k
+	var rect := Rect2(center - Vector2(half, half), Vector2(half, half) * 2)
+	draw_rect(rect, Color.html(c.fill))
+	draw_rect(rect.grow(-2 * k), Color.html(c.ring), false, 2.0)
+	if city.nation >= 0 and is_capital(city):
+		var star := PackedVector2Array()
+		for i in 10:
+			var r := (5.0 if i % 2 == 0 else 2.2) * k
+			var a := -PI / 2 + PI * i / 5.0
+			star.append(center + Vector2(cos(a), sin(a)) * r)
+		draw_colored_polygon(star, Color.html(c.star))
+	var label := str(city.get("name", "City %d" % city.id)).to_upper()
+	var font := ThemeDB.fallback_font
+	var fs := int(round(11 * k))
+	var sz := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs)
+	# Below the unit bars when a division stands here, so the label stays visible.
+	var top := rect.end.y + 4 * k
+	if roster and roster.division_at(city.cell):
+		top = center.y + (-4 + 14 + 8) * k + 4 * k
+	var plate := Rect2(Vector2(center.x - sz.x / 2 - 3 * k, top), Vector2(sz.x + 6 * k, sz.y))
+	draw_rect(plate, Color.html(c.plate))
+	draw_string(font, Vector2(plate.position.x + 3 * k, top + font.get_ascent(fs)), label,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color.html(c.label))
 
 
 ## The cell under a pixel position, or Vector2i(-1, -1) if none.
