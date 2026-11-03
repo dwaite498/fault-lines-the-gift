@@ -1,4 +1,4 @@
-[gd_resource type="Theme" load_steps=6 format=3]
+[gd_resource type="Theme" load_steps=8 format=3]
 
 [sub_resource type="StyleBoxFlat" id="panel"]
 content_margin_left = 8.0
@@ -57,6 +57,15 @@ bg_color = Color(0.1215686, 0.1647059, 0.2, 1)
 border_width_bottom = 1
 border_color = Color(0.172549, 0.227451, 0.270588, 1)
 
+[sub_resource type="StyleBoxLine" id="sep_h"]
+color = Color(0.9098, 0.8863, 0.8157, 0.25)
+thickness = 1
+
+[sub_resource type="StyleBoxLine" id="sep_v"]
+color = Color(0.9098, 0.8863, 0.8157, 0.25)
+thickness = 1
+vertical = true
+
 [resource]
 default_font_size = 12
 Panel/styles/panel = SubResource("panel")
@@ -71,5 +80,7 @@ Button/styles/disabled = SubResource("btn")
 Label/colors/font_color = Color(0.9098039, 0.8862745, 0.8156863, 1)
 RichTextLabel/colors/default_color = Color(0.9098039, 0.8862745, 0.8156863, 1)
 HSeparator/constants/separation = 9
+HSeparator/styles/separator = SubResource("sep_h")
+VSeparator/styles/separator = SubResource("sep_v")
 TopBar/base_type = &"Panel"
 TopBar/styles/panel = SubResource("bar")
