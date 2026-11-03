@@ -29,6 +29,10 @@ var in_combat := false
 var equipment_level := 1
 ## Distinct hexes that attacked this division this turn (for flanking). Reset at end_turn.
 var attacked_from: Array[Vector2i] = []
+## Pending order for end of turn: hexes to step through, in order. Empty = no order.
+var order_path: Array[Vector2i] = []
+## True if the order is an attack on the division at order_path's only hex.
+var order_attack := false
 
 
 static func from_template(new_id: int, owner_nation: int, start_hex: Vector2i,

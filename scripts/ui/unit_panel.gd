@@ -10,6 +10,8 @@ var flank_min_mult := 0.4
 ## Set by main.gd; used only to preview this turn's recovery.
 var roster: DivisionRoster
 var economy: NationEconomy
+## Map from the last refresh(); projected_recovery() uses it for income.
+var _map: HexMap
 
 
 func _init() -> void:
@@ -24,6 +26,7 @@ func _init() -> void:
 ## Shows d's current stats, or hides the panel when d is null.
 func refresh(d: Division, hex_map: HexMap) -> void:
 	panel.visible = d != null
+	_map = hex_map
 	if d == null:
 		label.text = ""
 		return
@@ -48,6 +51,12 @@ func refresh(d: Division, hex_map: HexMap) -> void:
 		label.text += "\nWill recover %+.1f org / +%.1f str this turn" % [rec.org, rec.strength]
 	if d.last_reinforce > 0.0:
 		label.text += "\nReinforcing +%.1f" % d.last_reinforce
+	if not d.order_path.is_empty():
+		var dest: Vector2i = d.order_path.back()
+		label.text += "\nOrder: %s (%d,%d)%s" % ["attack" if d.order_attack else "move to",
+				dest.x, dest.y, "" if d.order_attack else ", %d steps" % d.order_path.size()]
+	else:
+		label.text += "\nOrder: none"
 	if not d.supplied:
 		label.text += "\nOut of supply"
 	if penalty > 0.0:
@@ -58,8 +67,10 @@ func refresh(d: Division, hex_map: HexMap) -> void:
 ## Preview of d's org and strength change at the next end turn, using the same
 ## rules as DivisionRoster.end_turn (supply drain or morale recovery) and
 ## NationEconomy.reinforce (cap, cost, pool shared in division id order).
-## Uses d's current supply status and ignores unpaid-upkeep drain. Read-only.
-func projected_recovery(d: Division) -> Dictionary:
+## The pool includes this turn's manpower income (collected before reinforcement;
+## upkeep costs no manpower). with_growth adds the city growth main.gd applies
+## before income. Uses d's current supply status and ignores unpaid-upkeep drain. Read-only.
+func projected_recovery(d: Division, with_growth := true) -> Dictionary:
 	var c := roster.combat
 	var org := 0.0
 	if not d.supplied:
@@ -69,6 +80,15 @@ func projected_recovery(d: Division) -> Dictionary:
 	var cap := float(economy.config.reinforce_cap_per_turn)
 	var rate := float(economy.config.reinforce_manpower_per_strength)
 	var pool := float(economy.stocks.get(d.nation, {}).get("manpower", 0.0))
+	if _map and _map.nations.has(d.nation):
+		for city in _map.cities:
+			if city.nation != d.nation:
+				continue
+			var c2: Dictionary = city.duplicate()
+			if with_growth:
+				c2.population = mini(int(city.population) + int(_map.city_rules.growth_per_turn),
+						int(_map.city_rules.max_population))
+			pool += float(economy.city_income(c2).manpower)
 	var order := roster.divisions.filter(func(x): return x.nation == d.nation)
 	order.sort_custom(func(a, b): return a.id < b.id)
 	var strength := 0.0
