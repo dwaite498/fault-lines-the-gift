@@ -29,6 +29,10 @@ func refresh(nation: int, roster: DivisionRoster, economy: NationEconomy, top: f
 	if lines.size() == 1:
 		lines.append("No divisions")
 	lines.append("Manpower spent on reinforcement last turn: %.1f" % float(economy.reinforce_spent.get(nation, 0.0)))
+	var cost: Dictionary = economy.config.recruit_cost
+	lines.append("Recruit cost: cash %d, manpower %d, capacity %d; %d turns training" % [
+			int(cost.get("cash", 0)), int(cost.get("manpower", 0)), int(cost.get("capacity", 0)),
+			int(economy.config.training_turns)])
 	var ids := economy.pending.keys()
 	ids.sort()
 	for id in ids:
