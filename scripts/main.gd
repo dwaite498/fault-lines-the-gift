@@ -127,7 +127,9 @@ func _on_hex_clicked(hex: Vector2i) -> void:
 	var target := roster.division_at(hex)
 	var selected := _view.selected
 	_city = {}
-	if selected and (target == null or target.nation != PLAYER_NATION) and roster.set_order(selected, hex, _view.hex_map):
+	if selected and target == selected:
+		_view.selected = null
+	elif selected and (target == null or target.nation != PLAYER_NATION) and roster.set_order(selected, hex, _view.hex_map):
 		pass
 	else:
 		_view.selected = target if target and target.nation == PLAYER_NATION else null

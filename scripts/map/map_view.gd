@@ -16,7 +16,7 @@ var roster: DivisionRoster
 var selected: Division
 var player_nation := 0
 const ORDER_COLOR := Color(1, 1, 1, 0.9)
-const ATTACK_COLOR := Color(1, 0.3, 0.2, 0.9)
+const ATTACK_COLOR := Color(0.9, 0.1, 0.1, 0.95)
 const CLASH_COLOR := Color(1, 0.85, 0.0, 1.0)
 
 
@@ -63,10 +63,11 @@ func _draw_orders() -> void:
 			continue
 		var color := CLASH_COLOR if clashes.has(d.order_path.back()) else (
 				ATTACK_COLOR if d.order_attack else ORDER_COLOR)
-		var points := PackedVector2Array([hex_to_pixel(d.hex)])
+		var centers := PackedVector2Array([hex_to_pixel(d.hex)])
 		for cell in d.order_path:
-			points.append(hex_to_pixel(cell))
-		draw_polyline(points, color, 3.0)
+			centers.append(hex_to_pixel(cell))
+		var points := ArrowCurve.through(centers)
+		draw_polyline(points, color, 4.0 if d.order_attack else 3.0, true)
 		var tip := points[points.size() - 1]
 		var dir := (tip - points[points.size() - 2]).normalized()
 		var side := Vector2(-dir.y, dir.x)
