@@ -95,7 +95,7 @@ func projected_recovery(d: Division, with_growth := true) -> Dictionary:
 	for x in order:
 		if not x.supplied or x.strength >= x.max_strength:
 			continue
-		var gain := minf(cap, x.max_strength - x.strength)
+		var gain := minf(cap * economy.reinforce_mult(x, _map, x.in_combat), x.max_strength - x.strength)
 		if rate > 0.0:
 			gain = minf(gain, pool / rate)
 		gain = maxf(gain, 0.0)
