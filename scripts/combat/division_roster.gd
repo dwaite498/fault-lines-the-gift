@@ -15,6 +15,8 @@ var rng := RandomNumberGenerator.new()
 var economy: NationEconomy = null
 ## Clash/combat lines from the last execute_orders().
 var turn_log: Array[String] = []
+## Nations treated as neutral: their hexes can be neither ordered into nor attacked.
+var neutral_nations: Array[int] = []
 var _defer_after_combat := false
 var _pending_captor := {}
 
@@ -101,7 +103,7 @@ func fortify(d: Division) -> bool:
 
 func can_attack(attacker: Division, defender: Division, hex_map: HexMap) -> bool:
 	return (attacker.moves_left > 0 and not attacker.has_moved and defender != null
-			and defender.nation != attacker.nation
+			and defender.nation != attacker.nation and not neutral_nations.has(defender.nation)
 			and defender.hex in hex_map.neighbors(attacker.hex))
 
 
@@ -205,7 +207,11 @@ func _after_combat(d: Division, hex_map: HexMap, captor: int) -> String:
 ## this turn. Returns false (order unchanged) if dest is unreachable.
 func set_order(d: Division, dest: Vector2i, hex_map: HexMap) -> bool:
 	var target := division_at(dest)
+	if target and neutral_nations.has(target.nation):
+		return false
 	if target and can_attack(d, target, hex_map):
+		if is_leaving(d):
+			clear_order(d)
 		d.order_path.assign([dest])
 		d.order_attack = true
 		return true
@@ -217,13 +223,29 @@ func set_order(d: Division, dest: Vector2i, hex_map: HexMap) -> bool:
 	return true
 
 
+## True if d has a move (not attack) order, so it is leaving its hex.
+func is_leaving(d: Division) -> bool:
+	return d != null and not d.order_path.is_empty() and not d.order_attack
+
+
+## Cancels d's order. Friendly orders routed through d's hex were only valid while
+## d was leaving, so they are cleared too, with a note in turn_log.
 func clear_order(d: Division) -> void:
+	var was_leaving := is_leaving(d)
 	d.order_path.clear()
 	d.order_attack = false
+	if not was_leaving:
+		return
+	for f in divisions:
+		if f != d and f.nation == d.nation and is_leaving(f) and f.order_path.has(d.hex):
+			var note := "Div %d order cleared: div %d's move out of %s was cancelled" % [f.id, d.id, d.hex]
+			turn_log.append(note)
+			print(note)
+			clear_order(f)
 
 
-## Shortest path (by steps, BFS) from d.hex to dest through passable hexes with no
-## division, excluding d.hex. Empty if none or if d can't pay for it this turn.
+## Shortest path (by steps, BFS) from d.hex to dest through passable hexes that are
+## empty or held by a friendly with a move order out, excluding d.hex. Empty if none or if d can't pay for it this turn.
 func plan_path(d: Division, dest: Vector2i, hex_map: HexMap) -> Array[Vector2i]:
 	var none: Array[Vector2i] = []
 	if dest == d.hex or not hex_map.cells.has(dest):
@@ -233,7 +255,11 @@ func plan_path(d: Division, dest: Vector2i, hex_map: HexMap) -> Array[Vector2i]:
 	while not queue.is_empty() and not came.has(dest):
 		var cell: Vector2i = queue.pop_front()
 		for n in hex_map.neighbors(cell):
-			if came.has(n) or not hex_map.terrain_of(n).passable or division_at(n) != null:
+			if came.has(n) or not hex_map.terrain_of(n).passable:
+				continue
+			var occ := division_at(n)
+			# Only a friendly that is moving out may be followed into its hex.
+			if occ != null and not (occ.nation == d.nation and is_leaving(occ)):
 				continue
 			came[n] = cell
 			queue.append(n)
