@@ -93,6 +93,7 @@ These factions secretly take over nations that still look neutral.
 - Manpower is spent when a division is created and drawn over time to replace losses and attrition.
 - Divisions on home territory and not in combat take no attrition.
 - Strength loss is permanent (reinforcement is planned). A division at 0 strength is destroyed.
+- Orders: clicking a reachable hex stores a move order (a path within this turn's move points); clicking an adjacent enemy stores an attack order. Right-click or Esc clears it. AI orders are issued at the start of each turn, before and without seeing the player's. End turn executes all orders by nation then division id using the normal move and attack rules; an order stops at its first blocked step. Player arrows that end on the same hex turn yellow as a possible clash. (Simultaneous resolution comes later.)
 - Supply: at end of turn, a division is in supply if a path of up to 8 passable hexes (no water, no hexes held by enemy divisions) reaches a city its nation owns. Out of supply (including encircled) divisions lose 10 org per turn (down to 0, no retreat) and recover no org or strength. Values are in `data/combat_config.json`.
 - Reinforcement: after income and upkeep, each in-supply division below its template strength regains up to 10 strength per turn, paying 1 manpower per point, in division id order until the pool runs out (never below 0). Out-of-supply divisions get nothing. Values are in `data/resources_config.json`.
 - The attacker never moves in. A city is captured only by moving into it when it is empty.

@@ -42,6 +42,12 @@ func refresh(d: Division, hex_map: HexMap) -> void:
 	var penalty := 1.0 - DivisionRoster.flank_mult_for(d.attacked_from.size(), flank_per_hex, flank_min_mult)
 	if d.last_reinforce > 0.0:
 		label.text += "\nReinforcing +%.1f" % d.last_reinforce
+	if not d.order_path.is_empty():
+		var dest: Vector2i = d.order_path.back()
+		label.text += "\nOrder: %s (%d,%d)%s" % ["attack" if d.order_attack else "move to",
+				dest.x, dest.y, "" if d.order_attack else ", %d steps" % d.order_path.size()]
+	else:
+		label.text += "\nOrder: none"
 	if not d.supplied:
 		label.text += "\nOut of supply"
 	if penalty > 0.0:

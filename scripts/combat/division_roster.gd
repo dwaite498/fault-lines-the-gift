@@ -186,8 +186,102 @@ func _after_combat(d: Division, hex_map: HexMap, captor: int) -> String:
 		economy.add_pows(captor, d.nation, d.strength)
 	return "surrendered"
 
-## Placeholder AI for every nation except player_nation: attack a random adjacent
-## enemy if possible, otherwise move randomly or fortify.
+# --- Orders ---
+
+## Stores an order for d toward dest instead of acting now. An adjacent enemy is
+## an attack order; otherwise a move along the shortest free path d can afford
+## this turn. Returns false (order unchanged) if dest is unreachable.
+func set_order(d: Division, dest: Vector2i, hex_map: HexMap) -> bool:
+	var target := division_at(dest)
+	if target and can_attack(d, target, hex_map):
+		d.order_path.assign([dest])
+		d.order_attack = true
+		return true
+	var path := plan_path(d, dest, hex_map)
+	if path.is_empty():
+		return false
+	d.order_path.assign(path)
+	d.order_attack = false
+	return true
+
+
+func clear_order(d: Division) -> void:
+	d.order_path.clear()
+	d.order_attack = false
+
+
+## Shortest path (by steps, BFS) from d.hex to dest through passable hexes with no
+## division, excluding d.hex. Empty if none or if d can't pay for it this turn.
+func plan_path(d: Division, dest: Vector2i, hex_map: HexMap) -> Array[Vector2i]:
+	var none: Array[Vector2i] = []
+	if dest == d.hex or not hex_map.cells.has(dest):
+		return none
+	var came := {d.hex: d.hex}
+	var queue: Array[Vector2i] = [d.hex]
+	while not queue.is_empty() and not came.has(dest):
+		var cell: Vector2i = queue.pop_front()
+		for n in hex_map.neighbors(cell):
+			if came.has(n) or not hex_map.terrain_of(n).passable or division_at(n) != null:
+				continue
+			came[n] = cell
+			queue.append(n)
+	if not came.has(dest):
+		return none
+	var path: Array[Vector2i] = []
+	var cur := dest
+	while cur != d.hex:
+		path.push_front(cur)
+		cur = came[cur]
+	# Same cost rule as can_move: the first step is always allowed.
+	var moves := d.moves_left
+	var moved := d.has_moved
+	for cell in path:
+		var cost := int(hex_map.terrain_of(cell).move_cost)
+		if moves <= 0 or (moves < cost and moved):
+			return none
+		moves = maxi(moves - cost, 0)
+		moved = true
+	return path
+
+
+## Executes every pending order, by nation then division id. Each step uses the
+## normal move/attack rules; an order stops at the first step that fails (e.g. the
+## hex became occupied). All orders are cleared afterwards.
+func execute_orders(hex_map: HexMap) -> void:
+	var order := divisions.duplicate()
+	order.sort_custom(func(a, b): return a.nation < b.nation or (a.nation == b.nation and a.id < b.id))
+	for d in order:
+		if not divisions.has(d) or d.order_path.is_empty():
+			continue
+		if d.order_attack:
+			var target := division_at(d.order_path[0])
+			if target and can_attack(d, target, hex_map):
+				attack(d, target, hex_map)
+		else:
+			for cell in d.order_path:
+				if not divisions.has(d) or not try_move(d, cell, hex_map):
+					break
+	for d in divisions:
+		clear_order(d)
+
+
+## Order endpoints of nation's divisions shared by two or more orders (possible clash).
+func clash_hexes(nation: int) -> Array[Vector2i]:
+	var counts := {}
+	for d in divisions:
+		if d.nation == nation and not d.order_path.is_empty():
+			counts[d.order_path.back()] = int(counts.get(d.order_path.back(), 0)) + 1
+	var out: Array[Vector2i] = []
+	for cell in counts:
+		if counts[cell] > 1:
+			out.append(cell)
+	return out
+
+
+## Placeholder AI for every nation except player_nation: order an attack on a random
+## adjacent enemy if possible, otherwise order a random 1-hex move or fortify.
+## Reads only the board, never other divisions' orders, so call it before the
+## player gives orders.
 func run_ai(player_nation: int, hex_map: HexMap) -> void:
 	for d in divisions.duplicate():
 		if d.nation == player_nation or not divisions.has(d) or d.moves_left <= 0:
@@ -201,9 +295,9 @@ func run_ai(player_nation: int, hex_map: HexMap) -> void:
 			elif can_move(d, n, hex_map):
 				free.append(n)
 		if not enemies.is_empty():
-			attack(d, enemies[rng.randi_range(0, enemies.size() - 1)], hex_map)
+			set_order(d, enemies[rng.randi_range(0, enemies.size() - 1)].hex, hex_map)
 		elif not free.is_empty() and rng.randf() < 0.7:
-			try_move(d, free[rng.randi_range(0, free.size() - 1)], hex_map)
+			set_order(d, free[rng.randi_range(0, free.size() - 1)], hex_map)
 		else:
 			fortify(d)
 
