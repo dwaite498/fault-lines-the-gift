@@ -2,7 +2,15 @@ class_name UnitPanel
 extends CanvasLayer
 ## Simple on-screen info panel for the selected division. Hidden when nothing is selected.
 
+signal action_pressed(action: String)
+
+const ACTION_LABELS := {"move": "Move (M)", "attack": "Attack (A)", "dig_in": "Dig in (D)",
+		"follow": "Follow/Swap (F)", "cancel": "Cancel order (Esc)"}
+
 var panel := Panel.new()
+## Action buttons for the player's selected unit; only valid ones are shown.
+var buttons := {}
+var _box := VBoxContainer.new()
 var label := Label.new()
 var max_fortify := 3
 var flank_per_hex := 0.15
@@ -21,12 +29,23 @@ func _init() -> void:
 	panel.add_child(label)
 	add_child(panel)
 	panel.visible = false
+	_box.position = Vector2(8, 212)
+	add_child(_box)
+	for a in ACTION_LABELS:
+		var b := Button.new()
+		b.text = ACTION_LABELS[a]
+		b.pressed.connect(func() -> void: action_pressed.emit(a))
+		b.visible = false
+		_box.add_child(b)
+		buttons[a] = b
 
 
 ## Shows d's current stats, or hides the panel when d is null.
-func refresh(d: Division, hex_map: HexMap) -> void:
+func refresh(d: Division, hex_map: HexMap, actions: Array[String] = [], mode := "") -> void:
 	panel.visible = d != null
 	_map = hex_map
+	for a in buttons:
+		buttons[a].visible = d != null and actions.has(a)
 	if d == null:
 		label.text = ""
 		return
@@ -51,6 +70,9 @@ func refresh(d: Division, hex_map: HexMap) -> void:
 		label.text += "\nWill recover %+.1f org / +%.1f str this turn" % [rec.org, rec.strength]
 	if d.last_reinforce > 0.0:
 		label.text += "\nReinforcing +%.1f" % d.last_reinforce
+	label.text += "\nTab: next unit without orders"
+	if mode != "":
+		label.text += "\nPick a highlighted hex (Esc: back)"
 	if not d.order_path.is_empty():
 		var dest: Vector2i = d.order_path.back()
 		label.text += "\nOrder: %s (%d,%d)%s" % ["attack" if d.order_attack else "move to",
@@ -62,6 +84,7 @@ func refresh(d: Division, hex_map: HexMap) -> void:
 	if penalty > 0.0:
 		label.text += "\nFlanked: -%d%% def" % roundi(penalty * 100.0)
 	panel.size = label.get_minimum_size() + Vector2(16, 12)
+	_box.position = panel.position + Vector2(0, panel.size.y + 4)
 
 
 ## Preview of d's org and strength change at the next end turn, using the same
