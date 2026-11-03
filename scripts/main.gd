@@ -42,6 +42,11 @@ func _ready() -> void:
 	_city_panel.growth_per_turn = int(_view.hex_map.city_rules.growth_per_turn)
 	_city_panel.max_population = int(_view.hex_map.city_rules.max_population)
 	_city_panel.economy = _economy
+	_city_panel.roster = _view.roster
+	_city_panel.player_nation = PLAYER_NATION
+	_city_panel.recruit_pressed.connect(_on_recruit_pressed)
+	_panel.roster = _view.roster
+	_panel.economy = _economy
 	add_child(_city_panel)
 	_nation_panel = NationPanel.new()
 	add_child(_nation_panel)
@@ -82,13 +87,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		roster.run_ai(PLAYER_NATION, _view.hex_map)
 		print("Turn ended")
 	elif key.keycode == KEY_R and not _city.is_empty() and _city.nation == PLAYER_NATION:
-		var reason := _economy.recruit_block_reason(_city, PLAYER_NATION, roster)
-		if reason == "":
-			_economy.recruit(_city, PLAYER_NATION, roster)
-			print("Recruiting at city %d; arrives in %d turns" % [_city.id, int(_economy.config.training_turns)])
-		else:
-			message.text = "Cannot recruit: " + reason
-			print(message.text)
+		_try_recruit()
 	elif key.keycode == KEY_ESCAPE and _view.selected:
 		roster.clear_order(_view.selected)
 	elif key.keycode == KEY_M:
@@ -137,4 +136,22 @@ func _on_hex_clicked(hex: Vector2i) -> void:
 			_city = _view.hex_map.city_at(hex)
 	if _view.selected and not roster.divisions.has(_view.selected):
 		_view.selected = null
+	_refresh_panels()
+
+
+## R key and the city panel's Recruit button.
+func _try_recruit() -> void:
+	var reason := _economy.recruit_block_reason(_city, PLAYER_NATION, _view.roster)
+	if reason == "":
+		_economy.recruit(_city, PLAYER_NATION, _view.roster)
+		print("Recruiting at city %d; arrives in %d turns" % [_city.id, int(_economy.config.training_turns)])
+	else:
+		message.text = "Cannot recruit: " + reason
+		print(message.text)
+
+
+func _on_recruit_pressed() -> void:
+	message.text = ""
+	if not _city.is_empty() and _city.nation == PLAYER_NATION:
+		_try_recruit()
 	_refresh_panels()
