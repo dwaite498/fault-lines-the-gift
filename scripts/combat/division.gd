@@ -25,6 +25,8 @@ var supplied := true
 var fortify_level := 0
 ## True if it attacked or was attacked this turn (blocks org recovery).
 var in_combat := false
+## in_combat as it stood when the turn ended (in_combat is reset before reinforcement).
+var fought_this_turn := false
 ## Equipment tier. Unused for now.
 var equipment_level := 1
 ## Distinct hexes that attacked this division this turn (for flanking). Reset at end_turn.

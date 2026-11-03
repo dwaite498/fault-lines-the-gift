@@ -173,7 +173,7 @@ func run_ai(player_nation: int, hex_map: HexMap, roster: DivisionRoster) -> void
 func end_turn(hex_map: HexMap, roster: DivisionRoster) -> void:
 	collect_income(hex_map)
 	pay_upkeep(hex_map, roster)
-	reinforce(roster)
+	reinforce(roster, hex_map)
 	spawn_pending(hex_map, roster)
 
 
@@ -181,7 +181,27 @@ func end_turn(hex_map: HexMap, roster: DivisionRoster) -> void:
 ## by division id ascending. Each gains at most reinforce_cap_per_turn and only
 ## what the pool can pay at reinforce_manpower_per_strength. Out-of-supply
 ## divisions get nothing. Sets d.last_reinforce and reinforce_spent.
-func reinforce(roster: DivisionRoster) -> void:
+## Cap multiplier for d: lowest of territory (own/neutral/enemy) and in_combat;
+## 0 out of supply. fought = d was in combat this turn. hex_map null = own territory.
+## Shared by reinforce() and the unit panel preview.
+func reinforce_mult(d: Division, hex_map: HexMap, fought: bool) -> float:
+	if not d.supplied:
+		return 0.0
+	var m: Dictionary = config.get("reinforce_mult", {})
+	var key := "own"
+	if hex_map and hex_map.cells.has(d.hex):
+		var owner: int = hex_map.cells[d.hex]
+		if owner == HexMap.UNCLAIMED:
+			key = "neutral"
+		elif owner != d.nation:
+			key = "enemy"
+	var mult := float(m.get(key, 1.0))
+	if fought:
+		mult = minf(mult, float(m.get("in_combat", 1.0)))
+	return mult
+
+
+func reinforce(roster: DivisionRoster, hex_map: HexMap = null) -> void:
 	var cap := float(config.reinforce_cap_per_turn)
 	var rate := float(config.reinforce_manpower_per_strength)
 	reinforce_spent.clear()
@@ -192,7 +212,7 @@ func reinforce(roster: DivisionRoster) -> void:
 		if not d.supplied or d.strength >= d.max_strength or not stocks.has(d.nation):
 			continue
 		var pool := float(stocks[d.nation].get("manpower", 0.0))
-		var gain := minf(cap, d.max_strength - d.strength)
+		var gain := minf(cap * reinforce_mult(d, hex_map, d.fought_this_turn), d.max_strength - d.strength)
 		if rate > 0.0:
 			gain = minf(gain, pool / rate)
 		if gain <= 0.0:

@@ -596,6 +596,7 @@ func end_turn(hex_map: HexMap = null) -> void:
 			d.org = maxf(d.org - float(combat.out_of_supply_org_drain), 0.0)
 		elif not d.in_combat:
 			d.org = minf(d.org + d.morale * rate, d.max_org)
+		d.fought_this_turn = d.in_combat
 		d.in_combat = false
 		d.attacked_from.clear()
 		d.moves_left = d.move
