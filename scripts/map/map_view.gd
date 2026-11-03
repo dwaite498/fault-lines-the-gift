@@ -110,6 +110,10 @@ static func bar_fractions(d: Division) -> Array[float]:
 			clampf(d.strength / maxf(d.max_strength, 0.001), 0.0, 1.0)]
 
 
+func spent_alpha() -> float:
+	return float(palette.counter.get("spent_alpha", 1.0))
+
+
 func _draw_counter(d: Division) -> void:
 	var k := _k()
 	var c: Dictionary = palette.counter
@@ -117,7 +121,10 @@ func _draw_counter(d: Division) -> void:
 	var size := Vector2(40, 28) * k
 	var center := hex_to_pixel(d.hex) + Vector2(0, -4 * k)
 	var rect := Rect2(center - size / 2, size)
-	draw_rect(rect, counter_fill(d.nation))
+	var fill := counter_fill(d.nation)
+	if d.moves_left <= 0:
+		fill.a = spent_alpha()
+	draw_rect(rect, fill)
 	draw_rect(rect, light, false, 2.0)
 	var inner := rect.grow(-4 * k)
 	match symbol_for(d.unit_type):

@@ -50,7 +50,8 @@
 		"org": "#E8E2D0",
 		"str": "#C9B37E",
 		"track": "#1F2A33",
-		"selected": "#C9B37E"
+		"selected": "#C9B37E",
+		"spent_alpha": 0.55
 	},
 	"city": {
 		"fill": "#1A1A1A",
@@ -58,5 +59,15 @@
 		"star": "#C9B37E",
 		"label": "#E8E2D0",
 		"plate": "#1F2A33"
+	},
+	"ui": {
+		"frame": "#1F2A33",
+		"panel": "#4A5244",
+		"text": "#E8E2D0",
+		"dim": "#A9A48F",
+		"accent": "#C9B37E",
+		"divider": "#E8E2D0",
+		"divider_alpha": 0.25,
+		"supply_out": "#C0603E"
 	}
 }

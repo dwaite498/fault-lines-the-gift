@@ -40,4 +40,4 @@ func refresh(nation: int, roster: DivisionRoster, economy: NationEconomy, top: f
 			lines.append("city %d: %s" % [id, NationEconomy.queue_text(economy.pending[id])])
 	label.text = "\n".join(lines)
 	panel.size = label.get_minimum_size() + Vector2(16, 12)
-	panel.position = Vector2(1280 - panel.size.x - 8, top)
+	panel.position = Vector2(1040 - panel.size.x - 8, top)

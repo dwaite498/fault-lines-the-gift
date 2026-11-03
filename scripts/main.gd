@@ -18,6 +18,7 @@ var _economy: NationEconomy
 var _city: Dictionary = {}
 var _nation_panel: NationPanel
 var _military_panel: MilitaryPanel
+var _top_bar := TopBar.new()
 ## Brief on-screen message (e.g. why R was blocked). Cleared on the next action.
 var message := Label.new()
 var turn := 1
@@ -57,6 +58,7 @@ func _ready() -> void:
 	_military_panel = MilitaryPanel.new()
 	_military_panel.max_fortify = _panel.max_fortify
 	add_child(_military_panel)
+	add_child(_top_bar)
 	var layer := CanvasLayer.new()
 	message.position = Vector2(8, 690)
 	message.add_theme_color_override("font_color", Color(1, 0.4, 0.4))
@@ -171,6 +173,7 @@ func _refresh_panels() -> void:
 		acts = _view.roster.valid_actions(_view.selected, _view.hex_map)
 	_panel.refresh(_view.selected, _view.hex_map, acts, _mode)
 	_city_panel.refresh(_city)
+	_top_bar.refresh("Concord", turn)
 	_nation_panel.refresh(PLAYER_NATION, turn, _view.hex_map, _economy)
 	var np := _nation_panel.panel
 	_military_panel.refresh(PLAYER_NATION, _view.roster, _economy, np.position.y + np.size.y + 8)
