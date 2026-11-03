@@ -292,6 +292,7 @@ func execute_orders(hex_map: HexMap) -> void:
 			if divisions.has(d) and step[d] < d.order_path.size() and d.moves_left > 0:
 				active.append(d)
 		var stopped := {}
+		var swapped := {}
 		var target_of := {}
 		for d in active:
 			target_of[d] = d.order_path[step[d]]
@@ -305,10 +306,18 @@ func execute_orders(hex_map: HexMap) -> void:
 					stopped[b] = true
 					if a.nation != b.nation:
 						_meeting(a, b, a.hex, b.hex, hex_map, "head-on at %s|%s" % [a.hex, b.hex])
+					else:
+						_friendly_swap(a, b, hex_map)
+						stopped.erase(a)
+						stopped.erase(b)
+						step[a] += 1
+						step[b] += 1
+						swapped[a] = true
+						swapped[b] = true
 		# Group the rest by target hex.
 		var groups := {}
 		for d in active:
-			if not stopped.has(d):
+			if not stopped.has(d) and not swapped.has(d):
 				if not groups.has(target_of[d]):
 					groups[target_of[d]] = []
 				groups[target_of[d]].append(d)
@@ -353,10 +362,16 @@ func execute_orders(hex_map: HexMap) -> void:
 			if occ and occ.nation != d.nation:
 				blocked_attacks.append([d, occ])
 				turn_log.append("Div %d (n%d) blocked at %s by div %d (n%d); attacks" % [d.id, d.nation, target_of[d], occ.id, occ.nation])
+			elif occ:
+				turn_log.append("Div %d (n%d) stalls short of %s: friendly div %d did not leave" % [d.id, d.nation, target_of[d], occ.id])
+			else:
+				turn_log.append("Div %d (n%d) stalls short of %s: cannot enter" % [d.id, d.nation, target_of[d]])
 		var still: Array = []
 		for d in movers:
 			if divisions.has(d) and not stopped.has(d) and active.has(d):
 				still.append(d)
+			elif divisions.has(d) and not active.has(d) and step[d] < d.order_path.size():
+				turn_log.append("Div %d (n%d) stops short of %s: out of moves" % [d.id, d.nation, d.order_path.back()])
 		movers = still
 	# Combat phase.
 	for pair in blocked_attacks:
@@ -390,6 +405,18 @@ func execute_orders(hex_map: HexMap) -> void:
 		clear_order(d)
 	for line in turn_log:
 		print(line)
+
+
+## Two friendlies trading hexes both complete the swap, no combat.
+func _friendly_swap(a: Division, b: Division, hex_map: HexMap) -> void:
+	var ha := a.hex
+	a.hex = b.hex
+	b.hex = ha
+	for d in [a, b]:
+		d.moves_left = maxi(d.moves_left - int(hex_map.terrain_of(d.hex).move_cost), 0)
+		d.has_moved = true
+		d.fortify_level = 0
+	turn_log.append("Div %d and div %d (n%d) swap %s <-> %s" % [a.id, b.id, a.nation, b.hex, a.hex])
 
 
 ## Attack without the can_attack gate (resolution already checked adjacency).
@@ -430,7 +457,9 @@ func _meeting(a: Division, b: Division, terrain_a: Vector2i, terrain_b: Vector2i
 	var sa := a.strength * a.org
 	var sb := b.strength * b.org
 	var res := 0 if is_equal_approx(sa, sb) else (1 if sa > sb else -1)
-	var result := "tie, both bounce" if res == 0 else ("div %d wins" % (a.id if res == 1 else b.id))
+	var head_on := where.begins_with("head-on")
+	var result := ("tie, both hold" if head_on else "tie, both bounce") if res == 0 else (
+			"div %d wins the clash, both hold" if head_on else "div %d wins") % (a.id if res == 1 else b.id)
 	turn_log.append("Clash %s: div %d (n%d) vs div %d (n%d): %s" % [where, a.id, a.nation, b.id, b.nation, result])
 	return res
 
