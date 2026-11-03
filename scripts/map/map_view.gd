@@ -61,7 +61,7 @@ func _draw_orders() -> void:
 	for d in roster.divisions:
 		if d.nation != player_nation or d.order_path.is_empty():
 			continue
-		var color := CLASH_COLOR if clashes.has(d.order_path.back()) else (
+		var color := CLASH_COLOR if not d.order_attack and clashes.has(d.order_path.back()) else (
 				ATTACK_COLOR if d.order_attack else ORDER_COLOR)
 		var centers := PackedVector2Array([hex_to_pixel(d.hex)])
 		for cell in d.order_path:

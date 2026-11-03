@@ -265,11 +265,12 @@ func execute_orders(hex_map: HexMap) -> void:
 		clear_order(d)
 
 
-## Order endpoints of nation's divisions shared by two or more orders (possible clash).
+## Endpoints shared by two or more of nation's MOVE orders (possible clash). Attacks on
+## the same enemy are a combined (flanking) attack, not a clash.
 func clash_hexes(nation: int) -> Array[Vector2i]:
 	var counts := {}
 	for d in divisions:
-		if d.nation == nation and not d.order_path.is_empty():
+		if d.nation == nation and not d.order_path.is_empty() and not d.order_attack:
 			counts[d.order_path.back()] = int(counts.get(d.order_path.back(), 0)) + 1
 	var out: Array[Vector2i] = []
 	for cell in counts:
