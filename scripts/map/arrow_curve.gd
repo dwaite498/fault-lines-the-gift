@@ -57,6 +57,14 @@ static func _trim(pts: PackedVector2Array, stop: float) -> PackedVector2Array:
 	return pts
 
 
+## Index in a through() result where the path reaches center `step` (the end of
+## this turn's moves), given the number of centers and of returned points.
+static func split_index(centers: int, step: int, points: int) -> int:
+	if centers <= 2:
+		return points - 1 if step >= 1 else 0
+	return mini(step * (points - 1) / (centers - 1), points - 1)
+
+
 ## +1 if mid-curve lies right of travel a->b (screen coords), -1 left.
 static func bow_side(pts: PackedVector2Array) -> int:
 	var a := pts[0]

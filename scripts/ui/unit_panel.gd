@@ -33,6 +33,7 @@ func _init() -> void:
 	add_child(_box)
 	for a in ACTION_LABELS:
 		var b := Button.new()
+		b.focus_mode = Control.FOCUS_NONE
 		b.text = ACTION_LABELS[a]
 		b.pressed.connect(func() -> void: action_pressed.emit(a))
 		b.visible = false
@@ -76,7 +77,7 @@ func refresh(d: Division, hex_map: HexMap, actions: Array[String] = [], mode := 
 	if not d.order_path.is_empty():
 		var dest: Vector2i = d.order_path.back()
 		label.text += "\nOrder: %s (%d,%d)%s" % ["attack" if d.order_attack else "move to",
-				dest.x, dest.y, "" if d.order_attack else ", %d steps" % d.order_path.size()]
+				dest.x, dest.y, "" if d.order_attack or _map == null else _turns_text(roster.turns_to_arrive(d, _map))]
 	else:
 		label.text += "\nOrder: none"
 	if not d.supplied:
@@ -127,3 +128,7 @@ func projected_recovery(d: Division, with_growth := true) -> Dictionary:
 			strength = gain
 			break
 	return {"org": org, "strength": strength}
+
+
+func _turns_text(n: int) -> String:
+	return ", %d turn%s" % [n, "" if n == 1 else "s"]
