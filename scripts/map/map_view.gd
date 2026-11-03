@@ -4,12 +4,11 @@ extends Node2D
 
 const HEX_SIZE := 30.0
 const ORIGIN := Vector2(50, 50)
-const WATER_COLOR := Color(0.16, 0.32, 0.55)
-const NEUTRAL_COLOR := Color(0.6, 0.6, 0.55)
-const NATION_COLORS: Array[Color] = [
-	Color(0.85, 0.3, 0.3), Color(0.3, 0.7, 0.35), Color(0.9, 0.75, 0.25),
-	Color(0.6, 0.4, 0.8), Color(0.95, 0.55, 0.2), Color(0.3, 0.75, 0.8),
-]
+const PALETTE_PATH := "res://data/art_palette.json"
+## Colors and line styles from data/art_palette.json (Art PR A).
+var palette: Dictionary = load_palette()
+## Nations drawn as neutral (no tint, no border), e.g. hidden minor factions.
+var hidden_nations: Array[int] = []
 
 var hex_map: HexMap
 var roster: DivisionRoster
@@ -30,22 +29,19 @@ func hex_to_pixel(cell: Vector2i) -> Vector2:
 func _draw() -> void:
 	if hex_map == null:
 		return
+	var grid: Dictionary = palette.grid
+	var grid_color := Color(Color.html(grid.color), float(grid.alpha))
 	for cell in hex_map.cells:
 		var corners := _corners(hex_to_pixel(cell))
-		draw_colored_polygon(corners, Color.html(hex_map.terrain_of(cell).color))
-		var owner: int = hex_map.cells[cell]
+		draw_colored_polygon(corners, terrain_color(cell))
+		var owner := owner_of(cell)
 		if owner >= 0:
-			draw_colored_polygon(corners, Color(_color_for(owner), 0.3))
+			draw_colored_polygon(corners, Color(_color_for(owner), float(palette.tint_alpha)))
 		corners.append(corners[0])
-		draw_polyline(corners, Color(0, 0, 0, 0.2), 1.0)
-	# Thick lines in the nation's color where two different owners meet.
-	for cell in hex_map.cells:
-		var owner: int = hex_map.cells[cell]
-		if owner < 0:
-			continue
-		for n in hex_map.neighbors(cell):
-			if hex_map.cells[n] != owner:
-				_draw_shared_edge(cell, n, _color_for(owner))
+		draw_polyline(corners, grid_color, float(grid.width))
+	# Dashed border in the nation color on edges between different owners (or owner and neutral).
+	for e in border_edges():
+		_draw_border(e[0], e[1], _color_for(owner_of(e[0])))
 	for city in hex_map.cities:
 		var center := hex_to_pixel(city.cell)
 		draw_circle(center, HEX_SIZE * 0.35, Color.WHITE)
@@ -114,11 +110,55 @@ func pixel_to_hex(pos: Vector2) -> Vector2i:
 	return best
 
 
-func _draw_shared_edge(cell: Vector2i, other: Vector2i, color: Color) -> void:
+static func load_palette(path := PALETTE_PATH) -> Dictionary:
+	return JSON.parse_string(FileAccess.get_file_as_string(path))
+
+
+## Owner as drawn: hidden nations count as neutral (UNCLAIMED).
+func owner_of(cell: Vector2i) -> int:
+	var owner: int = hex_map.cells[cell]
+	return HexMap.UNCLAIMED if hidden_nations.has(owner) else owner
+
+
+func terrain_color(cell: Vector2i) -> Color:
+	var name := hex_map.terrain_name(cell)
+	return Color.html(palette.terrain.get(name, hex_map.terrain_of(cell).color))
+
+
+## [cell, neighbor] pairs where cell has a visible owner and the neighbor's drawn owner differs.
+## Sorted for determinism.
+func border_edges() -> Array:
+	var out := []
+	var keys := hex_map.cells.keys()
+	keys.sort()
+	for cell in keys:
+		var owner := owner_of(cell)
+		if owner < 0:
+			continue
+		for n in hex_map.neighbors(cell):
+			if owner_of(n) != owner:
+				out.append([cell, n])
+	return out
+
+
+## Dashed line on the shared edge, nudged 1px into cell so both sides show.
+func _draw_border(cell: Vector2i, other: Vector2i, color: Color) -> void:
+	var center := hex_to_pixel(cell)
 	var other_center := hex_to_pixel(other)
-	var corners := Array(_corners(hex_to_pixel(cell)))
+	var corners := Array(_corners(center))
 	corners.sort_custom(func(a, b): return a.distance_to(other_center) < b.distance_to(other_center))
-	draw_line(corners[0], corners[1], color.darkened(0.3), 4.0)
+	var inward := (center - other_center).normalized()
+	var from: Vector2 = corners[0] + inward
+	var to: Vector2 = corners[1] + inward
+	var b: Dictionary = palette.border
+	var dash := float(b.dash)
+	var gap := float(b.gap)
+	var length := from.distance_to(to)
+	var dir := (to - from) / length
+	var t := 0.0
+	while t < length:
+		draw_line(from + dir * t, from + dir * minf(t + dash, length), Color(color, float(b.alpha)), float(b.width))
+		t += dash + gap
 
 
 func _corners(center: Vector2) -> PackedVector2Array:
@@ -130,8 +170,7 @@ func _corners(center: Vector2) -> PackedVector2Array:
 
 
 func _color_for(owner: int) -> Color:
-	if owner == HexMap.WATER:
-		return WATER_COLOR
-	if owner == HexMap.UNCLAIMED:
-		return NEUTRAL_COLOR
-	return NATION_COLORS[owner % NATION_COLORS.size()]
+	if owner < 0:
+		return Color.html(palette.terrain.water if owner == HexMap.WATER else palette.terrain.plains)
+	var nations: Array = palette.nations
+	return Color.html(nations[owner % nations.size()])
