@@ -1,13 +1,12 @@
 class_name NationPanel
 extends CanvasLayer
-## Always-visible panel for the player's own nation, in the top-right corner.
-## Shows only the player's data (hidden-info rule).
+
+const SIDE_WIDTH := 240.0
 
 var panel := Panel.new()
 var label := Label.new()
 var swatch := MapView.make_swatch()
 var _pal: Dictionary = MapView.load_palette()
-
 
 func _init() -> void:
 	label.position = Vector2(22, 6)
@@ -16,8 +15,6 @@ func _init() -> void:
 	panel.add_child(label)
 	add_child(panel)
 
-
-## Projected next-turn income for nation, using NationEconomy's formula.
 static func projected_income(nation: int, hex_map: HexMap, economy: NationEconomy) -> Dictionary:
 	var income := {"cash": 0.0, "influence": 0.0, "operations": 0.0, "manpower": 0.0, "capacity": 0.0}
 	if not hex_map.nations.has(nation):
@@ -30,7 +27,6 @@ static func projected_income(nation: int, hex_map: HexMap, economy: NationEconom
 			for r in c:
 				income[r] += c[r]
 	return income
-
 
 func refresh(nation: int, turn: int, hex_map: HexMap, economy: NationEconomy) -> void:
 	var city_count := hex_map.cities.filter(func(c): return c.nation == nation).size()
@@ -52,4 +48,4 @@ func refresh(nation: int, turn: int, hex_map: HexMap, economy: NationEconomy) ->
 	label.text = "\n".join(lines)
 	swatch.color = MapView.nation_color(_pal, nation)
 	panel.size = label.get_minimum_size() + Vector2(30, 12)
-	panel.position = Vector2(1040 - panel.size.x - 8, 40)
+	panel.position = Vector2(get_viewport().get_visible_rect().size.x - SIDE_WIDTH - panel.size.x - 8, 40)

@@ -1,5 +1,6 @@
 class_name MilitaryPanel
 extends CanvasLayer
+
 ## Player's divisions and pending recruits. Toggled with M. Placed below the nation panel.
 
 var panel := Panel.new()
@@ -7,7 +8,7 @@ var label := Label.new()
 var swatch := MapView.make_swatch()
 var _pal: Dictionary = MapView.load_palette()
 var max_fortify := 3
-
+const SIDE_WIDTH := 240.0
 
 func _init() -> void:
 	label.position = Vector2(22, 6)
@@ -17,10 +18,8 @@ func _init() -> void:
 	add_child(panel)
 	panel.visible = false
 
-
 func toggle() -> void:
 	panel.visible = not panel.visible
-
 
 func refresh(nation: int, roster: DivisionRoster, economy: NationEconomy, top: float) -> void:
 	var lines: Array[String] = ["%s - Military (M to close)" % MapView.nation_name(_pal, nation, nation)]
@@ -45,4 +44,5 @@ func refresh(nation: int, roster: DivisionRoster, economy: NationEconomy, top: f
 	label.text = "\n".join(lines)
 	swatch.color = MapView.nation_color(_pal, nation)
 	panel.size = label.get_minimum_size() + Vector2(30, 12)
-	panel.position = Vector2(1040 - panel.size.x - 8, top)
+	var viewport_width := get_viewport().get_visible_rect().size.x
+	panel.position = Vector2(viewport_width - SIDE_WIDTH - panel.size.x - 8, top)

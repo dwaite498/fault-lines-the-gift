@@ -1,5 +1,6 @@
 class_name UnitPanel
 extends CanvasLayer
+
 ## Simple on-screen info panel for the selected division. Hidden when nothing is selected.
 
 signal action_pressed(action: String)
@@ -32,11 +33,8 @@ var economy: NationEconomy
 ## Map from the last refresh(); projected_recovery() uses it for income.
 var _map: HexMap
 
-
 func _init() -> void:
 	# Right side panel, 240 wide, full height under the 32px top bar.
-	panel.position = Vector2(1280 - WIDTH, 32)
-	panel.size = Vector2(WIDTH, 720 - 32)
 	add_child(panel)
 	var col := VBoxContainer.new()
 	col.position = Vector2(8, 8)
@@ -69,6 +67,14 @@ func _init() -> void:
 		_box.add_child(b)
 		buttons[a] = b
 
+func _ready() -> void:
+	_layout()
+	get_viewport().size_changed.connect(_layout)
+
+func _layout() -> void:
+	var vs := get_viewport().get_visible_rect().size
+	panel.position = Vector2(vs.x - WIDTH, 32)
+	panel.size = Vector2(WIDTH, vs.y - 32)
 
 ## Shows d's current stats, or hides the panel when d is null.
 func refresh(d: Division, hex_map: HexMap, actions: Array[String] = [], mode := "") -> void:
@@ -114,14 +120,12 @@ func refresh(d: Division, hex_map: HexMap, actions: Array[String] = [], mode := 
 	o.append("Tab: next unit without orders")
 	orders.text = "\n".join(o)
 
-
 func _header(text: String) -> Label:
 	var h := Label.new()
 	h.text = text.to_upper()
 	h.add_theme_font_size_override("font_size", 13)
 	h.add_theme_color_override("font_color", Color.html(_pal.ui.accent))
 	return h
-
 
 func _draw_bars() -> void:
 	if _shown == null:
@@ -177,7 +181,6 @@ func projected_recovery(d: Division, with_growth := true) -> Dictionary:
 			strength = gain
 			break
 	return {"org": org, "strength": strength}
-
 
 func _turns_text(n: int) -> String:
 	return ", %d turn%s" % [n, "" if n == 1 else "s"]
