@@ -61,4 +61,4 @@ Replaces Art Spec v1 (Cold War paper map). Archive v1 as docs/art/ART_SPEC_v1.md
 4. **Data:** add a per-tile `elevation` to the map data, and add `iso: {tile_w: 96, tile_h: 48, step: 10, min_elev: -3, max_elev: 4, skirt_dark: [0.35, 0.20]}`, `factions[10]`, `ui{}`, and the new terrain keys to art_palette.json.
 5. **Rough size:** 3 to 4 PRs: (a) projection, elevation, skirts, and picking; (b) palette, terrain looks, and coast; (c) bases and unit standees on iso; (d) the datalink UI theme.
 
-**Needs David's eyes:** the 2:1 squash and 12px step feel, whether the fungal pink reads as alien and not candy, and whether 10 faction colors are distinguishable on rust.
+**Needs David's eyes:** the 2:1 squash and 10px step feel, whether the fungal pink reads as alien and not candy, and whether 10 faction colors are distinguishable on rust.

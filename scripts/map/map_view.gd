@@ -282,9 +282,10 @@ func _draw_city(city: Dictionary) -> void:
 
 
 ## The cell under a position (same space as before the view scale: parent/screen),
-## or Vector2i(-1, -1). Tests raised top faces front-most first (later rows, then higher
-## elevation), because a tall tile covers the one behind it. A click on a skirt falls
-## back to the tile that owns that skirt.
+## or Vector2i(-1, -1). Matches the draw order: rows from front to back, and within a
+## row the raised top faces (drawn last, higher elevation first) before that row's
+## skirts. A tall tile therefore covers what is behind it, and a click on a front
+## tile's skirt picks that tile rather than a higher tile behind.
 func pixel_to_hex(pos: Vector2) -> Vector2i:
 	var p := to_local(pos)
 	for y in range(hex_map.height - 1, -1, -1):
@@ -296,8 +297,7 @@ func pixel_to_hex(pos: Vector2) -> Vector2i:
 					best = cell
 		if best.x >= 0:
 			return best
-	for y in range(hex_map.height - 1, -1, -1):
-		for x in hex_map.width:
+		for x in range(hex_map.width - 1, -1, -1):
 			var cell := Vector2i(x, y)
 			if not hex_map.cells.has(cell):
 				continue
