@@ -7,7 +7,7 @@
 		"clamp_order": ["growth", "infrastructure", "training"],
 		"training_labor_cost": 15,
 		"infra_labor_per_level": 10,
-		"recruit_auto_training_share": 1.0
+		"recruit_auto_training_share": 0.5
 	},
 	"manpower_per_person": 0.00008,
 	"capacity_per_infra": 0.5,

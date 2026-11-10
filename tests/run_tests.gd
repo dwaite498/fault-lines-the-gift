@@ -587,8 +587,8 @@ func test_labor_sinks() -> void:
 	var e3: NationEconomy = s3.eco
 	s3.city.labor = {"training": 0, "infrastructure": 1, "growth": 2}
 	e3.recruit(s3.city, 0, s3.roster)
-	ok(s3.city.labor == {"training": 4, "infrastructure": 1, "growth": 0}, "queueing a recruit puts the free labor on Training (5 points: 4 Training, 1 Infrastructure kept)")
-	for i in 5:
+	ok(s3.city.labor == {"training": 2, "infrastructure": 1, "growth": 2}, "queueing a recruit moves half the labor to Training (5 points: floor(2.5) = 2 Training; Infrastructure 1 and Growth 2 kept)")
+	for i in 9:
 		e3.spawn_pending(s3.map, s3.roster)
 	ok(s3.roster.divisions.size() == 1 and s3.city.labor.training == 0 and s3.city.labor.growth == 2 and s3.city.labor.infrastructure == 1, "when the queue clears the default Growth returns and Training goes back to 0")
 	var s4 := sink_setup(0, 0)
@@ -597,7 +597,7 @@ func test_labor_sinks() -> void:
 	s4.eco.adjust_labor(s4.city, "training", -1)
 	for i in 5:
 		s4.eco.spawn_pending(s4.map, s4.roster)
-	ok(s4.city.labor.training == 4, "a manual change keeps the player's assignment after the queue clears (no auto reset)")
+	ok(s4.city.labor.training == 1, "a manual change keeps the player's assignment after the queue clears (no auto reset)")
 	# The AI path: run_ai queues, auto-training feeds it, and a division arrives with no player input.
 	var s5 := sink_setup(0, 0)
 	var e5: NationEconomy = s5.eco
@@ -605,7 +605,7 @@ func test_labor_sinks() -> void:
 	e5.stocks[ai_city.nation].manpower = 100.0
 	e5.stocks[ai_city.nation].capacity = 100.0
 	e5.recruit(ai_city, ai_city.nation, s5.roster)
-	for i in 6:
+	for i in 9:
 		e5.spawn_pending(s5.map, s5.roster)
 	ok(s5.roster.divisions.any(func(d: Division) -> bool: return d.nation == ai_city.nation), "an AI city's recruit completes through its default Training labor")
 	# Infrastructure: 10 labor-turns = +1 infra = +3,000 housing; leftover carries over.
@@ -645,3 +645,12 @@ func test_labor_sinks() -> void:
 	s10.city.labor = {"training": 2, "infrastructure": 3, "growth": 0}
 	s10.eco.end_turn(s10.map, s10.roster)
 	ok(s10.eco.pending[s10.city.id].labor == 2 and s10.city.infra_progress == 3, "end_turn feeds the training queue and infrastructure progress")
+	# A recruiting capital keeps cash and growth: with the 0.5 share, 5 labor points
+	# split 2 Training, 2 Growth, 1 unassigned.
+	var s11 := sink_setup(0, 0)
+	s11.city.erase("labor")
+	s11.eco.ensure_labor(s11.city)
+	s11.eco.recruit(s11.city, 0, s11.roster)
+	ok(s11.city.labor == {"training": 2, "infrastructure": 0, "growth": 2}, "a recruiting 10,000 capital: 2 Training, 2 Growth")
+	ok(s11.eco.unassigned_labor(s11.city) == 1 and s11.eco.city_income(s11.city).cash > 0.0, "a recruiting 10,000 capital still earns cash (1 free labor point)")
+	ok(s11.map.growth_amount(s11.city) > 0, "a recruiting capital still grows")
