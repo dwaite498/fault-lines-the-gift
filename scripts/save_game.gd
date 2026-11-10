@@ -46,6 +46,7 @@ static func capture(hex_map: HexMap, roster: DivisionRoster, economy: NationEcon
 			"coastal_nations": hex_map.coastal_nations.duplicate(), "growth_mods": hex_map.growth_mods.duplicate(),
 			"seed_value": hex_map.seed_value, "width": hex_map.width, "height": hex_map.height,
 			"reputation": hex_map.reputation.events.duplicate(true),
+			"plunder_last_turn": hex_map.plunder_last_turn.duplicate(),
 		},
 		"roster": {
 			"divisions": divs, "neutral_nations": roster.neutral_nations.duplicate(),
@@ -56,6 +57,7 @@ static func capture(hex_map: HexMap, roster: DivisionRoster, economy: NationEcon
 			"stocks": economy.stocks.duplicate(true), "pending": economy.pending.duplicate(true),
 			"upkeep_paid": economy.upkeep_paid.duplicate(), "unpaid_divisions": economy.unpaid_divisions.duplicate(true),
 			"pows": economy.pows.duplicate(true), "reinforce_spent": economy.reinforce_spent.duplicate(),
+			"rush_spent": economy.rush_spent.duplicate(),
 		},
 		"extras": extras.duplicate(true),
 	}
@@ -76,6 +78,8 @@ static func restore(state: Dictionary, hex_map: HexMap, roster: DivisionRoster, 
 	hex_map.nations.assign(m.nations)
 	hex_map.coastal_nations.assign(m.coastal_nations)
 	hex_map.reputation.events.assign(m.reputation.duplicate(true))
+	hex_map.plunder_last_turn = m.plunder_last_turn.duplicate()
+	hex_map.current_turn = int(state.turn)
 	var r: Dictionary = state.roster
 	roster.divisions.clear()
 	for saved in r.divisions:
@@ -99,6 +103,7 @@ static func restore(state: Dictionary, hex_map: HexMap, roster: DivisionRoster, 
 	economy.unpaid_divisions = e.unpaid_divisions.duplicate(true)
 	economy.pows = e.pows.duplicate(true)
 	economy.reinforce_spent = e.reinforce_spent.duplicate()
+	economy.rush_spent = e.rush_spent.duplicate()
 	return int(state.turn)
 
 

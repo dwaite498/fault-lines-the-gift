@@ -20,6 +20,8 @@ var neutral_nations: Array[int] = []
 ## Fog of war (Fog), or null for none. A nation the fog filters (the player) cannot order an
 ## attack on, or list as a target, a unit on a tile it cannot see.
 var fog: Fog = null
+## Faction trait modifiers (HexMap.traits), or null for none. main.gd and tests set it.
+var traits: FactionTraits = null
 ## Cities taken this turn that still await a capture choice: the result of
 ## HexMap.take_city, in capture order. Resolved by resolve_ai_captures and the popup.
 var pending_captures: Array[Dictionary] = []
@@ -44,6 +46,7 @@ func spawn_at_cities(hex_map: HexMap, template_name := "infantry") -> void:
 		var d := Division.from_template(divisions.size(), city.nation,
 				city.cell, templates[template_name])
 		d.home_city_id = int(hex_map.capital_of(city.nation).get("id", city.id))
+		_apply_spawn_traits(d)
 		divisions.append(d)
 
 
@@ -86,8 +89,31 @@ func found_city(d: Division, hex_map: HexMap) -> Dictionary:
 
 
 ## Upkeep per turn of d's division type, e.g. {"cash": 3} (divisions_config upkeep).
+## A faction's upkeep_extra trait adds that much cash to every division except colony pods.
 func upkeep_of(d: Division) -> Dictionary:
-	return templates.get(d.unit_type, {}).get("upkeep", {})
+	var base: Dictionary = templates.get(d.unit_type, {}).get("upkeep", {})
+	if traits == null or is_colonizer(d):
+		return base
+	var extra := float(traits.mod(d.nation, "upkeep_extra", 0.0))
+	if extra == 0.0:
+		return base
+	var out := base.duplicate()
+	out["cash"] = float(out.get("cash", 0.0)) + extra
+	return out
+
+
+## Spawn-time faction traits: max_org_mult (org and max org), and for naval divisions
+## naval_strength_mult and naval_move_bonus.
+func _apply_spawn_traits(d: Division) -> void:
+	if traits == null:
+		return
+	d.max_org *= float(traits.mod(d.nation, "max_org_mult", 1.0))
+	d.org = d.max_org
+	if d.unit_type == "naval":
+		d.strength *= float(traits.mod(d.nation, "naval_strength_mult", 1.0))
+		d.max_strength = d.strength
+		d.move += int(traits.mod(d.nation, "naval_move_bonus", 0))
+		d.moves_left = d.move
 
 
 ## Adds one new division of template_name on hex with a fresh id. A new division is always
@@ -104,6 +130,7 @@ func spawn_division(nation: int, hex: Vector2i, template_name := "infantry",
 		next_id = maxi(next_id, d.id + 1)
 	var d := Division.from_template(next_id, nation, hex, templates[template_name])
 	d.home_city_id = home_city_id
+	_apply_spawn_traits(d)
 	divisions.append(d)
 	return d
 
@@ -145,14 +172,14 @@ func can_move(d: Division, hex: Vector2i, hex_map: HexMap) -> bool:
 		return false  # a pod or scout cannot capture a city
 	if not hex_map.can_step(d.hex, hex):
 		return false
-	return d.moves_left >= hex_map.step_cost(d.hex, hex) or not d.has_moved
+	return d.moves_left >= hex_map.step_cost(d.hex, hex, d.nation) or not d.has_moved
 
 
 ## Moves d one hex; moving onto an enemy city captures it.
 func try_move(d: Division, hex: Vector2i, hex_map: HexMap) -> bool:
 	if not can_move(d, hex, hex_map):
 		return false
-	var cost := hex_map.step_cost(d.hex, hex)
+	var cost := hex_map.step_cost(d.hex, hex, d.nation)
 	d.hex = hex
 	d.moves_left = maxi(d.moves_left - cost, 0)
 	d.has_moved = true
@@ -160,12 +187,41 @@ func try_move(d: Division, hex: Vector2i, hex_map: HexMap) -> bool:
 	var city := hex_map.city_at(hex)
 	if not city.is_empty() and city.nation != d.nation:
 		var taken := hex_map.take_city(hex, d.nation)
+		_lose_org_on_city_lost(int(taken.victim))
 		var eliminated: Array[int] = []
 		eliminated.assign(taken.eliminated)
 		surrender(eliminated, d.nation)
 		pending_captures.append(taken)
 		print("Nation %d captured a city at %s; eliminated: %s" % [d.nation, hex, eliminated])
 	return true
+
+
+## Covenant trait org_on_city_lost: every division of the nation that lost a city loses that
+## much organization (not below 0).
+func _lose_org_on_city_lost(nation: int) -> void:
+	if traits == null:
+		return
+	var loss := float(traits.mod(nation, "org_on_city_lost", 0.0))
+	if loss <= 0.0:
+		return
+	for d in divisions:
+		if d.nation == nation:
+			d.org = maxf(d.org - loss, 0.0)
+
+
+## Free Tide trait naval_capture_undefended_coastal: a naval division may take an adjacent
+## undefended enemy coastal city. (Naval divisions cannot move yet; this is the rule for the
+## naval slice to call.)
+func naval_can_capture(d: Division, cell: Vector2i, hex_map: HexMap) -> bool:
+	if traits == null or d.unit_type != "naval" or not bool(traits.mod(d.nation, "naval_capture_undefended_coastal", false)):
+		return false
+	var city := hex_map.city_at(cell)
+	if city.is_empty() or city.nation == d.nation or division_at(cell) != null or not cell in hex_map.neighbors(d.hex):
+		return false
+	for n in hex_map.neighbors(cell):
+		if hex_map.cells.get(n, HexMap.UNCLAIMED) == HexMap.WATER:
+			return true
+	return false
 
 
 ## Every division of the given (eliminated) nations surrenders to captor as POWs, then is
@@ -193,7 +249,7 @@ func apply_capture(city_id: int, option: String, hex_map: HexMap) -> Dictionary:
 func resolve_ai_captures(hex_map: HexMap, player_nation: int) -> void:
 	for info in pending_captures.duplicate():
 		if info.captor != player_nation:
-			apply_capture(int(info.city_id), hex_map.ai_capture_option(int(info.captor), rng), hex_map)
+			apply_capture(int(info.city_id), hex_map.ai_capture_option(int(info.captor), rng, int(info.city_id)), hex_map)
 	for city in hex_map.cities:
 		if city.nation != player_nation and hex_map.can_annex_occupied(city):
 			hex_map.annex_occupied(int(city.id))
@@ -206,10 +262,24 @@ func disband(nations: Array[int]) -> void:
 
 # --- Fortify ---
 
+## Highest fortify level d can reach: combat.max_fortify plus the faction's max_fortify_mod.
+func max_fortify_for(d: Division) -> int:
+	var mod := int(traits.mod(d.nation, "max_fortify_mod", 0)) if traits != null else 0
+	return maxi(int(combat.max_fortify) + mod, 0)
+
+
+## One more fortify level per turn, or enough levels to reach the max in the faction's
+## fortify_turns_to_max turns (Directorate: 2).
 func fortify(d: Division) -> bool:
 	if is_colonizer(d) or d.moves_left <= 0 or d.has_moved:
 		return false
-	d.fortify_level = mini(d.fortify_level + 1, int(combat.max_fortify))
+	var top := max_fortify_for(d)
+	var step := 1
+	if traits != null:
+		var turns := int(traits.mod(d.nation, "fortify_turns_to_max", 0))
+		if turns > 0:
+			step = ceili(float(top) / float(turns))
+	d.fortify_level = mini(d.fortify_level + step, top)
 	d.moves_left = 0
 	return true
 
@@ -236,6 +306,8 @@ func flank_mult(d: Division) -> float:
 func defense_of(defender: Division, hex_map: HexMap) -> float:
 	var fort_mult: float = 1.0 + float(combat.fortify_bonus_per_level) * defender.fortify_level
 	var terrain_mult: float = hex_map.terrain_of(defender.hex).defense_mult
+	var terrain_traits: Dictionary = hex_map.traits.mod(defender.nation, "defense_mult_terrain", {})
+	terrain_mult *= float(terrain_traits.get(hex_map.terrain_name(defender.hex), 1.0))
 	var city_mult: float = float(combat.city_defense_mult) if not hex_map.city_at(defender.hex).is_empty() else 1.0
 	return defender.defense * terrain_mult * fort_mult * city_mult * flank_mult(defender)
 
@@ -250,6 +322,16 @@ func elevation_attack_mult(attacker_hex: Vector2i, defender_hex: Vector2i, hex_m
 	var levels := maxi(hex_map.elevation_of(defender_hex) - hex_map.elevation_of(attacker_hex), 0)
 	var penalty := minf(float(combat.uphill_attack_per_level) * levels, float(combat.uphill_attack_cap))
 	return 1.0 - penalty
+
+
+## d's attack with its faction's attack_mult (and naval_attack_mult for naval divisions).
+func attack_of(d: Division) -> float:
+	if traits == null:
+		return d.attack
+	var mult := float(traits.mod(d.nation, "attack_mult", 1.0))
+	if d.unit_type == "naval":
+		mult *= float(traits.mod(d.nation, "naval_attack_mult", 1.0))
+	return d.attack * mult
 
 
 ## Damage one side deals: base_dmg * (attack / other_defense) * rand(roll_min..roll_max).
@@ -270,9 +352,13 @@ func attack(attacker: Division, defender: Division, hex_map: HexMap) -> Dictiona
 	var def_defense := defense_of(defender, hex_map)
 	var atk_defense := attacker.defense
 	var uphill := elevation_attack_mult(attacker.hex, defender.hex, hex_map)
-	var dmg_to_defender := roll_damage(attacker.attack * uphill, def_defense)
-	var dmg_to_attacker := roll_damage(defender.attack, atk_defense)
-	var taken_by_defender := _damage(defender, dmg_to_defender)
+	var dmg_to_defender := roll_damage(attack_of(attacker) * uphill, def_defense)
+	var dmg_to_attacker := roll_damage(attack_of(defender), atk_defense)
+	var own_city := hex_map.city_at(defender.hex)
+	var org_div := 1.0
+	if traits != null and not own_city.is_empty() and own_city.nation == defender.nation:
+		org_div = float(traits.mod(defender.nation, "org_mult_defending_own_city", 1.0))
+	var taken_by_defender := _damage(defender, dmg_to_defender, org_div)
 	var taken_by_attacker := _damage(attacker, dmg_to_attacker)
 	attacker.moves_left = 0
 	attacker.fortify_level = 0
@@ -298,9 +384,11 @@ func _after_combat_or_defer(d: Division, hex_map: HexMap, captor: int) -> String
 
 ## Applies raw damage scaled by morale (* (morale_offset - morale)), split between
 ## org and strength. Returns the {"org", "strength"} amounts applied before clamping.
-func _damage(d: Division, raw: float) -> Dictionary:
+## org_div > 1 means the defender's organization counts for that much more (Covenant in its own
+## city), so it loses org_dmg / org_div.
+func _damage(d: Division, raw: float, org_div := 1.0) -> Dictionary:
 	var scaled: float = raw * maxf(float(combat.morale_offset) - d.morale, 0.0)
-	var org_dmg: float = scaled * float(combat.org_damage_share)
+	var org_dmg: float = scaled * float(combat.org_damage_share) / maxf(org_div, 0.0001)
 	var str_dmg: float = scaled * (1.0 - float(combat.org_damage_share))
 	d.org = maxf(d.org - org_dmg, 0.0)
 	d.strength = maxf(d.strength - str_dmg, 0.0)
@@ -476,7 +564,7 @@ func turn_split(d: Division, path: Array[Vector2i], hex_map: HexMap) -> Array[in
 	var steps := 0
 	var i := 0
 	while i < path.size():
-		var cost := hex_map.step_cost(path[i - 1] if i > 0 else d.hex, path[i])
+		var cost := hex_map.step_cost(path[i - 1] if i > 0 else d.hex, path[i], d.nation)
 		if moves <= 0 or (moves < cost and moved):
 			out.append(steps)
 			steps = 0
@@ -677,7 +765,7 @@ func execute_orders(hex_map: HexMap) -> void:
 func _friendly_swap(a: Division, b: Division, hex_map: HexMap) -> void:
 	var ha := a.hex
 	var hb := b.hex
-	var costs := {a: hex_map.step_cost(ha, hb), b: hex_map.step_cost(hb, ha)}
+	var costs := {a: hex_map.step_cost(ha, hb, a.nation), b: hex_map.step_cost(hb, ha, b.nation)}
 	a.hex = hb
 	b.hex = ha
 	for d in [a, b]:
@@ -712,8 +800,8 @@ func _meeting(a: Division, b: Division, terrain_a: Vector2i, terrain_b: Vector2i
 		hex_map: HexMap, where: String) -> int:
 	var ta: float = hex_map.terrain_of(terrain_a).defense_mult
 	var tb: float = hex_map.terrain_of(terrain_b).defense_mult
-	var to_b := roll_damage(a.attack, b.defense * tb)
-	var to_a := roll_damage(b.attack, a.defense * ta)
+	var to_b := roll_damage(attack_of(a), b.defense * tb)
+	var to_a := roll_damage(attack_of(b), a.defense * ta)
 	_damage(b, to_b)
 	_damage(a, to_a)
 	a.in_combat = true
@@ -822,6 +910,10 @@ func _ai_colonizer(d: Division, hex_map: HexMap) -> void:
 ## d's nation owns within supply_max_path steps (d's own hex is step 0).
 func is_in_supply(d: Division, hex_map: HexMap) -> bool:
 	var max_steps := int(combat.supply_max_path)
+	if traits != null:
+		max_steps += int(traits.mod(d.nation, "supply_range_bonus", 0))
+		if d.unit_type == "naval":
+			max_steps += int(traits.mod(d.nation, "sea_supply_range_bonus", 0))
 	var seen := {d.hex: 0}
 	var queue: Array[Vector2i] = [d.hex]
 	while not queue.is_empty():
@@ -863,7 +955,10 @@ func end_turn(hex_map: HexMap = null) -> void:
 		if not d.supplied:
 			d.org = maxf(d.org - float(combat.out_of_supply_org_drain), 0.0)
 		elif not d.in_combat:
-			d.org = minf(d.org + d.morale * rate, d.max_org)
+			var regen := d.morale * rate
+			if hex_map and traits != null and hex_map.cells.get(d.hex, HexMap.UNCLAIMED) == d.nation:
+				regen += float(traits.mod(d.nation, "home_org_regen_bonus", 0.0))  # on its own territory
+			d.org = minf(d.org + regen, d.max_org)
 		d.fought_this_turn = d.in_combat
 		d.in_combat = false
 		d.attacked_from.clear()
