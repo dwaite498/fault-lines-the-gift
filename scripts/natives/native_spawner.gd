@@ -55,6 +55,23 @@ static func run(hex_map: HexMap, roster: DivisionRoster, turn: int) -> Array[Div
 				if not near.is_empty():
 					cell = near[roster.rng.randi_range(0, near.size() - 1)]
 			out.append(_spawn("tendril_worm", cell, roster, pressure))
+	# Crag Harriers: each mountain tile with no unit within no_unit_radius; that tile is the nest.
+	var harrier: Dictionary = sp.get("harrier", {})
+	if not harrier.is_empty():
+		var mountains: Array[Vector2i] = []
+		for c in hex_map.cells:
+			if hex_map.terrain_name(c) == "mountains":
+				mountains.append(c)
+		mountains.sort()
+		for mc in mountains:
+			if count(roster) >= cap:
+				break
+			if not _free(mc, hex_map, roster, turn) or _unit_within(mc, int(harrier.no_unit_radius), roster):
+				continue
+			if roster.rng.randf() < minf(float(harrier.chance) * chance_mult, 1.0):
+				var h := _spawn("crag_harrier", mc, roster, pressure)
+				h.nest = mc
+				out.append(h)
 	# Striders: one random plains tile far from every city, with a chance per turn.
 	if count(roster) < cap:
 		var cell := _strider_tile(hex_map, roster, turn, int(sp.strider.min_city_distance))

@@ -48,7 +48,10 @@ func is_native(d: Division) -> bool:
 
 ## True if a native may stand on `hex`: its template's habitat ("fungus" or terrain names).
 func native_habitat_ok(d: Division, hex: Vector2i, hex_map: HexMap) -> bool:
-	for h in templates.get(d.unit_type, {}).get("habitat", []):
+	var tpl: Dictionary = templates.get(d.unit_type, {})
+	if tpl.has("nest_radius") and d.nest != Vector2i(-1, -1) and HexMap.hex_distance(hex, d.nest) > int(tpl.nest_radius):
+		return false  # a Crag Harrier stays within nest_radius of its nest
+	for h in tpl.get("habitat", []):
 		if (h == "fungus" and hex_map.is_fungus(hex)) or (h != "fungus" and hex_map.terrain_name(hex) == h):
 			return true
 	return false
@@ -195,14 +198,30 @@ func can_move(d: Division, hex: Vector2i, hex_map: HexMap) -> bool:
 		return false  # natives never enter a city and stay in their habitat
 	if not hex_map.can_step(d.hex, hex):
 		return false
-	return d.moves_left >= hex_map.step_cost(d.hex, hex, d.nation) or not d.has_moved
+	return d.moves_left >= step_cost_for(d, d.hex, hex, hex_map) or not d.has_moved
+
+
+## Move cost for d to step from -> to: the map's step cost, except a template with
+## "ignores_terrain_cost" (Crag Harrier) always pays 1; and a non-native leaving a hex next to a native
+## with "zoc_leave_extra" (the Harrier's pass hold) pays that much more.
+func step_cost_for(d: Division, from: Vector2i, to: Vector2i, hex_map: HexMap) -> int:
+	if templates.get(d.unit_type, {}).get("ignores_terrain_cost", false):
+		return 1
+	var cost := hex_map.step_cost(from, to, d.nation)
+	if not is_native(d):
+		for o in divisions:
+			var extra := int(templates.get(o.unit_type, {}).get("zoc_leave_extra", 0))
+			if extra > 0 and is_native(o) and HexMap.hex_distance(from, o.hex) == 1:
+				cost += extra
+				break
+	return cost
 
 
 ## Moves d one hex; moving onto an enemy city captures it.
 func try_move(d: Division, hex: Vector2i, hex_map: HexMap) -> bool:
 	if not can_move(d, hex, hex_map):
 		return false
-	var cost := hex_map.step_cost(d.hex, hex, d.nation)
+	var cost := step_cost_for(d, d.hex, hex, hex_map)
 	d.hex = hex
 	d.moves_left = maxi(d.moves_left - cost, 0)
 	d.has_moved = true
@@ -438,6 +457,9 @@ func attack(attacker: Division, defender: Division, hex_map: HexMap) -> Dictiona
 		org_div = float(traits.mod(defender.nation, "org_mult_defending_own_city", 1.0))
 	if hex_map.is_fungus(attacker.hex):  # Tendril Worm ambush: bonus when it attacks out of fungus
 		dmg_to_defender *= float(templates.get(attacker.unit_type, {}).get("ambush_attack_mult", 1.0))
+	# Crag Harrier dive: bonus against a defender that moved this turn (fortified or stationary units are safe).
+	if defender.has_moved and defender.fortify_level == 0:
+		dmg_to_defender *= float(templates.get(attacker.unit_type, {}).get("dive_attack_mult", 1.0))
 	var org_only: bool = templates.get(attacker.unit_type, {}).get("city_org_only", false) and not own_city.is_empty()
 	var taken_by_defender := _damage(defender, dmg_to_defender, org_div, org_only)
 	var taken_by_attacker := _damage(attacker, dmg_to_attacker)
@@ -654,7 +676,7 @@ func turn_split(d: Division, path: Array[Vector2i], hex_map: HexMap) -> Array[in
 	var steps := 0
 	var i := 0
 	while i < path.size():
-		var cost := hex_map.step_cost(path[i - 1] if i > 0 else d.hex, path[i], d.nation)
+		var cost := step_cost_for(d, path[i - 1] if i > 0 else d.hex, path[i], hex_map)
 		if moves <= 0 or (moves < cost and moved):
 			out.append(steps)
 			steps = 0
