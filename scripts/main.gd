@@ -5,7 +5,7 @@ extends Node2D
 ## order). F fortifies. Space ends the turn and executes all orders (AI orders are
 ## issued at the start of each turn, before yours). With your city panel open, R recruits infantry. M toggles the military panel. Debug: D removes the newest city.
 
-const GAME_TITLE := "Fault Lines: The Gift"
+const GAME_TITLE := "Fault Lines: Planetfall"
 const MAP_CONFIG_PATH := "res://data/map_config.json"
 ## The human player's nation for now.
 const PLAYER_NATION := 0
