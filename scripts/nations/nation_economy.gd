@@ -398,13 +398,38 @@ func division_count(nation: int, roster: DivisionRoster) -> int:
 	return count
 
 
+## Cash per turn a nation's cities make (the same city_income the economy collects).
+func cash_income(nation: int, hex_map: HexMap) -> float:
+	var total := 0.0
+	for city in hex_map.cities:
+		if city.nation == nation:
+			total += float(city_income(city).cash)
+	return total
+
+
+## Cash upkeep per turn of the nation's fielded divisions plus its queued recruits (each at
+## the recruit template's upkeep), plus `extra_recruits` more of them.
+func projected_cash_upkeep(nation: int, roster: DivisionRoster, extra_recruits := 0) -> float:
+	var total: float = float(upkeep_due(nation, roster).get("cash", 0.0))
+	var each := float(roster.templates.get(config.recruit_template, {}).get("upkeep", {}).get("cash", 0.0))
+	var queued := 0
+	for id in pending:
+		if pending[id].nation == nation:
+			queued += 1
+	return total + each * (queued + extra_recruits)
+
+
 ## Each AI city that can recruit does so with ai_recruit_chance, using roster.rng,
-## while the nation has fewer than ai_max_divisions (fielded plus in training).
+## while the nation has fewer than ai_max_divisions (fielded plus in training) and the
+## upkeep after the new division (fielded, queued and the new one) would not exceed
+## its per-turn cash income.
 func run_ai(player_nation: int, hex_map: HexMap, roster: DivisionRoster) -> void:
 	for city in hex_map.cities:
 		if city.nation == player_nation or recruit_block_reason(city, city.nation, roster) != "":
 			continue
 		if division_count(city.nation, roster) >= int(config.ai_max_divisions):
+			continue
+		if projected_cash_upkeep(city.nation, roster, 1) > cash_income(city.nation, hex_map):
 			continue
 		if roster.rng.randf() < float(config.ai_recruit_chance):
 			recruit(city, city.nation, roster)

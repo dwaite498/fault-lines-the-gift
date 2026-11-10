@@ -35,6 +35,7 @@ func _initialize() -> void:
 	test_siege_capture_ai()
 	test_stalled_recruit()
 	test_pillars_rules()
+	test_ai_upkeep_cap()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -1136,3 +1137,33 @@ func test_pillars_rules() -> void:
 	# QA nit: the main.gd header names the real keys.
 	var header := FileAccess.get_file_as_string("res://scripts/main.gd").substr(0, 900)
 	ok(header.contains("N toggles the military panel") and header.contains("K removes the newest city") and not header.contains("D removes"), "main.gd header comment names N and K (not M and D)")
+
+
+func test_ai_upkeep_cap() -> void:
+	var a := pool_setup()
+	var m: HexMap = a.map
+	var eco: NationEconomy = a.eco
+	var roster: DivisionRoster = a.roster
+	eco.config.ai_recruit_chance = 1.0
+	var nation: int = m.nations.filter(func(n: int) -> bool: return n != 0)[0]
+	for n in m.nations:
+		eco.stocks[n].capacity = 100.0
+	var cap := m.capital_of(nation)
+	var income := eco.cash_income(nation, m)
+	var fielded: int = roster.divisions.filter(func(d: Division) -> bool: return d.nation == nation).size()
+	ok(income == 6.0 and fielded == 2 and eco.projected_cash_upkeep(nation, roster) == 6.0, "setup: the AI nation makes 6 cash and its 2 divisions cost 6")
+	# Free the capital hex so only upkeep can stop the recruit.
+	roster.divisions.assign(roster.divisions.filter(func(d: Division) -> bool: return d.hex != cap.cell))
+	ok(eco.projected_cash_upkeep(nation, roster, 1) == 6.0 and eco.projected_cash_upkeep(nation, roster, 1) <= income, "with 1 division left, a new one brings upkeep to exactly the income: allowed")
+	eco.run_ai(0, m, roster)
+	ok(eco.pending.has(cap.id), "the AI recruits when projected upkeep equals its income")
+	cap.pool = 1000
+	eco.pending.erase(cap.id)
+	var other: Dictionary = m.cities.filter(func(c: Dictionary) -> bool: return c.nation == nation and c.id != cap.id)[0]
+	eco.pending[other.id] = {"nation": nation, "turns_left": 3, "labor": 0, "cost": 15}
+	other.pool = 0
+	ok(eco.projected_cash_upkeep(nation, roster) == 6.0 and eco.projected_cash_upkeep(nation, roster, 1) == 9.0, "queued recruits count toward projected upkeep (1 fielded + 1 queued = 6, +1 new = 9)")
+	cap.pool = 1000
+	cap.population = 10000
+	eco.run_ai(0, m, roster)
+	ok(not eco.pending.has(cap.id), "the AI queues no recruit when upkeep after it (9) would exceed its income (6)")
