@@ -40,6 +40,9 @@ func refresh(nation: int, turn: int, hex_map: HexMap, economy: NationEconomy) ->
 	var stock: Dictionary = economy.stocks.get(nation, {})
 	for r in NationEconomy.RESOURCES:
 		lines.append("%s: %.1f (+%.1f/turn)" % [r.capitalize(), float(stock.get(r, 0.0)), income[r]])
+	var labor := economy.labor_totals(nation, hex_map)
+	lines.append("Labor: %d (%d free)" % [labor.total, labor.free])
+	lines.append("  Training %d, Infrastructure %d, Growth %d" % [labor.training, labor.infrastructure, labor.growth])
 	lines.append("POWs held: %d" % roundi(economy.pows_held(nation)))
 	lines.append("POWs lost: %d" % roundi(economy.pows_lost(nation)))
 	if city_count == 0:

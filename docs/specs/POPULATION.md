@@ -11,7 +11,7 @@
   1. Training feeds the city's recruit queue. A division costs 15 labor-turns and takes at least 3 turns [DEFAULT].
   2. Infrastructure: 10 labor-turns = +1 infra (+3,000 housing). It also rebuilds capture damage.
   3. Growth: +0.5% growth per point.
-- New and AI cities default to all-Growth until a recruit is queued [DEFAULT].
+- New and AI cities default to all-Growth until a recruit is queued [DEFAULT]. **Deviation (PM, for playtesting cash flow): the default is 50% of labor points on Growth, rounded down, with the rest left unassigned (so it makes cash) and Training and Infrastructure at 0. The share is `labor.default_growth_share` in `data/resources_config.json`. The player can reassign freely.**
 - Labor replaces the capacity resource for city production. Division upkeep becomes cash only, at 3 cash per division [DEFAULT]. Keep the `capacity` name reserved for later orbital use.
 
 ## Recruitable pool (replaces the nation-wide manpower pool)
@@ -33,6 +33,11 @@
 ## UI
 - City panel: 'Pop 12,400 / 30,000 housing', 'Labor 6 (1 free)', 'Recruitable 1,000', then 3 rows (Training, Infrastructure, Growth), each with -/+ buttons and progress toward its next result, such as 'Division 9/15, 2 turns left'.
 - Nation panel: total labor and its split, plus total recruitable.
+
+## Current behavior (implementation notes)
+- Default labor split: 50% of labor points on Growth, rounded down (see the deviation above). A 10,000-person capital has 5 labor points: 2 on Growth, 3 unassigned, 3 cash.
+- A city over its housing cap (for example after capture costs it infrastructure) holds its population: it neither grows nor shrinks. Balance for this comes later.
+- When population drops, assigned labor is trimmed to the new labor points, taking Growth first, then Infrastructure, then Training (`labor.clamp_order`).
 
 ## Out of scope
 Tech, happiness and unrest effects, trade, specialists, and food as a separate resource.
