@@ -279,15 +279,13 @@ static func nation_color(pal: Dictionary, nation: int) -> Color:
 	return Color.html(nations[nation % nations.size()])
 
 
-## Placeholder name from the nation's palette color, e.g. "Red Nation". The player
-## keeps its own name. Past the palette size a number keeps names unique.
-static func nation_name(pal: Dictionary, nation: int, player: int) -> String:
-	if nation == player:
-		return str(pal.player_name)
+## Nation name from the palette's nation_names, by index. Past the list a number keeps
+## names unique. (Task 32 replaces this with factions.json.)
+static func nation_name(pal: Dictionary, nation: int, _player: int) -> String:
 	if nation < 0:
 		return "Neutral"
 	var names: Array = pal.nation_names
-	var n := "%s Nation" % names[nation % names.size()]
+	var n: String = names[nation % names.size()]
 	if nation >= names.size():
 		n += " %d" % (nation / names.size() + 1)
 	return n
