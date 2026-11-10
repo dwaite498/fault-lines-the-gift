@@ -1,6 +1,5 @@
 {
-	"start_stock": {"cash": 0, "influence": 0, "operations": 0, "manpower": 0, "capacity": 0},
-	"people_per_labor_point": 2000,
+	"start_stock": {"cash": 0, "influence": 0, "operations": 0, "capacity": 0},
 	"cash_per_unassigned_labor": 1,
 	"labor": {
 		"default_growth_share": 0.5,
@@ -9,17 +8,15 @@
 		"infra_labor_per_level": 10,
 		"recruit_auto_training_share": 0.5
 	},
-	"manpower_per_person": 0.00008,
 	"capacity_per_infra": 0.5,
 	"influence_per_turn": 1,
 	"operations_per_turn": 1,
-	"recruit_cost": {"manpower": 20, "capacity": 15},
+	"recruit_cost": {"capacity": 15},
 	"recruit_template": "infantry",
 	"training_turns": 3,
 	"upkeep_per_division": {"cash": 2, "capacity": 1},
 	"unpaid_upkeep_org_loss": 5,
 	"reinforce_cap_per_turn": 10,
-	"reinforce_manpower_per_strength": 1,
 	"reinforce_mult": {"own": 1.0, "in_combat": 0.5, "neutral": 0.25, "enemy": 0.1},
 	"ai_recruit_chance": 0.3,
 	"ai_max_divisions": 6

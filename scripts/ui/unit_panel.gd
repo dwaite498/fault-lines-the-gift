@@ -144,10 +144,10 @@ func _draw_bars() -> void:
 
 ## Preview of d's org and strength change at the next end turn, using the same
 ## rules as DivisionRoster.end_turn (supply drain or morale recovery) and
-## NationEconomy.reinforce (cap, cost, pool shared in division id order).
-## The pool includes this turn's manpower income (collected before reinforcement;
-## upkeep costs no manpower). with_growth adds the city growth main.gd applies
-## before income. Uses d's current supply status and ignores unpaid-upkeep drain. Read-only.
+## NationEconomy.reinforce (cap, people cost, city pools shared in division id order).
+## The pools are next turn's (growth and fill applied, as main.gd does before
+## reinforcement) when with_growth is true. Uses d's current supply status and ignores
+## unpaid-upkeep drain. Read-only.
 func projected_recovery(d: Division, with_growth := true) -> Dictionary:
 	var c := roster.combat
 	var org := 0.0
@@ -155,31 +155,13 @@ func projected_recovery(d: Division, with_growth := true) -> Dictionary:
 		org = -minf(float(c.out_of_supply_org_drain), d.org)
 	elif not d.in_combat:
 		org = minf(d.morale * float(c.org_recovery_per_morale), d.max_org - d.org)
-	var cap := float(economy.config.reinforce_cap_per_turn)
-	var rate := float(economy.config.reinforce_manpower_per_strength)
-	var pool := float(economy.stocks.get(d.nation, {}).get("manpower", 0.0))
-	if _map and _map.nations.has(d.nation):
-		for city in _map.cities:
-			if city.nation != d.nation:
-				continue
-			var c2: Dictionary = city.duplicate()
-			if with_growth:
-				c2.population = _map.grown_population(city)
-			pool += float(economy.city_income(c2).manpower)
-	var order := roster.divisions.filter(func(x): return x.nation == d.nation)
-	order.sort_custom(func(a, b): return a.id < b.id)
 	var strength := 0.0
-	for x in order:
-		if not x.supplied or x.strength >= x.max_strength:
-			continue
-		var gain := minf(cap * economy.reinforce_mult(x, _map, x.in_combat), x.max_strength - x.strength)
-		if rate > 0.0:
-			gain = minf(gain, pool / rate)
-		gain = maxf(gain, 0.0)
-		pool -= gain * rate
-		if x == d:
-			strength = gain
-			break
+	if _map and _map.nations.has(d.nation):
+		var pools := {}
+		for city in _map.cities:
+			pools[city.id] = _map.pool_of(_map.advance_preview(city) if with_growth else city)
+		var plan := economy.reinforce_plan(roster, _map, pools, d.nation)
+		strength = float(plan.gains.get(d.id, 0.0))
 	return {"org": org, "strength": strength}
 
 func _turns_text(n: int) -> String:

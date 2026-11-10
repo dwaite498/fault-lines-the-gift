@@ -42,7 +42,7 @@ Open questions are marked **TBD**.
 - Selecting and orders (Task 26): a left-click only selects (a unit, else the city, else nothing); it never creates an order. The unit panel shows only the valid actions: Move (M), Attack (A), Dig in (D, fortify, replaces the order), Follow/Swap (F) and Cancel order (Esc). Move, Attack and Follow/Swap highlight their valid targets and the next click sets the order; the selection stays. Esc or a click elsewhere leaves the mode. Tab selects the next unit without an order. N toggles the military panel.
 - Orders: the Move action highlights every hex reachable along a free path, including ones beyond this turn's move points; the unit moves as far as its points allow each turn and keeps the rest of the order until it arrives (Task 25). The arrow is solid for this turn's part and dimmer for later turns; the panel shows "Order: move to X, N turns". A blocked step, clash or bounce ends the order where the unit stands, with a log note. An attack order targets an adjacent enemy. Right-click or Esc clears it. AI orders are issued at the start of each turn, before and without seeing the player's. End turn executes all orders by nation then division id using the normal move and attack rules. Player arrows whose this-turn endpoints are the same hex turn yellow as a possible clash. (Simultaneous resolution comes later.)
 - Supply: at end of turn, a division is in supply if a path of up to 8 passable hexes (no water, no hexes held by enemy divisions) reaches a city its nation owns. Out of supply (including encircled) divisions lose 10 org per turn (down to 0, no retreat) and recover no org or strength. Values are in `data/combat_config.json`.
-- Reinforcement: after income and upkeep, each in-supply division below its template strength regains up to 10 strength per turn, paying 1 manpower per point, in division id order until the pool runs out (never below 0). Out-of-supply divisions get nothing. Values are in `data/resources_config.json`.
+- Reinforcement: after income and upkeep, each in-supply division below its template strength regains up to 10 strength per turn, paying 10 people per point from its home city's recruit pool (then the nearest owned cities' pools; empty pools are skipped), in division id order until the pools run out. The people leave the city's population too. Out-of-supply divisions get nothing. Values are in `data/resources_config.json` and `data/cities_config.json`.
 - The attacker never moves in. A city is captured only by moving into it when it is empty.
 - Battles last several turns: an even fight takes 4 to 5 attacks to break a division's organization.
 - All numbers are in `data/combat_config.json`. Each division has an equipment_level (default 1), unused for now.
@@ -52,7 +52,7 @@ Open questions are marked **TBD**.
 
 - When a division surrenders, its remaining strength becomes POWs held by the captor (the nation that made the attack). Strength destroyed in combat does not become POWs.
 - Each nation tracks the POWs it holds, by owner nation. The player's nation panel shows POWs held and POWs lost.
-- POWs return to the owner's manpower pool on peace, or immediately if the captor joins the owner's side.
+- POWs return to the owner's capital population (10 people per strength point) on peace, or immediately if the captor joins the owner's side.
 - If a nation is eliminated, the POWs it holds and the POWs held from it stay recorded.
 - Later: POW exchanges, POWs as bargaining chips, and a mistreatment option.
 

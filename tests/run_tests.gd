@@ -30,6 +30,10 @@ func _initialize() -> void:
 	test_player_faction_warning()
 	test_labor()
 	test_labor_sinks()
+	test_growth_tuning()
+	test_recruit_pool()
+	test_siege_capture_ai()
+	test_stalled_recruit()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -410,13 +414,13 @@ func test_population() -> void:
 	# Housing cap = infrastructure x 3,000.
 	ok(m.housing_cap(capital) == 30000, "starting infra 10 gives a 30,000 housing cap")
 	ok(m.housing_cap({"infrastructure": 11.5}) == 34500 and m.housing_cap({"infrastructure": 0}) == 0, "housing cap scales with infra (11.5 -> 34,500, 0 -> 0)")
-	# Growth = 1% base + 0.5% per labor point assigned to Growth, capped at housing.
-	ok(is_equal_approx(m.growth_rate(capital), 0.01), "base growth is 1% a turn")
+	# Growth = (0.5% base + 1.0% x the share of labor on Growth) x terrain, capped at housing.
+	ok(is_equal_approx(m.growth_rate(capital), 0.005), "base growth is 0.5% a turn (no Growth labor)")
 	var with_labor := capital.duplicate()
 	with_labor.labor = {"growth": 3}
-	ok(is_equal_approx(m.growth_rate(with_labor), 0.025), "3 labor points on Growth give 2.5% (1% + 3 x 0.5%)")
-	ok(m.growth_amount(capital) == 100 and m.grown_population(capital) == 10100, "1% of 10,000 is +100 people")
-	ok(m.growth_amount(with_labor) == 250, "2.5% of 10,000 is +250 people")
+	ok(is_equal_approx(m.growth_rate(with_labor), 0.011), "3 of 5 labor points on Growth: 0.5% + 1.0% x 0.6 = 1.1%")
+	ok(m.growth_amount(capital) == 50 and m.grown_population(capital) == 10050, "0.5% of 10,000 is +50 people")
+	ok(m.growth_amount(with_labor) == 110, "1.1% of 10,000 is +110 people")
 	var near := {"id": 1, "nation": 0, "population": 29950, "infrastructure": 10}
 	ok(m.growth_amount(near) == 50 and m.grown_population(near) == 30000, "growth is capped at housing (29,950 -> 30,000)")
 	var full := {"id": 2, "nation": 0, "population": 30000, "infrastructure": 10}
@@ -427,7 +431,7 @@ func test_population() -> void:
 	var gm := pop_map()
 	gm.cities.append({"id": 0, "nation": 0, "cell": Vector2i(0, 0), "population": 10000, "infrastructure": 10, "radius": 1})
 	gm.grow_cities()
-	ok(gm.cities[0].population == 10100, "grow_cities adds 1% a turn")
+	ok(gm.cities[0].population == 10050, "grow_cities adds 0.5% a turn")
 	# People rounded to the nearest 100 for display.
 	ok(m.display_people(12449) == 12400 and m.display_people(12450) == 12500 and m.display_people(10000) == 10000, "people display rounds to the nearest 100")
 	ok(CityPanel.people_text(12400) == "12,400" and CityPanel.people_text(30000) == "30,000" and CityPanel.people_text(950) == "950", "people are shown with thousands separators")
@@ -441,8 +445,8 @@ func test_population() -> void:
 	ok(eco.unassigned_labor(assigned) == 2 and is_equal_approx(eco.city_income(assigned).cash, 2.0), "assigned labor earns no cash (5 - 3 = 2 free -> 2 cash)")
 	assigned.labor = {"growth": 9}
 	ok(eco.unassigned_labor(assigned) == 0, "unassigned labor never goes below 0")
-	# Manpower per person: the old 0.08 per 1,000 people.
-	ok(is_equal_approx(eco.city_income(capital).manpower, 0.8), "manpower income stays 0.8 for 10,000 people (rescaled to per person)")
+	# No nation-wide manpower: it is neither a stock nor an income.
+	ok(not NationEconomy.RESOURCES.has("manpower") and not eco.city_income(capital).has("manpower") and not eco.config.has("manpower_per_person"), "manpower is gone as a nation resource (per-city pools replace it)")
 	# Old keys are gone from config.
 	ok(not m.city_rules.has("max_population") and not m.city_rules.has("growth_per_turn") and not eco.config.has("cash_per_pop"), "pre-rescale config keys are removed")
 	# Territory radius still grows at 20,000 people.
@@ -481,8 +485,8 @@ func test_labor() -> void:
 	ok(is_equal_approx(eco.city_income(cap).cash, 3.0), "3 unassigned labor make 3 cash")
 	for pair in [[2000, 0], [3999, 0], [4000, 1], [12000, 3], [14000, 3], [16000, 4]]:
 		ok(eco.default_labor({"population": pair[0]}).growth == pair[1], "default Growth rounds down: %d people -> %d" % [pair[0], pair[1]])
-	# Growth labor feeds the Task 35 growth formula: 2 points = 1% + 2 x 0.5% = 2%.
-	ok(is_equal_approx(m.growth_rate(cap), 0.02) and m.growth_amount(cap) == 200, "Growth labor feeds growth: default capital grows 2% (+200)")
+	# Growth labor feeds the growth formula: 2 of 5 points = 0.5% + 1.0% x 0.4 = 0.9%.
+	ok(is_equal_approx(m.growth_rate(cap), 0.009) and m.growth_amount(cap) == 90, "Growth labor feeds growth: default capital grows 0.9% (+90)")
 	# The default share comes from config.
 	var all_growth := NationEconomy.new()
 	all_growth.config.labor.default_growth_share = 1.0
@@ -536,7 +540,6 @@ func sink_setup(training: int, infra: int) -> Dictionary:
 	var roster := make_roster()
 	var city: Dictionary = m.cities.filter(func(c: Dictionary) -> bool: return c.nation == 0)[0]
 	city.labor = {"training": training, "infrastructure": infra, "growth": 0}
-	eco.stocks[0].manpower = 100.0
 	eco.stocks[0].capacity = 100.0
 	return {"map": m, "eco": eco, "roster": roster, "city": city}
 
@@ -565,7 +568,7 @@ func test_labor_sinks() -> void:
 	ok(turns_to_division(0) == -1, "0 Training points: the queue never finishes")
 	var s := sink_setup(4, 0)
 	var eco: NationEconomy = s.eco
-	ok(eco.recruit(s.city, 0, s.roster) and eco.stocks[0].manpower == 80.0 and eco.stocks[0].capacity == 85.0, "recruiting still pays the existing cost (manpower 20, capacity 15) from the nation pool")
+	ok(eco.recruit(s.city, 0, s.roster) and eco.stocks[0].capacity == 85.0 and s.city.pool == 0 and s.city.population == 9000, "recruiting pays 15 capacity and draws 1,000 people from the city pool (and its population)")
 	eco.spawn_pending(s.map, s.roster)
 	ok(eco.pending[s.city.id].labor == 4 and eco.pending[s.city.id].turns_left == 2, "one turn adds 4 labor and ticks the timer")
 	ok(NationEconomy.queue_text(eco.pending[s.city.id]) == "Division 4/15 labor, 2 turns left", "queue text shows labor progress and turns")
@@ -587,7 +590,7 @@ func test_labor_sinks() -> void:
 	var e3: NationEconomy = s3.eco
 	s3.city.labor = {"training": 0, "infrastructure": 1, "growth": 2}
 	e3.recruit(s3.city, 0, s3.roster)
-	ok(s3.city.labor == {"training": 2, "infrastructure": 1, "growth": 2}, "queueing a recruit moves half the labor to Training (5 points: floor(2.5) = 2 Training; Infrastructure 1 and Growth 2 kept)")
+	ok(s3.city.labor == {"training": 2, "infrastructure": 1, "growth": 1}, "queueing a recruit moves half the labor to Training (the 1,000-person draw leaves 4 points: 2 Training, Infrastructure 1 kept, Growth trimmed to fit)")
 	for i in 9:
 		e3.spawn_pending(s3.map, s3.roster)
 	ok(s3.roster.divisions.size() == 1 and s3.city.labor.training == 0 and s3.city.labor.growth == 2 and s3.city.labor.infrastructure == 1, "when the queue clears the default Growth returns and Training goes back to 0")
@@ -602,7 +605,6 @@ func test_labor_sinks() -> void:
 	var s5 := sink_setup(0, 0)
 	var e5: NationEconomy = s5.eco
 	var ai_city: Dictionary = s5.map.cities.filter(func(c: Dictionary) -> bool: return c.nation != 0)[0]
-	e5.stocks[ai_city.nation].manpower = 100.0
 	e5.stocks[ai_city.nation].capacity = 100.0
 	e5.recruit(ai_city, ai_city.nation, s5.roster)
 	for i in 9:
@@ -642,15 +644,358 @@ func test_labor_sinks() -> void:
 	# The turn step runs both sinks: economy end_turn applies training and infrastructure.
 	var s10 := sink_setup(2, 3)
 	s10.eco.recruit(s10.city, 0, s10.roster)
-	s10.city.labor = {"training": 2, "infrastructure": 3, "growth": 0}
+	s10.city.labor = {"training": 2, "infrastructure": 2, "growth": 0}
 	s10.eco.end_turn(s10.map, s10.roster)
-	ok(s10.eco.pending[s10.city.id].labor == 2 and s10.city.infra_progress == 3, "end_turn feeds the training queue and infrastructure progress")
-	# A recruiting capital keeps cash and growth: with the 0.5 share, 5 labor points
-	# split 2 Training, 2 Growth, 1 unassigned.
+	ok(s10.eco.pending[s10.city.id].labor == 2 and s10.city.infra_progress == 2, "end_turn feeds the training queue and infrastructure progress")
+	# Auto-training with the 0.5 share on a 10,000 capital keeps cash and growth (5 points:
+	# 2 Training, 2 Growth, 1 free). Recruiting also draws 1,000 people, which costs one
+	# labor point (9,000 people = 4 points), so a recruiting capital has 0 free after the draw.
 	var s11 := sink_setup(0, 0)
 	s11.city.erase("labor")
 	s11.eco.ensure_labor(s11.city)
-	s11.eco.recruit(s11.city, 0, s11.roster)
-	ok(s11.city.labor == {"training": 2, "infrastructure": 0, "growth": 2}, "a recruiting 10,000 capital: 2 Training, 2 Growth")
-	ok(s11.eco.unassigned_labor(s11.city) == 1 and s11.eco.city_income(s11.city).cash > 0.0, "a recruiting 10,000 capital still earns cash (1 free labor point)")
-	ok(s11.map.growth_amount(s11.city) > 0, "a recruiting capital still grows")
+	s11.eco.auto_training(s11.city)
+	ok(s11.city.labor == {"training": 2, "infrastructure": 0, "growth": 2} and s11.eco.unassigned_labor(s11.city) == 1 and s11.eco.city_income(s11.city).cash > 0.0, "auto-training a 10,000 capital: 2 Training, 2 Growth, 1 free point of cash")
+	ok(s11.map.growth_amount(s11.city) > 0, "a training capital still grows")
+	var s12 := sink_setup(0, 0)
+	s12.city.erase("labor")
+	s12.eco.ensure_labor(s12.city)
+	s12.eco.recruit(s12.city, 0, s12.roster)
+	ok(s12.eco.labor_points(s12.city) == 4 and s12.city.labor == {"training": 2, "infrastructure": 0, "growth": 2}, "recruiting from a 10,000 capital: the draw leaves 4 labor points, split 2 Training / 2 Growth")
+
+
+# --- Task 38: growth tuning, recruit pool, home city, siege ---
+
+## Turns for a city to reach target at a fixed Growth share (0..1), from the config rules.
+func turns_to_grow(m: HexMap, from: int, target: int, share: float, infra := 11.0) -> int:
+	var city := {"id": 0, "nation": 0, "population": from, "infrastructure": infra}
+	for turn in range(1, 1000):
+		city.population = int(city.population) + m.growth_amount(city, share)
+		if int(city.population) >= target:
+			return turn
+	return -1
+
+
+func near(actual: int, expected: int, slack := 2) -> bool:
+	return absi(actual - expected) <= slack
+
+
+func test_growth_tuning() -> void:
+	var m := pop_map()
+	var r := m.city_rules
+	ok(is_equal_approx(r.base_growth, 0.005) and is_equal_approx(r.growth_labor_max_bonus, 0.01) and is_equal_approx(r.min_growth, 0.001), "config: base_growth 0.005, growth_labor_max_bonus 0.010, min_growth 0.001")
+	ok(r.division_people_cost == 1000 and r.people_per_strength == 10 and is_equal_approx(r.pool_fill_rate, 0.005) and is_equal_approx(r.pool_cap, 0.15), "config: division 1,000 people, 10 per strength, fill 0.5%, cap 15%")
+	ok(r.capital_start_pool == 1000 and r.colony_start_pool == 0 and r.train_min_city_pop == 5000, "config: capital pool 1,000, colony pool 0, training floor 5,000")
+	ok(not r.has("growth_rate_per_labor_point") and not r.has("growth_base_rate"), "growth_per_labor_point is removed")
+	# Turn counts from POPULATION_TUNING.md (floor rounding makes them a turn or two slower).
+	var table := [
+		["capital 10k -> 15k, no Growth", 10000, 15000, 0.0, 82],
+		["capital 10k -> 15k, half Growth", 10000, 15000, 0.5, 41],
+		["capital 10k -> 15k, full Growth", 10000, 15000, 1.0, 28],
+		["capital 10k -> 30k, no Growth", 10000, 30000, 0.0, 221],
+		["capital 10k -> 30k, half Growth", 10000, 30000, 0.5, 111],
+		["capital 10k -> 30k, full Growth", 10000, 30000, 1.0, 74],
+		["colony 3k -> 5k, no Growth", 3000, 5000, 0.0, 103],
+		["colony 3k -> 5k, half Growth", 3000, 5000, 0.5, 52],
+		["colony 3k -> 5k, full Growth", 3000, 5000, 1.0, 35],
+		["colony 3k -> 15k, no Growth", 3000, 15000, 0.0, 323],
+		["colony 3k -> 15k, half Growth", 3000, 15000, 0.5, 162],
+		["colony 3k -> 15k, full Growth", 3000, 15000, 1.0, 109],
+	]
+	for row in table:
+		var got := turns_to_grow(m, row[1], row[2], row[3])
+		ok(near(got, row[4], maxi(3, int(row[4] * 0.02))), "%s takes %d turns (doc %d; whole people round down, so a turn or two slower)" % [row[0], got, row[4]])
+	var a := turns_to_grow(m, 10000, 15000, 1.0)
+	var b := turns_to_grow(m, 10000, 30000, 1.0)
+	ok(near(a, 28, 1) and near(b, 74, 2), "acceptance 1: full-Growth capital reaches 15k on turn %d (28 +/- 1) and 30k on turn %d (74, +/- 2 for rounding down)" % [a, b])
+	# Rate checks.
+	var plain := {"id": 0, "nation": 0, "population": 10000, "infrastructure": 10}
+	ok(is_equal_approx(m.growth_rate(plain, 0.0), 0.005), "acceptance 2: 0 Growth labor grows exactly 0.5% a turn on plains")
+	ok(is_equal_approx(m.growth_rate(plain, 1.0), 0.015) and is_equal_approx(m.growth_rate(plain, 0.5), 0.010), "full Growth is 1.5%, half is 1.0%")
+	m.growth_mods[0] = -0.003
+	ok(is_equal_approx(m.growth_rate(plain, 0.0), 0.002), "acceptance 3: a -0.3% trait mod (Directorate) with 0 Growth grows 0.2%")
+	m.growth_mods[0] = -0.02
+	ok(is_equal_approx(m.growth_rate(plain, 0.0), 0.001), "growth never falls below min_growth (0.1%) outside a siege")
+	m.growth_mods.clear()
+	# Terrain and fungus multipliers on the city's own tile.
+	var fm := make_map(7, 7)
+	for key in r:
+		fm.city_rules[key] = r[key]
+	var city := {"id": 0, "nation": 0, "cell": Vector2i(3, 3), "population": 10000, "infrastructure": 10}
+	ok(is_equal_approx(fm.terrain_growth_mult(city), 1.0), "plains: terrain multiplier 1.0")
+	fm.terrain[city.cell] = "forest"
+	ok(is_equal_approx(fm.terrain_growth_mult(city), 0.9), "forest: 0.9")
+	fm.terrain[city.cell] = "hills"
+	ok(is_equal_approx(fm.terrain_growth_mult(city), 0.9), "hills: 0.9")
+	fm.terrain[city.cell] = "mountains"
+	ok(is_equal_approx(fm.terrain_growth_mult(city), 0.7) and is_equal_approx(fm.growth_rate(city, 0.0), 0.0035), "mountains: 0.7 (rate 0.35%)")
+	fm.terrain[city.cell] = "plains"
+	var nbrs := fm.neighbors(city.cell)
+	fm.cells[nbrs[0]] = HexMap.WATER
+	ok(fm.growth_terrain_key(city) == "coast" and is_equal_approx(fm.terrain_growth_mult(city), 1.1), "plains touching water count as coast: 1.1")
+	fm.cells[nbrs[0]] = HexMap.UNCLAIMED
+	fm.terrain[city.cell] = "water"
+	ok(fm.growth_terrain_key(city) == "shallow_ocean" and is_equal_approx(fm.terrain_growth_mult(city), 1.0), "a city on water uses shallow_ocean: 1.0")
+	fm.terrain[city.cell] = "plains"
+	for i in 3:
+		fm.fungus_tiles[nbrs[i]] = true
+	ok(fm.fungus_adjacent(city) == 3 and is_equal_approx(fm.terrain_growth_mult(city), 0.857375), "acceptance 4: 3 adjacent fungus tiles give 0.95^3 = 0.857")
+	fm.city_rules.fungus_adjacent_growth_mult = 0.8
+	ok(is_equal_approx(fm.terrain_growth_mult(city), 0.7), "the fungus multiplier never goes below 0.7 (0.8^3 = 0.512 -> 0.7)")
+	ok(fm.city_rules.terrain_growth_mult.size() == 6 and is_equal_approx(fm.city_rules.fungus_growth_min_mult, 0.7), "terrain table and fungus minimum are in config")
+
+
+## A generated map with a roster whose divisions sit on the city hexes and an economy.
+func pool_setup() -> Dictionary:
+	var m := build(5)
+	var eco := NationEconomy.new()
+	eco.setup(m)
+	var roster := make_roster()
+	roster.spawn_at_cities(m)
+	for d in roster.divisions:
+		d.supplied = true
+	return {"map": m, "eco": eco, "roster": roster}
+
+
+func nation_cities(m: HexMap, nation: int) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for c in m.cities:
+		if c.nation == nation:
+			out.append(c)
+	return out
+
+
+func test_recruit_pool() -> void:
+	var s := pool_setup()
+	var m: HexMap = s.map
+	var eco: NationEconomy = s.eco
+	var roster: DivisionRoster = s.roster
+	# Starting pools: the capital (a nation's first city) has 1,000, a colony 0.
+	var cap := m.capital_of(0)
+	var colony := nation_cities(m, 0)[1]
+	ok(cap.pool == 1000 and colony.pool == 0, "acceptance 6: a capital starts with a pool of 1,000, a colony with 0")
+	ok(m.cities.all(func(c: Dictionary) -> bool: return m.pool_of(c) == (1000 if c == m.capital_of(c.nation) else 0)), "every nation's first city is its capital with the starting pool")
+	# Fill and cap.
+	var c10 := {"id": 0, "nation": 0, "population": 10000, "infrastructure": 10, "pool": 1000}
+	ok(m.pool_fill(c10) == 50 and m.pool_cap(c10) == 1500, "a 10k city fills 50 a turn and caps at 1,500 (0.5% / 15%)")
+	ok(m.advance_preview(c10).pool > 1000, "the pool grows each end turn")
+	var c3 := {"id": 1, "nation": 0, "population": 3000, "infrastructure": 10, "pool": 0}
+	var top := 0
+	for i in 80:
+		m._advance_people(c3)
+		top = maxi(top, int(c3.pool))
+	ok(top == int(floor(float(c3.population) * 0.15)) and top <= int(floor(float(c3.population) * 0.15)), "the pool never exceeds 15% of the city's population")
+	var c3b := {"id": 1, "nation": 0, "population": 3000, "infrastructure": 0, "pool": 0}
+	for i in 80:
+		m._advance_people(c3b)
+	ok(c3b.pool == 450 and c3b.population == 3000, "acceptance 6: a 3k colony's pool tops out at 450 (infra 0, no growth)")
+	var shrunk := {"id": 2, "nation": 0, "population": 4000, "infrastructure": 0, "pool": 900}
+	m._advance_people(shrunk)
+	ok(shrunk.pool == 600, "a pool above the cap after population drops is trimmed to the cap (900 -> 600 at 4,000 people)")
+	# Recruiting: removes 1,000 people, needs a full pool, and respects the 5,000 floor.
+	ok(eco.recruit_block_reason(cap, 0, roster) == "city hex occupied", "(a division stands on the city hex)")
+	roster.divisions.assign(roster.divisions.filter(func(d: Division) -> bool: return d.hex != cap.cell))
+	eco.stocks[0].capacity = 100.0
+	ok(eco.recruit_block_reason(cap, 0, roster) == "", "the capital's starting pool allows exactly one recruit")
+	ok(eco.recruit(cap, 0, roster) and cap.pool == 0 and cap.population == 9000, "acceptance 5: recruiting removes 1,000 people (pool 1,000 -> 0, population 10,000 -> 9,000)")
+	eco.pending.clear()
+	cap.pool = 999
+	ok(eco.recruit_block_reason(cap, 0, roster) == "recruit pool too small", "a pool under 1,000 cannot recruit")
+	cap.pool = 1000
+	cap.population = 5999
+	ok(eco.recruit_block_reason(cap, 0, roster) == "city too small to train", "a recruit that would leave the city under 5,000 is blocked")
+	cap.population = 6000
+	ok(eco.recruit_block_reason(cap, 0, roster) == "", "6,000 people may train (5,000 left)")
+	colony.pool = 0
+	ok(eco.recruit_block_reason(colony, 0, roster).begins_with("recruit pool") or eco.recruit_block_reason(colony, 0, roster) == "city hex occupied", "a colony with an empty pool cannot recruit")
+	# Home city: starting divisions use the capital; a trained recruit uses its city.
+	var s2 := pool_setup()
+	var home_ok: bool = s2.roster.divisions.all(func(d: Division) -> bool: return d.home_city_id == s2.map.capital_of(d.nation).id)
+	ok(home_ok, "starting divisions have the nation's capital as home_city_id")
+	var rc := nation_cities(s2.map, 0)[0]
+	s2.roster.divisions.assign(s2.roster.divisions.filter(func(d: Division) -> bool: return d.hex != rc.cell))
+	s2.eco.stocks[0].capacity = 100.0
+	s2.eco.recruit(rc, 0, s2.roster)
+	rc.labor = {"training": 5, "infrastructure": 0, "growth": 0}
+	for i in 4:
+		s2.eco.spawn_pending(s2.map, s2.roster)
+	ok(s2.roster.division_at(rc.cell) != null and s2.roster.division_at(rc.cell).home_city_id == rc.id, "a recruit's home_city_id is the city that trained it")
+	# Disband / demobilize: survivors (strength x 10) return to the home city's population.
+	var s3 := pool_setup()
+	var d3: Division = s3.roster.divisions.filter(func(d: Division) -> bool: return d.nation == 0)[0]
+	var home3: Dictionary = s3.map.city_by_id(d3.home_city_id)
+	d3.strength = 60.0
+	var pop3 := int(home3.population)
+	var pool3 := int(home3.pool)
+	ok(s3.roster.demobilize(d3, s3.map) == 600 and home3.population == pop3 + 600 and home3.pool == pool3 and not s3.roster.divisions.has(d3), "acceptance 5: disbanding a division at 60 strength returns 600 people to its home city's population (not its pool)")
+	# Home city lost: nearest owned city, capital on ties; the flag stays if it is retaken.
+	var hm := make_map(10, 10)
+	for key in r_rules():
+		hm.city_rules[key] = r_rules()[key]
+	hm.cities.append({"id": 0, "nation": 0, "cell": Vector2i(0, 0), "population": 10000, "pool": 0, "infrastructure": 10, "radius": 1})
+	hm.cities.append({"id": 1, "nation": 0, "cell": Vector2i(4, 0), "population": 10000, "pool": 0, "infrastructure": 10, "radius": 1})
+	hm.cities.append({"id": 2, "nation": 0, "cell": Vector2i(2, 0), "population": 10000, "pool": 0, "infrastructure": 10, "radius": 1})
+	hm.cities.append({"id": 3, "nation": 1, "cell": Vector2i(8, 8), "population": 10000, "pool": 0, "infrastructure": 10, "radius": 1})
+	var droster := make_roster()
+	var dd := droster.spawn_division(0, Vector2i(2, 0), "infantry", 2)
+	dd.strength = 40.0
+	hm.cities.remove_at(2)
+	ok(droster.demobilize(dd, hm) == 400 and hm.cities[0].population == 10400 and hm.cities[1].population == 10000, "home city lost: survivors go to the nearest owned city, capital on a tie (400 to city 0)")
+	var dd2 := droster.spawn_division(0, Vector2i(5, 0), "infantry", 3)
+	dd2.strength = 10.0
+	droster.demobilize(dd2, hm)
+	ok(hm.city_by_id(3).population == 10000 and hm.cities[1].population == 10100, "home city held by another nation: survivors go to an owned city instead")
+	var dd3 := droster.spawn_division(0, Vector2i(5, 1), "infantry", 1)
+	hm.capture_city(Vector2i(4, 0), 1)
+	ok(dd3.home_city_id == 1, "the home_city_id flag stays when the home city is captured")
+	droster.demobilize(dd3, hm)
+	ok(hm.city_by_id(1).population < 10000 and hm.cities[0].population == 10400 + 1000, "survivors of a division whose home was captured go to the owner's remaining city (population +1,000)")
+	# Reinforcement: 10 strength costs 100 people from the home pool first.
+	var s4 := pool_setup()
+	var d4: Division = s4.roster.divisions.filter(func(d: Division) -> bool: return d.nation == 0)[0]
+	var home4: Dictionary = s4.map.city_by_id(d4.home_city_id)
+	d4.strength = 50.0
+	var pop4 := int(home4.population)
+	s4.eco.reinforce(s4.roster, s4.map)
+	ok(d4.strength == 60.0 and home4.pool == 900 and home4.population == pop4 - 100 and s4.eco.reinforce_spent[0] == 100.0, "acceptance 5: reinforcing 10 strength costs 100 people (home pool 1,000 -> 900, population -100)")
+	ok(not s4.eco.stocks[0].has("manpower"), "reinforcement no longer touches a nation manpower stock")
+	# Preview matches the real thing.
+	var s5 := pool_setup()
+	var d5: Division = s5.roster.divisions.filter(func(d: Division) -> bool: return d.nation == 0)[0]
+	d5.strength = 50.0
+	var plan: Dictionary = s5.eco.reinforce_plan(s5.roster, s5.map, s5.eco.current_pools(s5.map), 0)
+	ok(plan.gains[d5.id] == 10.0 and s5.map.pool_of(s5.map.city_by_id(d5.home_city_id)) == 1000, "reinforce_plan previews without changing anything")
+	# Empty home pool: fall back to the nearest owned city's pool, and partial pools are combined.
+	var s6 := pool_setup()
+	var d6: Division = s6.roster.divisions.filter(func(d: Division) -> bool: return d.nation == 0)[0]
+	var home6: Dictionary = s6.map.city_by_id(d6.home_city_id)
+	var other6: Dictionary = nation_cities(s6.map, 0).filter(func(c: Dictionary) -> bool: return c.id != home6.id)[0]
+	d6.strength = 50.0
+	home6.pool = 0
+	other6.pool = 500
+	s6.eco.reinforce(s6.roster, s6.map)
+	ok(d6.strength == 60.0 and other6.pool == 400 and home6.pool == 0, "an empty home pool falls back to the nearest owned city (500 -> 400)")
+	d6.strength = 50.0
+	home6.pool = 30
+	s6.eco.reinforce(s6.roster, s6.map)
+	ok(d6.strength == 60.0 and home6.pool == 0 and other6.pool == 330, "a short home pool is topped up from the next city (30 + 70)")
+	d6.strength = 50.0
+	home6.pool = 0
+	other6.pool = 0
+	s6.eco.reinforce(s6.roster, s6.map)
+	ok(d6.strength == 50.0 and d6.last_reinforce == 0.0, "no pool anywhere means no reinforcement")
+	# Pools are shared in division id order.
+	var s7 := pool_setup()
+	var mine: Array = s7.roster.divisions.filter(func(d: Division) -> bool: return d.nation == 0)
+	for d in mine:
+		d.strength = 50.0
+	for c in nation_cities(s7.map, 0):
+		c.pool = 0
+	s7.map.capital_of(0).pool = 150
+	s7.eco.reinforce(s7.roster, s7.map)
+	ok(mine[0].strength == 60.0 and mine[1].strength == 55.0, "a 150-person pool pays 100 for division %d and 50 for the next (+10, +5)" % mine[0].id)
+	# POWs return to the owner's capital population.
+	var s8 := pool_setup()
+	var pop8 := int(s8.map.capital_of(0).population)
+	s8.eco.add_pows(1, 0, 30.0)
+	ok(s8.eco.return_pows(1, 0, s8.map) == 30.0 and s8.map.capital_of(0).population == pop8 + 300, "returned POWs (30 strength) add 300 people to the owner's capital")
+
+
+func r_rules() -> Dictionary:
+	return city_rules()
+
+
+func test_siege_capture_ai() -> void:
+	var r := city_rules()
+	var fm := make_map(7, 7)
+	for key in r:
+		fm.city_rules[key] = r[key]
+	var city := {"id": 0, "nation": 0, "cell": Vector2i(3, 3), "population": 10000, "pool": 1000, "infrastructure": 10, "radius": 1}
+	fm.cities.append(city)
+	var nbrs := fm.neighbors(city.cell)
+	var enemy_units := {}
+	for n in nbrs:
+		enemy_units[n] = 1
+	ok(fm.is_besieged(city, enemy_units), "a city with an enemy division on every land neighbor is besieged")
+	var mixed := enemy_units.duplicate()
+	mixed[nbrs[0]] = 0
+	ok(not fm.is_besieged(city, mixed), "one friendly division on a neighbor breaks the siege")
+	ok(not fm.is_besieged(city, {}), "unclaimed land and no units is not a siege")
+	for n in nbrs:
+		fm.cells[n] = 1
+	ok(fm.is_besieged(city, {}), "all neighbors owned by an enemy nation is a siege")
+	fm.cells[nbrs[1]] = HexMap.UNCLAIMED
+	ok(not fm.is_besieged(city, {}), "a neutral neighbor is not enemy-held")
+	fm.cells[nbrs[1]] = 1
+	fm.cells[nbrs[2]] = HexMap.WATER
+	ok(fm.is_besieged(city, {}), "water neighbors are ignored")
+	for n in nbrs:
+		fm.cells[n] = HexMap.WATER
+	ok(not fm.is_besieged(city, enemy_units), "a city with no land neighbors is never besieged")
+	for n in nbrs:
+		fm.cells[n] = HexMap.UNCLAIMED
+	# Effects: growth 0, -2% population a turn, labor halved.
+	var eco := NationEconomy.new()
+	var before := city.duplicate()
+	fm.grow_cities(enemy_units)
+	ok(city.besieged and city.population == 9800 and fm.growth_rate(city) == 0.0, "siege: population -2% (10,000 -> 9,800), growth 0")
+	ok(city.pool == mini(1000 + fm.pool_fill({"population": 9800}), fm.pool_cap({"population": 9800})), "the pool still fills during a siege (and is capped by the lower population)")
+	ok(eco.labor_points(city) == 2 and eco.labor_points(before) == 5, "siege halves labor (9,800 people: 4.9 / 2 -> 2 points, was 5)")
+	fm.grow_cities({})
+	ok(not city.besieged and city.population > 9800, "the siege ends and growth resumes when the ring is broken")
+	# Capture: the new owner gets an empty pool, a reset labor plan and no siege flag.
+	var m := build(5)
+	var ceco := NationEconomy.new()
+	ceco.setup(m)
+	var target := nation_cities(m, 1)[0]
+	target.pool = 1000
+	target.besieged = true
+	target.infra_progress = 7
+	m.capture_city(target.cell, 0)
+	ok(target.nation == 0 and target.pool == 0 and not target.besieged and not target.has("labor") and target.infra_progress == 0, "capture empties the pool and resets labor, infra progress and the siege flag")
+	ok(target.population == 7500, "capture still costs 25% of the people (10,000 -> 7,500)")
+	ceco.refresh_labor(m)
+	ok(target.labor.growth == 1, "the new owner's city gets the default labor split (3 points: 1 Growth)")
+	# AI: same pool and floor rules, default labor assignment.
+	var s := pool_setup()
+	var m2: HexMap = s.map
+	var eco2: NationEconomy = s.eco
+	var roster: DivisionRoster = s.roster
+	roster.divisions.clear()
+	eco2.config.ai_recruit_chance = 1.0
+	for c in m2.cities:
+		c.pool = 0
+	for nation in m2.nations:
+		eco2.stocks[nation].capacity = 100.0
+	eco2.run_ai(0, m2, roster)
+	ok(eco2.pending.is_empty(), "the AI does not recruit from cities with empty pools")
+	var ai_cap: Dictionary = m2.capital_of(m2.nations.filter(func(n: int) -> bool: return n != 0)[0])
+	ai_cap.pool = 1000
+	ai_cap.population = 5500
+	eco2.run_ai(0, m2, roster)
+	ok(eco2.pending.is_empty(), "the AI respects the 5,000-person floor (5,500 people, 1,000 pool)")
+	ai_cap.population = 10000
+	eco2.run_ai(0, m2, roster)
+	ok(eco2.pending.has(ai_cap.id) and ai_cap.pool == 0 and ai_cap.population == 9000, "an AI capital with a full pool recruits and pays 1,000 people")
+	ok(m2.cities.all(func(c: Dictionary) -> bool: return c.has("labor") and c.labor.training >= 0), "AI cities get the default labor assignment (and auto-training for the recruit)")
+
+
+func test_stalled_recruit() -> void:
+	var s := sink_setup(0, 0)
+	var eco: NationEconomy = s.eco
+	var city: Dictionary = s.city
+	ok(not eco.recruit_stalled(city), "no recruit queued: not stalled")
+	eco.recruit(city, 0, s.roster)
+	city.labor = {"training": 0, "infrastructure": 0, "growth": 2}
+	ok(eco.recruit_stalled(city) and eco.stalled_cities(0, s.map) == [city.id], "a queued recruit with 0 Training labor is stalled and listed")
+	var panel := CityPanel.new()
+	panel.hex_map = s.map
+	panel.economy = eco
+	panel.roster = s.roster
+	panel.player_nation = 0
+	panel.factions = FactionRoster.from_config({"seed": 5, "faction_count": 4, "faction_seed": -1})
+	panel.refresh(city)
+	ok(panel.label.text.contains("Recruit stalled: assign Training labor"), "the city panel says 'Recruit stalled: assign Training labor'")
+	city.labor.training = 2
+	panel.refresh(city)
+	ok(not eco.recruit_stalled(city) and not panel.label.text.contains("Recruit stalled") and eco.stalled_cities(0, s.map).is_empty(), "assigning Training clears the warning")
+	panel.free()

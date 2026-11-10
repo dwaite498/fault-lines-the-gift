@@ -5,6 +5,9 @@ extends RefCounted
 var id: int
 var nation: int
 var hex: Vector2i
+## City id the division was trained in (starting divisions: the nation's capital), or -1
+## if unknown. Survivors return there, and reinforcement draws from its pool first.
+var home_city_id := -1
 var strength: float
 ## Template strength; reinforcement refills up to this.
 var max_strength: float
