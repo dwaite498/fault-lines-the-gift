@@ -413,6 +413,7 @@ func _on_hex_clicked(hex: Vector2i) -> void:
 				roster.set_swap(selected, target, _view.hex_map)
 			else:
 				roster.set_order(selected, hex, _view.hex_map)
+				message.text = roster.order_message
 		_set_mode("")
 		_refresh_panels()
 		return
