@@ -4,8 +4,8 @@ extends CanvasLayer
 
 var panel := Panel.new()
 var label := Label.new()
-var growth_per_turn := 1
-var max_population := 30
+## Set by main.gd: the map supplies housing cap, growth and people rounding.
+var hex_map: HexMap
 var economy: NationEconomy
 ## Set by main.gd. The Recruit button shows for this nation's cities.
 var roster: DivisionRoster
@@ -30,6 +30,16 @@ func _init() -> void:
 	panel.visible = false
 
 
+## 12400 -> "12,400".
+static func people_text(n: int) -> String:
+	var s := str(absi(n))
+	var out := ""
+	while s.length() > 3:
+		out = "," + s.substr(s.length() - 3) + out
+		s = s.substr(0, s.length() - 3)
+	return ("-" if n < 0 else "") + s + out
+
+
 ## Shows the city's current values, or hides the panel when city is empty.
 func refresh(city: Dictionary) -> void:
 	panel.visible = not city.is_empty()
@@ -37,11 +47,12 @@ func refresh(city: Dictionary) -> void:
 		label.text = ""
 		return
 	swatch.color = factions.color_of(int(city.nation))
-	var growth := growth_per_turn if int(city.population) < max_population else 0
+	var growth := hex_map.growth_amount(city)
 	label.text = "\n".join([
 		"%s - City %d" % [factions.name_of(int(city.nation)), city.id],
-		"Population: %d / %d" % [city.population, max_population],
-		"Growth/turn: +%d" % growth,
+		"Pop %s / %s housing" % [people_text(hex_map.display_people(int(city.population))),
+				people_text(hex_map.housing_cap(city))],
+		"Growth/turn: +%s" % people_text(hex_map.display_people(growth)),
 		"Claim radius: %d" % city.radius,
 		"Infrastructure: %.1f" % float(city.infrastructure),
 	])

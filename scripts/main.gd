@@ -52,8 +52,7 @@ func _ready() -> void:
 	_panel.flank_min_mult = float(_view.roster.combat.flank_min_mult)
 	add_child(_panel)
 	_city_panel = CityPanel.new()
-	_city_panel.growth_per_turn = int(_view.hex_map.city_rules.growth_per_turn)
-	_city_panel.max_population = int(_view.hex_map.city_rules.max_population)
+	_city_panel.hex_map = _view.hex_map
 	_city_panel.economy = _economy
 	_city_panel.roster = _view.roster
 	_city_panel.player_nation = PLAYER_NATION

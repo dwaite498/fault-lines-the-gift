@@ -1,7 +1,8 @@
 {
 	"start_stock": {"cash": 0, "influence": 0, "operations": 0, "manpower": 0, "capacity": 0},
-	"cash_per_pop": 0.5,
-	"manpower_per_pop": 0.08,
+	"people_per_labor_point": 2000,
+	"cash_per_unassigned_labor": 1,
+	"manpower_per_person": 0.00008,
 	"capacity_per_infra": 0.5,
 	"influence_per_turn": 1,
 	"operations_per_turn": 1,

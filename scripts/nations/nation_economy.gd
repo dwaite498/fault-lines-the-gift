@@ -37,11 +37,26 @@ func setup(hex_map: HexMap) -> void:
 			stocks[nation][r] = float(config.start_stock.get(r, 0))
 
 
-## Per-turn output of one city: {"cash", "manpower", "capacity"}.
+## Labor points of a city: population / people_per_labor_point, rounded down.
+func labor_points(city: Dictionary) -> int:
+	return int(floor(float(city.population) / float(config.people_per_labor_point)))
+
+
+## Labor not assigned to a sink: labor_points minus everything in city.labor (the
+## assignment dictionary, absent until labor assignment exists), never below 0.
+func unassigned_labor(city: Dictionary) -> int:
+	var assigned := 0
+	for sink in city.get("labor", {}):
+		assigned += int(city.labor[sink])
+	return maxi(labor_points(city) - assigned, 0)
+
+
+## Per-turn output of one city: {"cash", "manpower", "capacity"}. Cash is
+## cash_per_unassigned_labor for each unassigned labor point.
 func city_income(city: Dictionary) -> Dictionary:
 	return {
-		"cash": float(city.population) * float(config.cash_per_pop),
-		"manpower": float(city.population) * float(config.manpower_per_pop),
+		"cash": float(unassigned_labor(city)) * float(config.cash_per_unassigned_labor),
+		"manpower": float(city.population) * float(config.manpower_per_person),
 		"capacity": float(city.infrastructure) * float(config.capacity_per_infra),
 	}
 

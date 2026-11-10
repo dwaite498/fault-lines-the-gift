@@ -25,7 +25,7 @@ var height := 0
 var cells: Dictionary = {}
 ## Generated nation areas (same keys and values as cells). Cities are placed inside these.
 var territory: Dictionary = {}
-## Each city is {"id", "nation", "cell": Vector2i, "population", "infrastructure",
+## Each city is {"id", "nation", "cell": Vector2i, "population" (people), "infrastructure",
 ## "radius"}, kept in ascending id order. radius is that city's claim radius.
 ## A recently captured city also has "rebuild_target" and "rebuild_turns_left".
 var cities: Array[Dictionary] = []
@@ -33,9 +33,10 @@ var cities: Array[Dictionary] = []
 var nations: Array[int] = []
 ## Growth rules from cities_config.json. Set before generate() so new cities use them.
 var city_rules := {
-	"claim_radius": 1, "grown_claim_radius": 2, "grown_radius_population": 20,
-	"start_population": 10, "start_infrastructure": 10,
-	"growth_per_turn": 1, "max_population": 30,
+	"claim_radius": 1, "grown_claim_radius": 2, "grown_radius_population": 20000,
+	"start_population": 10000, "start_infrastructure": 10,
+	"housing_per_infra": 3000, "growth_base_rate": 0.01, "growth_rate_per_labor_point": 0.005,
+	"display_round": 100,
 	"capture_pop_loss": 0.25, "capture_infra_loss": 0.3, "rebuild_turns": 26,
 }
 ## Nations whose first cities should sit on the coast (sea factions until the naval
@@ -377,14 +378,13 @@ func update_ownership() -> void:
 		cells[cell] = owner
 
 
-## Adds growth_per_turn population to every city (up to max_population) and
+## Adds growth to every city's population (see grown_population) and
 ## sets each radius from its population. Reruns ownership if a radius changed.
 ## Returns true if ownership was rerun. Called once per end turn.
 func grow_cities() -> bool:
 	var changed := false
 	for city in cities:
-		city.population = mini(int(city.population) + int(city_rules.growth_per_turn),
-				int(city_rules.max_population))
+		city.population = grown_population(city)
 		_rebuild_step(city)
 		var radius := _radius_for(int(city.population))
 		if radius != int(city.radius):
@@ -393,6 +393,37 @@ func grow_cities() -> bool:
 	if changed:
 		update_ownership()
 	return changed
+
+
+## Housing cap in people: infrastructure x housing_per_infra, rounded down.
+func housing_cap(city: Dictionary) -> int:
+	return int(floor(float(city.infrastructure) * float(city_rules.housing_per_infra)))
+
+
+## Growth rate per turn: growth_base_rate plus growth_rate_per_labor_point for every
+## labor point assigned to Growth (city.labor.growth; 0 until labor assignment exists).
+func growth_rate(city: Dictionary) -> float:
+	var points := int(city.get("labor", {}).get("growth", 0))
+	return float(city_rules.growth_base_rate) + points * float(city_rules.growth_rate_per_labor_point)
+
+
+## People gained next turn (rounded down): population x growth_rate, never past housing,
+## and 0 for a city already at or over housing (it does not shrink).
+func growth_amount(city: Dictionary) -> int:
+	var pop := int(city.population)
+	var room := maxi(housing_cap(city) - pop, 0)
+	return mini(int(floor(pop * growth_rate(city))), room)
+
+
+## The city's population after one turn of growth.
+func grown_population(city: Dictionary) -> int:
+	return int(city.population) + growth_amount(city)
+
+
+## People rounded for display (nearest display_round, 100 by default).
+func display_people(people: int) -> int:
+	var step := maxi(int(city_rules.display_round), 1)
+	return int(round(float(people) / step)) * step
 
 
 ## Regains (target - current) / turns_left infra. Lands exactly on the target

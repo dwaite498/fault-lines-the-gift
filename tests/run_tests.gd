@@ -26,6 +26,8 @@ func _initialize() -> void:
 	test_uphill_damage()
 	test_reachability()
 	test_camera()
+	test_population()
+	test_player_faction_warning()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -385,3 +387,81 @@ func test_camera() -> void:
 	ok(not cam.edge_scroll_enabled and cam._edge_direction(Vector2(2, 300)) == Vector2(-1, 0), "edge zone maps to a pan direction (applied only when enabled, off by default)")
 	cam.free()
 	view.free()
+
+
+func city_rules() -> Dictionary:
+	return JSON.parse_string(FileAccess.get_file_as_string("res://data/cities_config.json"))
+
+
+func pop_map() -> HexMap:
+	var m := HexMap.new()
+	for key in city_rules():
+		m.city_rules[key] = city_rules()[key]
+	return m
+
+
+func test_population() -> void:
+	var m := pop_map()
+	var eco := NationEconomy.new()
+	var capital := {"id": 0, "nation": 0, "population": 10000, "infrastructure": 10}
+	ok(m.city_rules.start_population == 10000, "a capital starts at 10,000 people (config start_population)")
+	# Housing cap = infrastructure x 3,000.
+	ok(m.housing_cap(capital) == 30000, "starting infra 10 gives a 30,000 housing cap")
+	ok(m.housing_cap({"infrastructure": 11.5}) == 34500 and m.housing_cap({"infrastructure": 0}) == 0, "housing cap scales with infra (11.5 -> 34,500, 0 -> 0)")
+	# Growth = 1% base + 0.5% per labor point assigned to Growth, capped at housing.
+	ok(is_equal_approx(m.growth_rate(capital), 0.01), "base growth is 1% a turn")
+	var with_labor := capital.duplicate()
+	with_labor.labor = {"growth": 3}
+	ok(is_equal_approx(m.growth_rate(with_labor), 0.025), "3 labor points on Growth give 2.5% (1% + 3 x 0.5%)")
+	ok(m.growth_amount(capital) == 100 and m.grown_population(capital) == 10100, "1% of 10,000 is +100 people")
+	ok(m.growth_amount(with_labor) == 250, "2.5% of 10,000 is +250 people")
+	var near := {"id": 1, "nation": 0, "population": 29950, "infrastructure": 10}
+	ok(m.growth_amount(near) == 50 and m.grown_population(near) == 30000, "growth is capped at housing (29,950 -> 30,000)")
+	var full := {"id": 2, "nation": 0, "population": 30000, "infrastructure": 10}
+	ok(m.growth_amount(full) == 0, "a city at its cap stops growing")
+	var over := {"id": 3, "nation": 0, "population": 30000, "infrastructure": 7}
+	ok(m.growth_amount(over) == 0 and m.grown_population(over) == 30000, "a city over its cap (infra lost) does not shrink or grow")
+	# grow_cities applies it to every city.
+	var gm := pop_map()
+	gm.cities.append({"id": 0, "nation": 0, "cell": Vector2i(0, 0), "population": 10000, "infrastructure": 10, "radius": 1})
+	gm.grow_cities()
+	ok(gm.cities[0].population == 10100, "grow_cities adds 1% a turn")
+	# People rounded to the nearest 100 for display.
+	ok(m.display_people(12449) == 12400 and m.display_people(12450) == 12500 and m.display_people(10000) == 10000, "people display rounds to the nearest 100")
+	ok(CityPanel.people_text(12400) == "12,400" and CityPanel.people_text(30000) == "30,000" and CityPanel.people_text(950) == "950", "people are shown with thousands separators")
+	# Labor points = population / 2,000, rounded down.
+	ok(eco.labor_points(capital) == 5, "10,000 people give 5 labor points")
+	ok(eco.labor_points({"population": 3999}) == 1 and eco.labor_points({"population": 1999}) == 0 and eco.labor_points({"population": 12400}) == 6, "labor rounds down (3,999 -> 1, 1,999 -> 0, 12,400 -> 6)")
+	# Cash formula: +1 cash for every unassigned labor point.
+	ok(eco.unassigned_labor(capital) == 5 and is_equal_approx(eco.city_income(capital).cash, 5.0), "a capital with nothing assigned makes 5 cash (5 free labor)")
+	var assigned := capital.duplicate()
+	assigned.labor = {"growth": 2, "training": 1}
+	ok(eco.unassigned_labor(assigned) == 2 and is_equal_approx(eco.city_income(assigned).cash, 2.0), "assigned labor earns no cash (5 - 3 = 2 free -> 2 cash)")
+	assigned.labor = {"growth": 9}
+	ok(eco.unassigned_labor(assigned) == 0, "unassigned labor never goes below 0")
+	# Manpower per person: the old 0.08 per 1,000 people.
+	ok(is_equal_approx(eco.city_income(capital).manpower, 0.8), "manpower income stays 0.8 for 10,000 people (rescaled to per person)")
+	# Old keys are gone from config.
+	ok(not m.city_rules.has("max_population") and not m.city_rules.has("growth_per_turn") and not eco.config.has("cash_per_pop"), "pre-rescale config keys are removed")
+	# Territory radius still grows at 20,000 people.
+	ok(m._radius_for(19999) == m.city_rules.claim_radius and m._radius_for(20000) == m.city_rules.grown_claim_radius, "claim radius grows at 20,000 people (was 20 pop)")
+	# A generated map starts every city at the config population.
+	var gen := build(5)
+	var starts := gen.cities.all(func(c: Dictionary) -> bool: return int(c.population) == 10000)
+	ok(starts, "generated cities start at 10,000 people")
+
+
+func test_player_faction_warning() -> void:
+	var cfg := {"seed": 5, "faction_count": 4, "faction_seed": -1}
+	cfg.player_faction = "ASSEMBLY"
+	var r := FactionRoster.from_config(cfg)
+	ok(r.player_warning.contains("ASSEMBLY") and r.player_warning.contains("did you mean"), "wrong-case player_faction warns and suggests the id")
+	ok(r.assigned.size() == 4, "a wrong player_faction still falls back to a random roster")
+	cfg.player_faction = "no-such-faction"
+	ok(FactionRoster.from_config(cfg).player_warning != "", "an unknown player_faction warns")
+	var good_id: String = FactionRoster.load_all()[0].id
+	cfg.player_faction = good_id
+	var g := FactionRoster.from_config(cfg)
+	ok(g.player_warning == "" and g.assigned[0].id == good_id, "a valid player_faction does not warn and is nation 0")
+	cfg.player_faction = ""
+	ok(FactionRoster.from_config(cfg).player_warning == "", "blank player_faction does not warn")
