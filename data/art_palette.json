@@ -1,13 +1,15 @@
 {
 	"terrain": {
-		"plains": "#B9BE98",
-		"forest": "#7F8A5A",
-		"hills": "#C8B88A",
-		"mountains": "#9C8F78",
-		"water": "#5E7A8C",
-		"coast": "#7E97A3",
-		"crater": "#2A2626",
-		"scorched": "#5A524A"
+		"plains": "#A4532F",
+		"forest": "#7A3E2A",
+		"hills": "#C9A04E",
+		"mountains": "#D8B872",
+		"water": "#14505A",
+		"coast": "#2F9C9A",
+		"crater": "#2A1E1E",
+		"scorched": "#5C3A2C",
+		"shallow_ocean": "#2F9C9A",
+		"fungus": "#7A3E2A"
 	},
 	"iso": {
 		"tile_w": 96,
@@ -21,8 +23,15 @@
 	},
 	"grid": {
 		"color": "#000000",
-		"alpha": 0.18,
+		"alpha": 0.20,
 		"width": 1.0
+	},
+	"highlight": {
+		"reach": "#5FD3C0",
+		"reach_alpha": 0.9,
+		"blocked": "#E0583A",
+		"blocked_alpha": 0.6,
+		"width": 3.0
 	},
 	"tint_alpha": 0.35,
 	"border": {
@@ -41,7 +50,7 @@
 		"org": "#E8E2D0",
 		"str": "#C9B37E",
 		"track": "#1F2A33",
-		"selected": "#C9B37E",
+		"selected": "#5FD3C0",
 		"spent_alpha": 0.55
 	},
 	"city": {
