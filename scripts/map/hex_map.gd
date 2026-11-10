@@ -36,8 +36,11 @@ var cities: Array[Dictionary] = []
 var nations: Array[int] = []
 ## Growth rules from cities_config.json. Set before generate() so new cities use them.
 var city_rules := {
-	"claim_radius": 1, "grown_claim_radius": 2, "grown_radius_population": 20000,
-	"start_population": 10000, "start_infrastructure": 10,
+	"claim_radius": 1,
+	"tiers": [{"key": "outpost", "min_pop": 0, "sprite_scale": 0.6}, {"key": "base", "min_pop": 5000, "sprite_scale": 0.8},
+			{"key": "city", "min_pop": 15000, "claim_radius": 2, "sprite_scale": 1.0},
+			{"key": "metropolis", "min_pop": 30000, "claim_radius": 2, "sprite_scale": 1.2}],
+	"colony_start_population": 3000, "capital_start_population": 10000, "start_infrastructure": 10,
 	"housing_per_infra": 3000, "people_per_labor_point": 2000,
 	"base_growth": 0.005, "growth_labor_max_bonus": 0.01, "min_growth": 0.001,
 	"terrain_growth_mult": {"plains": 1.0, "coast": 1.1, "forest": 0.9, "hills": 0.9,
@@ -107,6 +110,10 @@ var attitude := Attitude.new()
 var current_turn := 0
 ## nation -> turn it last plundered a city (used when plunder_cooldown_scope is "nation").
 var plunder_last_turn: Dictionary = {}
+## Tier changes made by the last grow_cities: {"city_id", "nation", "from", "to", "grew"} (for the turn log).
+var tier_changes: Array[Dictionary] = []
+## Faction id -> {"style": base_style, "sea": bool} for city sprite keys (load_faction_views).
+var faction_art := {}
 ## Vector2i cell -> true for fungus tiles (hook; the map has no fungus yet). A terrain
 ## named "fungus" also counts.
 var fungus_tiles: Dictionary = {}
@@ -465,32 +472,51 @@ static func _to_cube(cell: Vector2i) -> Vector3i:
 
 ## Each land tile goes to the nation of the closest city whose own radius
 ## reaches it. Ties go to the lowest city id. Unclaimed land is neutral.
+## A city that has dropped below City tier keeps the ring-2 tiles it held (`kept_ring2`,
+## recorded while its claim radius is 2) but claims no new ones.
 func update_ownership() -> void:
+	var winners := {}
 	for cell in territory:
 		if territory[cell] == WATER:
 			cells[cell] = WATER
 			continue
 		var owner := UNCLAIMED
 		var best_dist := 1 << 30
+		var winner := -1
 		for city in cities:
 			var dist := hex_distance(cell, city.cell)
-			if dist <= int(city.radius) and dist < best_dist:
+			var claims: bool = dist <= int(city.radius) \
+					or (dist == 2 and city.get("kept_ring2", []).has(cell))
+			if claims and dist < best_dist:
 				best_dist = dist
 				owner = city.nation
+				winner = int(city.id)
 		cells[cell] = owner
+		winners[cell] = winner
+	for city in cities:
+		if int(city.radius) >= 2:
+			var held: Array[Vector2i] = []
+			for cell in winners:
+				if winners[cell] == int(city.id) and hex_distance(cell, city.cell) == 2:
+					held.append(cell)
+			held.sort()
+			city.kept_ring2 = held
 
 
 ## Advances every city one turn (see _advance_people: siege loss, growth, pool fill),
 ## steps capture rebuilds, and sets each radius from its population. Sieges are
-## updated first from unit_cells. Reruns ownership if a radius changed. Returns true if
+## updated first from unit_cells. Tiers are recalculated after growth and losses (a change
+## is recorded in tier_changes). Reruns ownership if a radius changed. Returns true if
 ## ownership was rerun. Called once per end turn.
 func grow_cities(unit_cells := {}) -> bool:
 	update_sieges(unit_cells)
+	tier_changes.clear()
 	var changed := false
 	for city in cities:
 		_advance_people(city)
 		_rebuild_step(city)
 		_tick_capture_timers(city)
+		_note_tier(city)
 		var radius := _radius_for(int(city.population))
 		if radius != int(city.radius):
 			city.radius = radius
@@ -772,10 +798,63 @@ func _rebuild_step(city: Dictionary) -> void:
 	city.rebuild_turns_left = left - 1
 
 
+## The tier entry (city_rules.tiers) for a population: the highest min_pop at or below it.
+func tier_for_population(population: int) -> Dictionary:
+	var best: Dictionary = city_rules.tiers[0]
+	for t in city_rules.tiers:
+		if population >= int(t.min_pop) and int(t.min_pop) >= int(best.min_pop):
+			best = t
+	return best
+
+
+## Tier key of a city: "outpost", "base", "city" or "metropolis".
+func tier(city: Dictionary) -> String:
+	return str(tier_for_population(int(city.population)).key)
+
+
+## Claim radius from the tier, default city_rules.claim_radius.
 func _radius_for(population: int) -> int:
-	if population >= int(city_rules.grown_radius_population):
-		return int(city_rules.grown_claim_radius)
-	return int(city_rules.claim_radius)
+	return int(tier_for_population(population).get("claim_radius", city_rules.claim_radius))
+
+
+## Population at the next tier above the city's, or -1 at the top tier.
+func next_tier_population(city: Dictionary) -> int:
+	var next := -1
+	for t in city_rules.tiers:
+		if int(t.min_pop) > int(city.population) and (next < 0 or int(t.min_pop) < next):
+			next = int(t.min_pop)
+	return next
+
+
+## Records a tier change in tier_changes (the first call for a city only stores its tier).
+func _note_tier(city: Dictionary) -> void:
+	var now := tier(city)
+	var before := str(city.get("last_tier", ""))
+	if before != "" and before != now:
+		tier_changes.append({"city_id": int(city.id), "nation": int(city.nation), "from": before, "to": now,
+				"grew": int(tier_for_population(int(city.population)).min_pop) > _tier_min(before)})
+	city.last_tier = now
+
+
+func _tier_min(key: String) -> int:
+	for t in city_rules.tiers:
+		if str(t.key) == key:
+			return int(t.min_pop)
+	return 0
+
+
+## Label for a city: "City 3 (City)" (cities have no names yet).
+func city_label(city: Dictionary) -> String:
+	return "%s (%s)" % [str(city.get("name", "City %d" % int(city.id))), str(tier(city)).capitalize()]
+
+
+## Turn-log text for a tier change, e.g. "City 3 grew to a City".
+func tier_change_text(change: Dictionary) -> String:
+	var city := city_by_id(int(change.city_id))
+	var name := str(city.get("name", "City %d" % int(change.city_id)))
+	var to := str(change.to).capitalize()
+	return "%s %s to %s %s" % [name, "grew" if change.grew else "shrank",
+			"an" if to[0] in "AEIOU" else "a", to]
 
 
 # --- Colonization (Task 40e) ---
@@ -818,6 +897,7 @@ func found_city(nation: int, cell: Vector2i) -> Dictionary:
 	var pop := int(rules.outpost_population)
 	var city := {"id": next_id, "nation": nation, "cell": cell, "population": pop,
 			"pool": mini(int(city_rules.colony_start_pool), pop), "radius": _radius_for(pop),
+			"last_tier": str(tier_for_population(pop).key),
 			"infrastructure": int(rules.outpost_infrastructure)}
 	cities.append(city)
 	update_ownership()
@@ -937,6 +1017,7 @@ func load_faction_views(factions: Array) -> void:
 	for f in factions:
 		faction_views[str(f.id)] = f.get("views_as_atrocity", city_rules.capture.default_views_as_atrocity)
 		faction_sensitivity[str(f.id)] = float(f.get("atrocity_sensitivity", 1.0))
+		faction_art[str(f.id)] = {"style": str(f.get("base_style", f.id)), "sea": str(f.get("type", "land")) == "sea"}
 
 
 ## True if the observing faction treats this reputation_event as an atrocity: its type is
@@ -1154,12 +1235,12 @@ func _place_cities(rng: RandomNumberGenerator, per_nation: int, min_spacing: int
 				# Every nation needs at least one city, even if spacing can't be met.
 				push_warning("Nation %d: no hex meets city spacing" % nation)
 				spot = land_by_nation[nation][0]
-			var pop := int(city_rules.start_population)
 			# A nation's first city is its capital; later ones are colonies.
 			var first := not cities.any(func(c: Dictionary) -> bool: return c.nation == nation)
+			var pop := int(city_rules.capital_start_population if first else city_rules.colony_start_population)
 			var pool := int(city_rules.capital_start_pool if first else city_rules.colony_start_pool)
 			cities.append({"id": cities.size(), "nation": nation, "cell": spot,
-					"population": pop, "pool": mini(pool, pop), "radius": _radius_for(pop),
+					"population": pop, "pool": mini(pool, pop), "radius": _radius_for(pop), "last_tier": str(tier_for_population(pop).key),
 					"infrastructure": int(city_rules.start_infrastructure)})
 	return true
 

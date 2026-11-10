@@ -275,14 +275,35 @@ func is_capital(city: Dictionary) -> bool:
 	return false
 
 
+## The generic placeholder city: a dome (half disc) on a base, on a platform for sea factions.
+func _draw_dome(center: Vector2, half: float, sea: bool, c: Dictionary) -> void:
+	var pts := PackedVector2Array()
+	for i in 13:
+		var a := PI + PI * i / 12.0
+		pts.append(center + Vector2(cos(a) * half, sin(a) * half * 0.9 + half * 0.4))
+	draw_colored_polygon(pts, Color.html(c.fill))
+	draw_polyline(pts, Color.html(c.ring), 2.0)
+	var base := Rect2(center + Vector2(-half, half * 0.4), Vector2(half * 2, half * 0.35))
+	draw_rect(base, Color.html(c.ring))
+	if sea:
+		draw_rect(Rect2(center + Vector2(-half * 1.2, half * 0.75), Vector2(half * 2.4, half * 0.25)), Color.html(c.plate))
+
+
 func _draw_city(city: Dictionary) -> void:
 	var k := _k()
 	var c: Dictionary = palette.city
 	var center := hex_to_pixel(city.cell)
-	var half := 8 * k
+	var tier := hex_map.tier(city)
+	var art: Dictionary = hex_map.faction_art.get(str(hex_map.nation_factions.get(city.nation, "")), {})
+	var scale_k := CityArt.tier_scale(hex_map.city_rules.tiers, tier)
+	var half := 8 * k * scale_k
 	var rect := Rect2(center - Vector2(half, half), Vector2(half, half) * 2)
-	draw_rect(rect, Color.html(c.fill))
-	draw_rect(rect.grow(-2 * k), Color.html(c.ring), false, 2.0)
+	var key := CityArt.resolve_key(str(art.get("style", "generic")), tier)
+	if key != "":
+		var tex: Texture2D = load(CityArt.ART_DIR + key + ".png")
+		draw_texture_rect(tex, rect, false)
+	else:
+		_draw_dome(center, half, art.get("sea", false), c)
 	if city.nation >= 0 and is_capital(city):
 		var star := PackedVector2Array()
 		for i in 10:
@@ -290,7 +311,7 @@ func _draw_city(city: Dictionary) -> void:
 			var a := -PI / 2 + PI * i / 5.0
 			star.append(center + Vector2(cos(a), sin(a)) * r)
 		draw_colored_polygon(star, Color.html(c.star))
-	var label := str(city.get("name", "City %d" % city.id)).to_upper()
+	var label := hex_map.city_label(city).to_upper()
 	var font := ThemeDB.fallback_font
 	var fs := int(round(11 * k))
 	var sz := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs)

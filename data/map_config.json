@@ -16,7 +16,6 @@
 		"sight": {"infantry": 2, "scout": 3, "colony_pod": 2, "default": 2, "city": 2},
 		"city_sight_bonus": 1,
 		"city_bonus_tier": "city",
-		"tier_thresholds": {"outpost": 0, "base": 5000, "city": 15000, "metropolis": 30000},
 		"elevated_sight_bonus": 1,
 		"elevated_terrain": ["hills", "mountains"],
 		"blocking_terrain": ["mountains"]
