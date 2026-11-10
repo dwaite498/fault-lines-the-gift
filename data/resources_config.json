@@ -14,7 +14,6 @@
 	"recruit_cost": {"capacity": 15},
 	"recruit_template": "infantry",
 	"training_turns": 3,
-	"upkeep_per_division": {"cash": 2, "capacity": 1},
 	"unpaid_upkeep_org_loss": 5,
 	"reinforce_cap_per_turn": 10,
 	"reinforce_mult": {"own": 1.0, "in_combat": 0.5, "neutral": 0.25, "enemy": 0.1},

@@ -89,7 +89,9 @@ func refresh(city: Dictionary) -> void:
 		if economy.pending.has(city.id):
 			label.text += "\nRecruiting: " + NationEconomy.queue_text(economy.pending[city.id])
 			label.text += " (+%d/turn)" % economy.training_points(city)
-			if economy.recruit_stalled(city):
+			if economy.training_blocked(city) != "":
+				label.text += "\nTraining paused: city is %s" % economy.training_blocked(city)
+			elif economy.recruit_stalled(city):
 				label.text += "\nRecruit stalled: assign Training labor"
 	button.visible = economy != null and roster != null and city.nation == player_nation
 	var psize := label.get_minimum_size() + Vector2(30, 12)
@@ -110,7 +112,7 @@ func refresh(city: Dictionary) -> void:
 		row.minus.position = Vector2(150, psize.y)
 		row.plus.position = Vector2(186, psize.y)
 		row.minus.disabled = pts <= 0
-		row.plus.disabled = economy.unassigned_labor(city) <= 0
+		row.plus.disabled = economy.unassigned_labor(city) <= 0 or (sink == "training" and city.get("enslaved", false))
 		psize = Vector2(maxf(psize.x, 226.0), psize.y + ROW_HEIGHT)
 	if button.visible:
 		var reason := economy.recruit_block_reason(city, player_nation, roster)

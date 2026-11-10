@@ -1,6 +1,6 @@
 # Fault Lines: Planetfall — Status
 
-Last updated: Nov 9 2026 (Task 38)
+Last updated: Nov 9 2026 (Task 38b)
 
 ## Current direction
 An Alpha Centauri (SMAC) homage with landfall and 10 ideological factions.
@@ -23,6 +23,7 @@ See [docs/PIVOT.md](PIVOT.md) for the pivot brief.
 - Recruit pool and tuning (Task 38; docs/specs/POPULATION_TUNING.md overrides POPULATION.md): growth = (0.5% + 1.0% x Growth labor share) x terrain mult (x 0.95 per adjacent fungus tile), never under 0.1%, 0 in a siege; each city has a recruit pool (fills 0.5%/turn, capped at 15%; capital starts with 1,000, colonies 0) that replaces the nation manpower stock; a recruit draws 1,000 people and needs 5,000 left; reinforcement costs 10 people per strength, drawn from the home city's pool then the nearest owned cities'; divisions carry home_city_id and survivors return to its population; siege (all land neighbors enemy-held) stops growth, costs 2% people a turn and halves labor; capture empties the pool and resets labor. Settings are in data/cities_config.json (growth, pool, siege), people_per_strength is global until Task 38b moves it to the division type.
 - Stalled recruits: a queued recruit with 0 Training labor shows "Recruit stalled: assign Training labor" on the city panel, in the military panel queue list and in the end-turn message.
 - Not yet: trait growth mods (hook: HexMap.growth_mods), fungus tiles (hook: HexMap.fungus_tiles), starvation (Task 38b hook), annex lockout and enslave (Tasks 39-40).
+- Pillars recruiting rules (Task 38b): people_per_strength and upkeep live on each division type in data/divisions_config.json (infantry 10 people/strength, 3 cash; mechanized and robotic are future entries with no units); new divisions are always full strength (no splitting); no training progress while a city is besieged, starving (hook: city.starving) or enslaved (hook: city.enslaved, Task 39); enslaved cities have no Training labor and a 0 pool; reinforcement skips empty pools; the AI uses the same checks. Unpaid upkeep: divisions are paid in id order, cash never goes below 0, and each unpaid division loses 5 org that turn (unpaid_upkeep_org_loss), logged and shown in the military panel.
 
 ## Next
 - Task 31: remove doom systems

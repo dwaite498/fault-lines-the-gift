@@ -41,10 +41,25 @@ func spawn_at_cities(hex_map: HexMap, template_name := "infantry") -> void:
 		divisions.append(d)
 
 
-## Adds one new division of template_name on hex with a fresh id. home_city_id is the
+## People per strength point of d's division type (divisions_config people_per_strength).
+func people_per_strength(d: Division) -> float:
+	return float(templates.get(d.unit_type, {}).get("people_per_strength", 10.0))
+
+
+## Upkeep per turn of d's division type, e.g. {"cash": 3} (divisions_config upkeep).
+func upkeep_of(d: Division) -> Dictionary:
+	return templates.get(d.unit_type, {}).get("upkeep", {})
+
+
+## Adds one new division of template_name on hex with a fresh id. A new division is always
+## full strength (the template's strength): there is no partial recruiting and no
+## splitting. Future types (mechanized, robotic) cannot be spawned yet; returns null. home_city_id is the
 ## city that trained it (-1 if unknown).
 func spawn_division(nation: int, hex: Vector2i, template_name := "infantry",
 		home_city_id := -1) -> Division:
+	if templates[template_name].get("future", false):
+		push_warning("%s is a future division type and cannot be spawned yet" % template_name)
+		return null
 	var next_id := 0
 	for d in divisions:
 		next_id = maxi(next_id, d.id + 1)
@@ -67,7 +82,7 @@ func unit_cells() -> Dictionary:
 ## (capital on ties). Returns the people returned. Destroyed or surrendered divisions
 ## do not come through here, so they return no one.
 func demobilize(d: Division, hex_map: HexMap) -> int:
-	var people := int(floor(d.strength * float(hex_map.city_rules.people_per_strength)))
+	var people := int(floor(d.strength * people_per_strength(d)))
 	divisions.erase(d)
 	hex_map.return_people(d.nation, d.home_city_id, d.hex, people)
 	return people

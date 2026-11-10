@@ -34,6 +34,7 @@ func _initialize() -> void:
 	test_recruit_pool()
 	test_siege_capture_ai()
 	test_stalled_recruit()
+	test_pillars_rules()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -683,7 +684,7 @@ func test_growth_tuning() -> void:
 	var m := pop_map()
 	var r := m.city_rules
 	ok(is_equal_approx(r.base_growth, 0.005) and is_equal_approx(r.growth_labor_max_bonus, 0.01) and is_equal_approx(r.min_growth, 0.001), "config: base_growth 0.005, growth_labor_max_bonus 0.010, min_growth 0.001")
-	ok(r.division_people_cost == 1000 and r.people_per_strength == 10 and is_equal_approx(r.pool_fill_rate, 0.005) and is_equal_approx(r.pool_cap, 0.15), "config: division 1,000 people, 10 per strength, fill 0.5%, cap 15%")
+	ok(r.division_people_cost == 1000 and not r.has("people_per_strength") and is_equal_approx(r.pool_fill_rate, 0.005) and is_equal_approx(r.pool_cap, 0.15), "config: division 1,000 people, fill 0.5%, cap 15% (people_per_strength moved to the division type)")
 	ok(r.capital_start_pool == 1000 and r.colony_start_pool == 0 and r.train_min_city_pop == 5000, "config: capital pool 1,000, colony pool 0, training floor 5,000")
 	ok(not r.has("growth_rate_per_labor_point") and not r.has("growth_base_rate"), "growth_per_labor_point is removed")
 	# Turn counts from POPULATION_TUNING.md (floor rounding makes them a turn or two slower).
@@ -897,7 +898,7 @@ func test_recruit_pool() -> void:
 	var s8 := pool_setup()
 	var pop8 := int(s8.map.capital_of(0).population)
 	s8.eco.add_pows(1, 0, 30.0)
-	ok(s8.eco.return_pows(1, 0, s8.map) == 30.0 and s8.map.capital_of(0).population == pop8 + 300, "returned POWs (30 strength) add 300 people to the owner's capital")
+	ok(s8.eco.return_pows(1, 0, s8.map, s8.roster) == 30.0 and s8.map.capital_of(0).population == pop8 + 300, "returned POWs (30 strength) add 300 people to the owner's capital")
 
 
 func r_rules() -> Dictionary:
@@ -999,3 +1000,139 @@ func test_stalled_recruit() -> void:
 	panel.refresh(city)
 	ok(not eco.recruit_stalled(city) and not panel.label.text.contains("Recruit stalled") and eco.stalled_cities(0, s.map).is_empty(), "assigning Training clears the warning")
 	panel.free()
+
+
+# --- Task 38b: Pillars recruiting rules ---
+
+func test_pillars_rules() -> void:
+	var t := DivisionRoster.load_templates()
+	var inf: Dictionary = t.infantry
+	ok(inf.people_per_strength == 10 and inf.upkeep.size() == 1 and inf.upkeep.cash == 3, "config: infantry has 10 people per strength and 3 cash upkeep (divisions_config.json)")
+	ok(t.mechanized.future and t.mechanized.people_per_strength == 5 and t.mechanized.upkeep.cash == 6 and t.mechanized.upkeep.alloy == 1, "config: mechanized is a future entry (5 people/strength, 6 cash, 1 alloy)")
+	ok(t.robotic.future and t.robotic.people_per_strength == 2 and t.robotic.upkeep.cash == 10 and t.robotic.upkeep.alloy == 1 and t.robotic.upkeep.fuel == 1, "config: robotic is a future entry (2 people/strength, 10 cash, 1 alloy, 1 fuel)")
+	var r := make_roster()
+	ok(r.spawn_division(0, Vector2i(0, 0), "mechanized") == null and r.divisions.is_empty(), "future division types cannot be spawned (no units yet)")
+	# Full strength, no splitting.
+	var s := pool_setup()
+	var rc := nation_cities(s.map, 0)[0]
+	s.roster.divisions.assign(s.roster.divisions.filter(func(d: Division) -> bool: return d.hex != rc.cell))
+	s.eco.stocks[0].capacity = 100.0
+	s.eco.recruit(rc, 0, s.roster)
+	rc.labor = {"training": 5, "infrastructure": 0, "growth": 0}
+	for i in 4:
+		s.eco.spawn_pending(s.map, s.roster)
+	var fresh: Division = s.roster.division_at(rc.cell)
+	ok(fresh != null and fresh.strength == 100.0 and fresh.strength == fresh.max_strength, "a recruited division starts at full strength (100)")
+	ok(s.roster.spawn_division(0, Vector2i(0, 0), "infantry").strength == 100.0, "spawn_division always makes a full-strength division")
+	ok(not s.roster.has_method("split_division") and not s.eco.has_method("recruit_partial"), "there is no split and no partial recruit")
+	ok(s.eco.recruit_block_reason(nation_cities(s.map, 0)[1], 0, s.roster) != "", "a recruit always costs the full 1,000 people (a colony with an empty pool cannot recruit a small one)")
+	# No training while besieged or starving; the queue waits.
+	for flag in ["besieged", "starving"]:
+		var b := sink_setup(5, 0)
+		b.eco.recruit(b.city, 0, b.roster)
+		b.city.labor = {"training": 5, "infrastructure": 0, "growth": 0}
+		b.eco.spawn_pending(b.map, b.roster)
+		var progress: int = b.eco.pending[b.city.id].labor
+		var turns: int = b.eco.pending[b.city.id].turns_left
+		b.city[flag] = true
+		for i in 6:
+			b.eco.spawn_pending(b.map, b.roster)
+		ok(b.eco.pending[b.city.id].labor == progress and b.eco.pending[b.city.id].turns_left == turns and b.roster.divisions.is_empty(), "a %s city makes no training progress (labor %d, %d turns left, no division)" % [flag, progress, turns])
+		ok(not b.eco.recruit_stalled(b.city), "a %s queue is paused, not 'stalled'" % flag)
+		b.city.erase(flag)
+		for i in 4:
+			b.eco.spawn_pending(b.map, b.roster)
+		ok(b.roster.divisions.size() == 1, "training resumes and finishes once the %s state ends" % flag)
+		var b2 := sink_setup(5, 0)
+		b2.city[flag] = true
+		ok(b2.eco.recruit_block_reason(b2.city, 0, b2.roster).contains(flag) and not b2.eco.recruit(b2.city, 0, b2.roster), "a %s city cannot start a recruit" % flag)
+	# Reinforcement skips empty pools (and enslaved cities' pools).
+	var rs := pool_setup()
+	var d: Division = rs.roster.divisions.filter(func(x: Division) -> bool: return x.nation == 0)[0]
+	var home: Dictionary = rs.map.city_by_id(d.home_city_id)
+	var other: Dictionary = nation_cities(rs.map, 0).filter(func(c: Dictionary) -> bool: return c.id != home.id)[0]
+	d.strength = 50.0
+	home.pool = 1000
+	home.enslaved = true
+	other.pool = 500
+	rs.eco.reinforce(rs.roster, rs.map)
+	ok(d.strength == 60.0 and home.pool == 1000 and other.pool == 400, "reinforcement skips an enslaved city's pool and draws from the next city (500 -> 400)")
+	home.erase("enslaved")
+	home.pool = 0
+	other.pool = 0
+	d.strength = 50.0
+	rs.eco.reinforce(rs.roster, rs.map)
+	ok(d.strength == 50.0, "reinforcement skips empty pools (nothing to draw)")
+	# Enslaved cities cannot train.
+	var e := sink_setup(0, 0)
+	e.city.enslaved = true
+	ok(e.eco.recruit_block_reason(e.city, 0, e.roster).contains("enslaved"), "an enslaved city cannot recruit")
+	e.eco.ensure_labor(e.city)
+	ok(e.eco.set_labor(e.city, "training", 3) == 0 and e.city.labor.training == 0, "an enslaved city's labor cannot go to Training")
+	e.city.labor.training = 2
+	e.eco.ensure_labor(e.city)
+	ok(e.city.labor.training == 0, "existing Training labor is dropped when a city is enslaved")
+	var before: Dictionary = e.city.labor.duplicate()
+	e.eco.auto_training(e.city)
+	ok(e.city.labor.training == 0 and e.city.labor == before, "auto-training does nothing for an enslaved city")
+	e.city.pool = 700
+	e.map._advance_people(e.city)
+	ok(e.city.pool == 0, "an enslaved city's pool is 0 permanently")
+	var panel := CityPanel.new()
+	panel.hex_map = e.map
+	panel.economy = e.eco
+	panel.roster = e.roster
+	panel.player_nation = 0
+	panel.factions = FactionRoster.from_config({"seed": 5, "faction_count": 4, "faction_seed": -1})
+	panel.refresh(e.city)
+	ok(panel.labor_rows.training.plus.disabled, "an enslaved city's Training + button is disabled")
+	panel.free()
+	e.map.capture_city(e.city.cell, 1)
+	ok(not e.city.has("enslaved"), "capture clears the enslaved flag for the new owner (Task 39 sets it by choice)")
+	# The AI follows the same rules.
+	for flag in ["besieged", "starving", "enslaved"]:
+		var a := pool_setup()
+		a.roster.divisions.clear()
+		a.eco.config.ai_recruit_chance = 1.0
+		for nation in a.map.nations:
+			a.eco.stocks[nation].capacity = 100.0
+		var acap: Dictionary = a.map.capital_of(a.map.nations.filter(func(n: int) -> bool: return n != 0)[0])
+		acap[flag] = true
+		a.eco.run_ai(0, a.map, a.roster)
+		ok(not a.eco.pending.has(acap.id), "the AI does not recruit in a %s city" % flag)
+		acap.erase(flag)
+		a.eco.run_ai(0, a.map, a.roster)
+		ok(a.eco.pending.has(acap.id), "the AI recruits there once it is not %s" % flag)
+	# Upkeep per division type, and the unpaid consequence.
+	var u := pool_setup()
+	var mine: Array = u.roster.divisions.filter(func(x: Division) -> bool: return x.nation == 0)
+	ok(u.eco.upkeep_due(0, u.roster) == {"cash": 3.0 * mine.size()}, "upkeep is 3 cash per infantry division (%d divisions)" % mine.size())
+	ok(not u.eco.config.has("upkeep_per_division"), "the global upkeep_per_division is gone (per-type upkeep)")
+	u.eco.stocks[0].cash = 3.0 * mine.size()
+	u.eco.stocks[0].capacity = 40.0
+	u.eco.pay_upkeep(u.map, u.roster)
+	ok(u.eco.stocks[0].cash == 0.0 and u.eco.stocks[0].capacity == 40.0 and u.eco.upkeep_paid[0] and not u.eco.unpaid_divisions.has(0), "upkeep paid in full takes only cash and leaves nothing unpaid")
+	u.eco.stocks[0].cash = 4.0
+	for x in mine:
+		x.org = 30.0
+	u.eco.pay_upkeep(u.map, u.roster)
+	ok(u.eco.stocks[0].cash == 1.0 and u.eco.unpaid_divisions[0] == [mine[1].id] and mine[0].org == 30.0 and mine[1].org == 25.0 and not u.eco.upkeep_paid[0], "cash 4 pays one division (id order); the other is unpaid, loses 5 org (config unpaid_upkeep_org_loss) and cash stays >= 0")
+	u.eco.stocks[0].cash = 0.0
+	for x in mine:
+		x.org = 3.0
+	u.eco.pay_upkeep(u.map, u.roster)
+	ok(u.eco.stocks[0].cash == 0.0 and u.eco.unpaid_divisions[0].size() == mine.size() and mine.all(func(x: Division) -> bool: return x.org == 0.0), "with no cash every division is unpaid, org clamps at 0 and cash never goes negative")
+	ok(u.map.nations.all(func(n: int) -> bool: return u.eco.stocks[n].cash >= 0.0), "no nation (AI included) has negative cash")
+	u.eco.stocks[0].cash = 100.0
+	u.eco.pay_upkeep(u.map, u.roster)
+	ok(not u.eco.unpaid_divisions.has(0), "the unpaid list resets each turn")
+	# Survivors use the division type's people_per_strength.
+	var dm := pool_setup()
+	var dv: Division = dm.roster.divisions.filter(func(x: Division) -> bool: return x.nation == 0)[0]
+	dm.roster.templates = dm.roster.templates.duplicate(true)
+	dm.roster.templates.infantry.people_per_strength = 5
+	dv.strength = 60.0
+	ok(dm.roster.demobilize(dv, dm.map) == 300, "survivors return at the division type's people_per_strength (60 x 5 = 300)")
+	# QA nit: the main.gd header names the real keys.
+	var header := FileAccess.get_file_as_string("res://scripts/main.gd").substr(0, 900)
+	ok(header.contains("N toggles the military panel") and header.contains("K removes the newest city") and not header.contains("D removes"), "main.gd header comment names N and K (not M and D)")
