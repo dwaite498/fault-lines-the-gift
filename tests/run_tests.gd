@@ -3175,6 +3175,13 @@ func test_harrier() -> void:
 	h.hex = inside
 	ok(HexMap.hex_distance(inside, peak) == 2 and not r.native_habitat_ok(h, far, m) and r.native_habitat_ok(h, Vector2i(7, 5), m), "it stays within 2 hexes of its nest")
 	h.hex = peak
+	# A move order past the leash is rejected with a message (not accepted and stopped at 2).
+	h.hex = peak
+	var past := Vector2i(7, 7)  # 3 hexes from the nest
+	m.terrain[Vector2i(7, 7)] = "hills"
+	ok(HexMap.hex_distance(past, peak) == 3 and not r.set_order(h, past, m) and h.order_path.is_empty() and r.order_message.contains("past its leash"), "a Harrier move order past its leash is rejected with a message")
+	ok(r.set_order(h, Vector2i(7, 5), m) and r.order_message == "" and h.order_path.size() >= 1, "an order inside the leash is accepted and clears the message")
+	h.order_path.clear()
 	# Ignores terrain cost; a ground unit pays the map's cost.
 	var inf := r.spawn_division(0, Vector2i(6, 3), "infantry")
 	ok(r.step_cost_for(h, peak, Vector2i(7, 5), m) == 1, "the Harrier ignores terrain move cost (always 1)")
