@@ -81,8 +81,11 @@ func refresh(city: Dictionary) -> void:
 		var income := economy.city_income(city)
 		label.text += "\nOutput/turn: cash +%.1f, manpower +%.1f, capacity +%.1f" % [
 				income.cash, income.manpower, income.capacity]
+		var per_level := economy.infra_labor_per_level()
+		label.text += "\nInfra build %d/%d (+%d/turn)" % [int(city.get("infra_progress", 0)), per_level, economy.infra_points(city)]
 		if economy.pending.has(city.id):
 			label.text += "\nRecruiting: " + NationEconomy.queue_text(economy.pending[city.id])
+			label.text += " (+%d/turn)" % economy.training_points(city)
 	button.visible = economy != null and roster != null and city.nation == player_nation
 	var psize := label.get_minimum_size() + Vector2(30, 12)
 	var editable: bool = economy != null and city.nation == player_nation

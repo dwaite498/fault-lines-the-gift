@@ -2,7 +2,13 @@
 	"start_stock": {"cash": 0, "influence": 0, "operations": 0, "manpower": 0, "capacity": 0},
 	"people_per_labor_point": 2000,
 	"cash_per_unassigned_labor": 1,
-	"labor": {"default_growth_share": 0.5, "clamp_order": ["growth", "infrastructure", "training"]},
+	"labor": {
+		"default_growth_share": 0.5,
+		"clamp_order": ["growth", "infrastructure", "training"],
+		"training_labor_cost": 15,
+		"infra_labor_per_level": 10,
+		"recruit_auto_training_share": 0.5
+	},
 	"manpower_per_person": 0.00008,
 	"capacity_per_infra": 0.5,
 	"influence_per_turn": 1,

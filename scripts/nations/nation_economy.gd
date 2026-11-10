@@ -103,6 +103,7 @@ func set_labor(city: Dictionary, sink: String, points: int) -> int:
 	ensure_labor(city)
 	var room := int(city.labor[sink]) + unassigned_labor(city)
 	city.labor[sink] = clampi(points, 0, room)
+	city.erase("labor_auto")
 	return int(city.labor[sink])
 
 
@@ -117,6 +118,66 @@ func adjust_labor(city: Dictionary, sink: String, delta: int) -> bool:
 func refresh_labor(hex_map: HexMap) -> void:
 	for city in hex_map.cities:
 		ensure_labor(city)
+
+
+## Labor-turns one division costs (labor.training_labor_cost).
+func training_labor_cost() -> int:
+	return int(config.get("labor", {}).get("training_labor_cost", 0))
+
+
+## Labor-turns of infrastructure per +1 infra level (labor.infra_labor_per_level).
+func infra_labor_per_level() -> int:
+	return int(config.get("labor", {}).get("infra_labor_per_level", 1 << 30))
+
+
+## Points the city has on Training / Infrastructure.
+func training_points(city: Dictionary) -> int:
+	return int(city.get("labor", {}).get("training", 0))
+
+
+func infra_points(city: Dictionary) -> int:
+	return int(city.get("labor", {}).get("infrastructure", 0))
+
+
+## When a recruit is queued in a city with nothing on Training, moves
+## labor.recruit_auto_training_share of its labor points to Training (from Growth,
+## keeping Infrastructure). The city is flagged labor_auto so end_auto_training can
+## put the default split back when the queue clears. Any manual change drops the flag.
+func auto_training(city: Dictionary) -> void:
+	ensure_labor(city)
+	if training_points(city) > 0:
+		return
+	var share := float(config.get("labor", {}).get("recruit_auto_training_share", 0.0))
+	var room := labor_points(city) - infra_points(city)
+	var train := clampi(int(floor(labor_points(city) * share)), 0, maxi(room, 0))
+	city.labor.training = train
+	city.labor.growth = mini(int(city.labor.growth), maxi(room - train, 0))
+	city.labor_auto = true
+
+
+## Undoes auto_training: Training back to 0 and Growth to its default, Infrastructure kept.
+func end_auto_training(city: Dictionary) -> void:
+	if not city.get("labor_auto", false):
+		return
+	city.erase("labor_auto")
+	if not city.has("labor"):
+		return
+	city.labor.training = 0
+	city.labor.growth = mini(int(default_labor(city).growth), maxi(labor_points(city) - infra_points(city), 0))
+
+
+## Infrastructure sink: each city adds its Infrastructure points to city.infra_progress;
+## every infra_labor_per_level labor-turns raises infrastructure by 1 (leftover carries
+## over), which raises the housing cap. During a capture rebuild the levels repair the
+## damage first (see HexMap._rebuild_step).
+func apply_infrastructure(hex_map: HexMap) -> void:
+	var per_level := infra_labor_per_level()
+	for city in hex_map.cities:
+		var progress := int(city.get("infra_progress", 0)) + infra_points(city)
+		while progress >= per_level:
+			progress -= per_level
+			city.infrastructure = float(city.infrastructure) + 1.0
+		city.infra_progress = progress
 
 
 ## Labor totals for a nation: {"total", "training", "infrastructure", "growth", "free"}.
@@ -210,7 +271,8 @@ func recruit(city: Dictionary, nation: int, roster: DivisionRoster) -> bool:
 		return false
 	for r in config.recruit_cost:
 		stocks[nation][r] -= float(config.recruit_cost[r])
-	pending[city.id] = {"nation": nation, "turns_left": int(config.training_turns)}
+	pending[city.id] = {"nation": nation, "turns_left": int(config.training_turns), "labor": 0, "cost": training_labor_cost()}
+	auto_training(city)
 	return true
 
 
@@ -227,18 +289,26 @@ func spawn_pending(hex_map: HexMap, roster: DivisionRoster) -> void:
 				city = c
 		if city.is_empty() or city.nation != entry.nation:
 			pending.erase(id)
+			if not city.is_empty():
+				end_auto_training(city)
 			continue
 		entry.turns_left = maxi(entry.turns_left - 1, 0)
-		if entry.turns_left == 0 and roster.division_at(city.cell) == null:
+		entry.labor = mini(int(entry.get("labor", 0)) + training_points(city), training_labor_cost())
+		if entry.turns_left == 0 and entry.labor >= training_labor_cost() and roster.division_at(city.cell) == null:
 			roster.spawn_division(entry.nation, city.cell, config.recruit_template)
 			pending.erase(id)
+			end_auto_training(city)
 
 
-## Queue text for one pending recruit, e.g. "2 turns left".
+## Queue text for one pending recruit, e.g. "Division 9/15 labor, 2 turns left".
+## The labor cost comes from the entry, so no config is needed here.
 static func queue_text(entry: Dictionary) -> String:
+	var labor := "Division %d/%d labor, " % [int(entry.get("labor", 0)), int(entry.get("cost", 0))] if entry.has("cost") else ""
+	if entry.turns_left <= 0 and int(entry.get("labor", 0)) >= int(entry.get("cost", 0)):
+		return labor + "ready, waiting for hex to clear"
 	if entry.turns_left <= 0:
-		return "ready, waiting for hex to clear"
-	return "%d turn%s left" % [entry.turns_left, "" if entry.turns_left == 1 else "s"]
+		return labor + "needs more Training labor"
+	return labor + "%d turn%s left" % [entry.turns_left, "" if entry.turns_left == 1 else "s"]
 
 
 func division_count(nation: int, roster: DivisionRoster) -> int:
@@ -271,6 +341,7 @@ func end_turn(hex_map: HexMap, roster: DivisionRoster) -> void:
 	collect_income(hex_map)
 	pay_upkeep(hex_map, roster)
 	reinforce(roster, hex_map)
+	apply_infrastructure(hex_map)
 	spawn_pending(hex_map, roster)
 
 
