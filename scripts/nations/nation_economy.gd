@@ -30,6 +30,10 @@ var unpaid_divisions: Dictionary = {}
 var pows: Dictionary = {}
 ## nation index -> people drawn from pools for reinforcement on the last end_turn.
 var reinforce_spent: Dictionary = {}
+## nation -> labor points rushed with cash this turn (Syndicate rush-buy; reset each end turn).
+var rush_spent: Dictionary = {}
+## The map this economy was set up on (faction traits and city ranks read it).
+var _map: HexMap = null
 
 
 func _init(path := CONFIG_PATH) -> void:
@@ -38,6 +42,8 @@ func _init(path := CONFIG_PATH) -> void:
 
 
 func setup(hex_map: HexMap) -> void:
+	_map = hex_map
+	rush_spent.clear()
 	city_rules = hex_map.city_rules
 	stocks.clear()
 	pending.clear()
@@ -56,6 +62,8 @@ func setup(hex_map: HexMap) -> void:
 ## Labor points of a city: population / people_per_labor_point, rounded down, times
 ## siege_labor_mult while besieged (HexMap.labor_points_for).
 func labor_points(city: Dictionary) -> int:
+	if _map != null:
+		return _map.labor_points(city)  # includes the faction trait labor bonuses
 	return HexMap.labor_points_for(city, city_rules)
 
 
@@ -142,8 +150,12 @@ func training_labor_cost() -> int:
 
 
 ## Labor-turns of infrastructure per +1 infra level (labor.infra_labor_per_level).
-func infra_labor_per_level() -> int:
-	return int(config.get("labor", {}).get("infra_labor_per_level", 1 << 30))
+## A faction's infra_cost_labor trait replaces it for that nation.
+func infra_labor_per_level(nation := -1) -> int:
+	var base := int(config.get("labor", {}).get("infra_labor_per_level", 1 << 30))
+	if _map != null and nation >= 0:
+		return int(_map.traits.mod(nation, "infra_cost_labor", base))
+	return base
 
 
 ## Points the city has on Training / Infrastructure.
@@ -189,8 +201,8 @@ func end_auto_training(city: Dictionary) -> void:
 ## over), which raises the housing cap. During a capture rebuild the levels repair the
 ## damage first (see HexMap._rebuild_step).
 func apply_infrastructure(hex_map: HexMap) -> void:
-	var per_level := infra_labor_per_level()
 	for city in hex_map.cities:
+		var per_level := infra_labor_per_level(int(city.nation))
 		var progress := int(city.get("infra_progress", 0)) + infra_points(city)
 		while progress >= per_level:
 			progress -= per_level
@@ -226,12 +238,14 @@ func collect_income(hex_map: HexMap) -> void:
 		var s: Dictionary = stocks[nation]
 		s.influence += float(config.influence_per_turn)
 		s.operations += float(config.operations_per_turn)
+		s.cash += cash_income(nation, hex_map)
 	for city in hex_map.cities:
 		if not hex_map.nations.has(city.nation):
 			continue
 		var income := city_income(city)
 		for r in income:
-			stocks[city.nation][r] += income[r]
+			if r != "cash":  # cash goes through cash_income (faction cash traits)
+				stocks[city.nation][r] += income[r]
 
 
 ## Total upkeep a nation owes this turn, summed over its divisions' types, e.g. {"cash": 6}.
@@ -333,6 +347,35 @@ func recruit(city: Dictionary, nation: int, roster: DivisionRoster) -> bool:
 	city.population = int(city.population) - int(city_rules.division_people_cost)
 	pending[city.id] = {"nation": nation, "turns_left": int(config.training_turns), "labor": 0, "cost": training_labor_cost()}
 	auto_training(city)
+	return true
+
+
+# --- Rush-buy (Syndicate trait; Task 41) ---
+
+## Why the city's queue cannot be rushed with cash, or "" if it can: the nation's faction
+## needs rush_cost_per_labor, the city a queued recruit that still needs labor, the nation
+## rush_cap_per_turn labor points left this turn (nation-wide) and enough cash.
+func rush_block_reason(city: Dictionary, nation: int) -> String:
+	if _map == null or not _map.traits.has_trait(nation, "rush_cost_per_labor"):
+		return "no rush-buy"
+	if city.is_empty() or city.nation != nation:
+		return "not your city"
+	if not pending.has(city.id) or int(pending[city.id].labor) >= int(pending[city.id].cost):
+		return "nothing to rush"
+	if int(rush_spent.get(nation, 0)) >= int(_map.traits.mod(nation, "rush_cap_per_turn", 0)):
+		return "rush cap reached"
+	if float(stocks[nation].cash) < float(_map.traits.mod(nation, "rush_cost_per_labor")):
+		return "not enough cash"
+	return ""
+
+
+## Rushes 1 labor point into the city's queue for rush_cost_per_labor cash. False if blocked.
+func rush_training(city: Dictionary, nation: int) -> bool:
+	if rush_block_reason(city, nation) != "":
+		return false
+	stocks[nation].cash = float(stocks[nation].cash) - float(_map.traits.mod(nation, "rush_cost_per_labor"))
+	pending[city.id].labor = int(pending[city.id].labor) + 1
+	rush_spent[nation] = int(rush_spent.get(nation, 0)) + 1
 	return true
 
 
@@ -530,12 +573,17 @@ func division_count(nation: int, roster: DivisionRoster) -> int:
 
 
 ## Cash per turn a nation's cities make (the same city_income the economy collects).
+## Faction traits: cash_per_city adds per city (at most flat_bonus_city_cap cities), then
+## cash_mult scales the nation's total.
 func cash_income(nation: int, hex_map: HexMap) -> float:
 	var total := 0.0
+	var count := 0
 	for city in hex_map.cities:
 		if city.nation == nation:
 			total += float(city_income(city).cash)
-	return total
+			count += 1
+	total += float(hex_map.traits.mod(nation, "cash_per_city", 0.0)) * hex_map.traits.counted_cities(count)
+	return total * float(hex_map.traits.mod(nation, "cash_mult", 1.0))
 
 
 ## Cash upkeep per turn of the nation's fielded divisions plus its queued recruits (each at
@@ -583,6 +631,7 @@ func run_ai(player_nation: int, hex_map: HexMap, roster: DivisionRoster) -> void
 ## End-of-turn economy step: income, upkeep, reinforcement, then training ticks
 ## and recruits appear.
 func end_turn(hex_map: HexMap, roster: DivisionRoster) -> void:
+	rush_spent.clear()
 	refresh_labor(hex_map)
 	collect_income(hex_map)
 	pay_upkeep(hex_map, roster)

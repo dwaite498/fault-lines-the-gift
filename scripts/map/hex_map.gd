@@ -99,6 +99,12 @@ var last_capture := {}
 ## Additive growth-rate modifier per nation (a trait hook for Task 41; empty today).
 ## Added to base_growth before the terrain multiplier, e.g. -0.003 for a penalized faction.
 var growth_mods: Dictionary = {}
+## Faction trait modifiers (factions.json faction_traits), filled by load_faction_traits.
+var traits := FactionTraits.new()
+## The game's current turn (main.gd keeps it); the plunder cooldown reads it.
+var current_turn := 0
+## nation -> turn it last plundered a city (used when plunder_cooldown_scope is "nation").
+var plunder_last_turn: Dictionary = {}
 ## Vector2i cell -> true for fungus tiles (hook; the map has no fungus yet). A terrain
 ## named "fungus" also counts.
 var fungus_tiles: Dictionary = {}
@@ -200,10 +206,12 @@ func can_step(from: Vector2i, to: Vector2i) -> bool:
 
 ## Move points to step from `from` into `to`: the target's move_cost, plus climb_cost
 ## when it is one or more levels higher. Downhill and level steps cost the normal amount.
-func step_cost(from: Vector2i, to: Vector2i) -> int:
+func step_cost(from: Vector2i, to: Vector2i, nation := -1) -> int:
 	var cost := int(terrain_of(to).move_cost)
 	if elevation_of(to) > elevation_of(from):
-		cost += int(elevation_rules.get("climb_cost", 0))
+		var free: Array = traits.mod(nation, "no_uphill_penalty_terrain", []) if nation >= 0 else []
+		if not free.has(terrain_name(to)):
+			cost += int(elevation_rules.get("climb_cost", 0))
 	return cost
 
 
@@ -491,26 +499,46 @@ func grow_cities(unit_cells := {}) -> bool:
 
 
 ## Housing cap in people: infrastructure x housing_per_infra, rounded down.
+## Faction traits: a sea city of a faction with sea_housing_per_infra uses that per infra,
+## housing_flat_per_city adds to each of the first flat_bonus_city_cap cities, and
+## housing_mult scales the total.
 func housing_cap(city: Dictionary) -> int:
-	return int(floor(float(city.infrastructure) * float(city_rules.housing_per_infra)))
+	var nation := int(city.get("nation", -1))
+	var per_infra := float(city_rules.housing_per_infra)
+	if traits.has_trait(nation, "sea_housing_per_infra") and traits.is_sea_city(self, city):
+		per_infra = float(traits.mod(nation, "sea_housing_per_infra"))
+	var total := float(city.infrastructure) * per_infra
+	if traits.has_trait(nation, "housing_flat_per_city") and traits.within_city_cap(self, city):
+		total += float(traits.mod(nation, "housing_flat_per_city"))
+	return int(floor(total * float(traits.mod(nation, "housing_mult", 1.0))))
 
 
 ## Labor points of a city: population / people_per_labor_point rounded down, times
 ## siege_labor_mult while besieged, the Occupy labor_mult while occupied and the Enslave
 ## labor_mult while enslaved.
-static func labor_points_for(city: Dictionary, rules: Dictionary) -> int:
+static func labor_points_for(city: Dictionary, rules: Dictionary, occupy_mult := -1.0) -> int:
 	var points := float(city.population) / float(rules.people_per_labor_point)
 	if city.get("besieged", false):
 		points *= float(rules.siege_labor_mult)
 	if city.get("occupied", false):
-		points *= float(rules.capture.options.occupy.labor_mult)
+		points *= occupy_mult if occupy_mult >= 0.0 else float(rules.capture.options.occupy.labor_mult)
 	if city.get("enslaved", false):
 		points *= float(rules.capture.options.enslave.labor_mult)
 	return int(floor(points))
 
 
+## Faction traits: occupy_labor_mult replaces the Occupy labor_mult for the occupier,
+## labor_per_city adds points to each of the first flat_bonus_city_cap cities and
+## labor_per_sea_city to each of the first sea cities.
 func labor_points(city: Dictionary) -> int:
-	return labor_points_for(city, city_rules)
+	var nation := int(city.get("nation", -1))
+	var occupy := float(traits.mod(nation, "occupy_labor_mult", -1.0))
+	var points := labor_points_for(city, city_rules, occupy)
+	if traits.has_trait(nation, "labor_per_city") and traits.within_city_cap(self, city):
+		points += int(traits.mod(nation, "labor_per_city"))
+	if traits.has_trait(nation, "labor_per_sea_city") and traits.within_sea_city_cap(self, city):
+		points += int(traits.mod(nation, "labor_per_sea_city"))
+	return points
 
 
 ## Key into terrain_growth_mult for the city's own tile: "coast" for plains that touch
@@ -560,6 +588,8 @@ func growth_rate(city: Dictionary, share_override := -1.0) -> float:
 		var total := labor_points(city)
 		share = float(int(city.get("labor", {}).get("growth", 0))) / float(total) if total > 0 else 0.0
 	var base := float(city_rules.base_growth) + float(growth_mods.get(int(city.nation), 0.0))
+	if int(city.population) < int(traits.global_value("growth_bonus_pop_ceiling", 0)):
+		base += float(traits.mod(int(city.nation), "growth_bonus_small_city", 0.0))
 	var rate := (base + float(city_rules.growth_labor_max_bonus) * clampf(share, 0.0, 1.0)) \
 			* terrain_growth_mult(city)
 	return maxf(rate, float(city_rules.min_growth))
@@ -587,13 +617,19 @@ func display_people(people: int) -> int:
 # --- Recruitable pool ---
 
 ## The pool never holds more than pool_cap of the population (rounded down).
+## Faction traits: recruit_cap_pop_share adds to the cap rate, then recruit_cap_mult scales it.
 func pool_cap(city: Dictionary) -> int:
-	return int(floor(float(city.population) * float(city_rules.pool_cap)))
+	var nation := int(city.get("nation", -1))
+	var rate := (float(city_rules.pool_cap) + float(traits.mod(nation, "recruit_cap_pop_share", 0.0))) \
+			* float(traits.mod(nation, "recruit_cap_mult", 1.0))
+	return int(floor(float(city.population) * rate))
 
 
 ## People added to the pool each turn: pool_fill_rate of the population, rounded down.
+## Faction traits: pool_fill_mult scales the fill.
 func pool_fill(city: Dictionary) -> int:
-	return int(floor(float(city.population) * float(city_rules.pool_fill_rate)))
+	var mult := float(traits.mod(int(city.get("nation", -1)), "pool_fill_mult", 1.0))
+	return int(floor(float(city.population) * float(city_rules.pool_fill_rate) * mult))
 
 
 ## Recruitable people now (cities built by hand may have no "pool" key).
@@ -829,12 +865,45 @@ func allowed_capture_options(nation: int) -> Array[String]:
 
 
 ## "" if `nation` may use the capture option, else a short reason.
-func capture_block_reason(nation: int, option: String) -> String:
+## Plunder also has a global cooldown (factions.json global.plunder_cooldown_turns): with
+## plunder_cooldown_scope "city" (the spec: nobody may plunder a city for that many turns after
+## it was plundered; needs city_id) or "nation" (the plundering nation may not plunder again).
+func capture_block_reason(nation: int, option: String, city_id := -1) -> String:
 	if not city_rules.capture.options.has(option):
 		return "unknown option"
 	if not allowed_capture_options(nation).has(option):
 		return "not allowed for this faction"
+	if option == "plunder":
+		var left := plunder_turns_left(nation, city_id)
+		if left > 0:
+			return "plunder on cooldown: %d turn%s left" % [left, "" if left == 1 else "s"]
 	return ""
+
+
+## Turns until `nation` may plunder (the city, in "city" scope) again; 0 if it may now.
+func plunder_turns_left(nation: int, city_id := -1) -> int:
+	var cooldown := int(traits.global_value("plunder_cooldown_turns", 0))
+	var last := -1
+	if str(traits.global_value("plunder_cooldown_scope", "city")) == "nation":
+		if not plunder_last_turn.has(nation):
+			return 0
+		last = int(plunder_last_turn[nation])
+	else:
+		var city := city_by_id(city_id)
+		if city.is_empty() or not city.has("last_plundered_turn"):
+			return 0
+		last = int(city.last_plundered_turn)
+	return maxi(last + cooldown - current_turn, 0)
+
+
+## Loads faction_traits and the global block (factions.json) for this map's nations
+## (nation_factions must be set), and gives each nation its static growth_mod through
+## growth_mods.
+func load_faction_traits(factions: Array, global_block: Dictionary) -> void:
+	traits.load_factions(factions, global_block, nation_factions)
+	for nation in nation_factions:
+		if traits.has_trait(int(nation), "growth_mod"):
+			growth_mods[int(nation)] = float(traits.mod(int(nation), "growth_mod"))
 
 
 ## The harshest option `nation` may use, by capture.harshness_order.
@@ -880,7 +949,7 @@ func reputation_weight_to(observer_faction: String, event: Dictionary) -> float:
 ## option with probability aggressive_harsh_chance (drawn from rng) and Annex otherwise;
 ## every other faction always picks Annex. A nation with no faction uses
 ## capture.ai_default_option. The result is always an allowed option (else Annex).
-func ai_capture_option(nation := -1, rng: RandomNumberGenerator = null) -> String:
+func ai_capture_option(nation := -1, rng: RandomNumberGenerator = null, city_id := -1) -> String:
 	var faction: String = nation_factions.get(nation, "")
 	var pick := String(city_rules.capture.ai_default_option)
 	if faction != "":
@@ -888,7 +957,7 @@ func ai_capture_option(nation := -1, rng: RandomNumberGenerator = null) -> Strin
 		if city_rules.capture.aggressive_factions.has(faction) and rng != null \
 				and rng.randf() < float(city_rules.capture.aggressive_harsh_chance):
 			pick = harshest_capture_option(nation)
-	return pick if capture_block_reason(nation, pick) == "" else "annex"
+	return pick if capture_block_reason(nation, pick, city_id) == "" else "annex"
 
 
 ## True if the city is occupied and its occupy timer has run out (it may be annexed).
@@ -926,8 +995,8 @@ func apply_capture(city_id: int, option: String) -> Dictionary:
 	var city := city_by_id(city_id)
 	if city.is_empty() or not city.get("capture_pending", false):
 		return {}
-	if capture_block_reason(int(city.nation), option) != "":
-		option = "annex"  # unknown or gated for the captor's faction
+	if capture_block_reason(int(city.nation), option, city_id) != "":
+		option = "annex"  # unknown, gated for the captor's faction, or plunder on cooldown
 	var opt: Dictionary = city_rules.capture.options[option]
 	var victim := int(city.capture_victim)
 	var captor := int(city.nation)
@@ -964,11 +1033,17 @@ func apply_capture(city_id: int, option: String) -> Dictionary:
 		match option:
 			"occupy":
 				city.occupied = true
-				city.occupy_turns_left = int(opt.turns)
+				city.occupy_turns_left = int(traits.mod(captor, "occupy_annex_turns", int(opt.turns)))
 			"enslave":
 				city.enslaved = true
 			"plunder":
-				result.cash = float(pop) / 1000.0 * float(opt.cash_per_1000_people)
+				var cash := float(pop) / 1000.0 * float(opt.cash_per_1000_people) \
+						* float(traits.mod(captor, "plunder_cash_mult", 1.0))
+				if traits.has_trait(captor, "plunder_cash_cap"):
+					cash = minf(cash, float(traits.mod(captor, "plunder_cash_cap")))
+				result.cash = cash
+				city.last_plundered_turn = current_turn
+				plunder_last_turn[captor] = current_turn
 			"reduce":
 				_settle_refugees(result, victim, cell, loss, loss)
 		if option in ["annex", "plunder", "reduce"]:

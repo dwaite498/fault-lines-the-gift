@@ -19,11 +19,14 @@ signal recruit_pressed
 signal pod_pressed
 ## Emitted when the Scout button is clicked (same action as the S key).
 signal scout_pressed
+## Emitted when the Rush button is clicked (Syndicate rush-buy).
+signal rush_pressed
 ## Emitted when the Annex button (an occupied city whose timer ran out) is clicked.
 signal annex_pressed
 var annex_button := Button.new()
 var pod_button := Button.new()
 var scout_button := Button.new()
+var rush_button := Button.new()
 ## Emitted by a labor row's -/+ button: the sink name and +1 or -1.
 signal labor_pressed(sink: String, delta: int)
 ## sink -> {"label": Label, "minus": Button, "plus": Button}
@@ -40,6 +43,9 @@ func _init() -> void:
 	panel.add_child(button)
 	button.focus_mode = Control.FOCUS_NONE
 	button.pressed.connect(func(): recruit_pressed.emit())
+	panel.add_child(rush_button)
+	rush_button.focus_mode = Control.FOCUS_NONE
+	rush_button.pressed.connect(func(): rush_pressed.emit())
 	panel.add_child(scout_button)
 	scout_button.focus_mode = Control.FOCUS_NONE
 	scout_button.pressed.connect(func(): scout_pressed.emit())
@@ -116,7 +122,7 @@ func refresh(city: Dictionary) -> void:
 		if int(city.get("recruit_lockout", 0)) > 0:
 			label.text += "\nRecruit lockout: %d turns" % int(city.recruit_lockout)
 		label.text += "\nOutput/turn: cash +%.1f, capacity +%.1f" % [income.cash, income.capacity]
-		var per_level := economy.infra_labor_per_level()
+		var per_level := economy.infra_labor_per_level(int(city.nation))
 		label.text += "\nInfra build %d/%d (+%d/turn)" % [int(city.get("infra_progress", 0)), per_level, economy.infra_points(city)]
 		if economy.pending.has(city.id):
 			label.text += "\nRecruiting: " + NationEconomy.queue_text(economy.pending[city.id])
@@ -148,6 +154,7 @@ func refresh(city: Dictionary) -> void:
 		psize = Vector2(maxf(psize.x, 226.0), psize.y + ROW_HEIGHT)
 	pod_button.visible = button.visible
 	scout_button.visible = button.visible
+	rush_button.visible = button.visible
 	annex_button.visible = button.visible and hex_map.can_annex_occupied(city)
 	if annex_button.visible:
 		annex_button.position = Vector2(8, psize.y)
@@ -160,6 +167,14 @@ func refresh(city: Dictionary) -> void:
 		button.position = Vector2(8, psize.y)
 		button.size = button.get_minimum_size()
 		psize = Vector2(maxf(psize.x, button.size.x + 16), psize.y + button.size.y + 8)
+		var rush_reason := economy.rush_block_reason(city, player_nation)
+		rush_button.visible = rush_reason != "no rush-buy"
+		rush_button.disabled = rush_reason != ""
+		rush_button.text = "Rush +1 labor" if rush_reason == "" else "Rush: " + rush_reason
+		if rush_button.visible:
+			rush_button.position = Vector2(8, psize.y)
+			rush_button.size = rush_button.get_minimum_size()
+			psize = Vector2(maxf(psize.x, rush_button.size.x + 16), psize.y + rush_button.size.y + 8)
 		var scout_reason := economy.scout_block_reason(city, player_nation, roster)
 		scout_button.disabled = scout_reason != ""
 		scout_button.text = "Scout (S)" if scout_reason == "" else "Scout: " + scout_reason

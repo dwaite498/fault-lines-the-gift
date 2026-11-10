@@ -46,6 +46,8 @@ func _initialize() -> void:
 	test_colonizers()
 	test_fog()
 	test_scout()
+	test_faction_traits()
+	test_plunder_cooldown()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -1514,10 +1516,10 @@ func test_atrocity_views() -> void:
 	ok(ev.type == "enslave" and ev.severity == 3 and ev.atrocity == false and r.severity == 3, "the Enslave event keeps severity 3 and atrocity false")
 	# Observer-relative weight: atrocity_weight x sensitivity for an atrocity, else base severity.
 	var w: float = float(m.city_rules.capture.atrocity_weight)
-	ok(is_equal_approx(m.reputation_weight_to("assembly", plunder), w) and is_equal_approx(m.reputation_weight_to("syndicate", plunder), 1.0), "weight: Plunder is an atrocity weight to Assembly and its base severity (1) to Syndicate")
+	ok(is_equal_approx(m.reputation_weight_to("assembly", plunder), w * 1.5) and is_equal_approx(m.reputation_weight_to("syndicate", plunder), 1.0), "weight: Plunder is an atrocity weight to Assembly and its base severity (1) to Syndicate")
 	ok(is_equal_approx(m.reputation_weight_to("directorate", enslave), 3.0) and is_equal_approx(m.reputation_weight_to("directorate", annex), 0.0), "weight: a normal event counts its base severity")
 	m.faction_sensitivity["drift"] = 0.5
-	ok(is_equal_approx(m.reputation_weight_to("drift", raze), w * 0.5) and is_equal_approx(m.reputation_weight_to("assembly", raze), w), "weight: scaled by the faction's atrocity sensitivity (default 1.0)")
+	ok(is_equal_approx(m.reputation_weight_to("drift", raze), w * 0.5) and is_equal_approx(m.reputation_weight_to("assembly", raze), w * 1.5), "weight: scaled by the faction's atrocity sensitivity (Assembly 1.5 in factions.json)")
 	var custom := [{"id": "x", "views_as_atrocity": ["raze"], "atrocity_sensitivity": 2.0}, {"id": "y"}]
 	m.load_faction_views(custom)
 	ok(is_equal_approx(m.reputation_weight_to("x", raze), w * 2.0) and is_equal_approx(m.reputation_weight_to("y", raze), w), "atrocity_sensitivity is read from the faction entry when present")
@@ -2165,3 +2167,282 @@ func test_scout() -> void:
 		if d.unit_type == "scout":
 			scouts += 1
 	ok(scouts >= 1 and grew == game.map.nations.size(), "25 turns of AI play: scouts exist (%d) and every nation more than doubled its explored map (%s)" % [scouts, game.map.nations.map(func(n: int) -> String: return "%d->%d" % [initial[n], game.fog.explored[n].size()])])
+
+
+# --- Task 41: faction traits ---
+
+## pool_setup with the factions of `ids` (nation -> faction id) and their traits loaded.
+func trait_setup(ids: Dictionary) -> Dictionary:
+	var s := pool_setup()
+	var m: HexMap = s.map
+	m.nation_factions = ids.duplicate()
+	m.load_faction_traits(FactionRoster.load_all(), FactionRoster.load_global())
+	s.roster.traits = m.traits
+	s.roster.economy = s.eco
+	s.eco.setup(m)
+	return s
+
+
+## A naval template (none ships yet) so naval traits can be exercised.
+func add_naval(roster: DivisionRoster) -> void:
+	var t: Dictionary = roster.templates.infantry.duplicate(true)
+	t["type"] = "naval"
+	roster.templates["naval"] = t
+
+
+func test_faction_traits() -> void:
+	var cfg: Dictionary = FactionRoster.load_global()
+	ok(cfg.plunder_cooldown_turns == 20 and cfg.flat_bonus_city_cap == 6 and cfg.growth_bonus_pop_ceiling == 15000, "factions.json global: plunder cooldown 20, flat bonus cap 6 cities, growth bonus below 15,000")
+	var rows := FactionRoster.load_all()
+	ok(rows.all(func(f: Dictionary) -> bool: return f.has("faction_traits") and f.has("atrocity_sensitivity")), "every faction has faction_traits and an atrocity_sensitivity")
+	var base := trait_setup({})
+	var bm: HexMap = base.map
+	# --- Assembly ---
+	var a := trait_setup({0: "assembly"})
+	var am: HexMap = a.map
+	var acity: Dictionary = nation_cities(am, 0)[0]
+	var bcity: Dictionary = nation_cities(bm, 0)[0]
+	var tmult := am.terrain_growth_mult(acity)
+	ok(is_equal_approx(am.growth_rate(acity, 0.0) - bm.growth_rate(bcity, 0.0), 0.003 * tmult), "Assembly: +0.3% growth in a city under 15,000 people")
+	acity.population = 15000
+	bcity.population = 15000
+	ok(is_equal_approx(am.growth_rate(acity, 0.0), bm.growth_rate(bcity, 0.0)), "Assembly: the growth bonus is gone at 15,000 people")
+	ok(am.pool_cap(acity) == int(floor(15000.0 * float(am.city_rules.pool_cap) * 0.75)) and am.pool_cap(acity) < bm.pool_cap(bcity), "Assembly: recruit cap x0.75")
+	var cash_a: float = a.eco.cash_income(0, am)
+	var cash_b: float = base.eco.cash_income(0, bm)
+	var n_a := nation_cities(am, 0).size()
+	ok(is_equal_approx(cash_a - cash_b, 2.0 * mini(n_a, 6)), "Assembly: +2 cash per city (%d cities)" % n_a)
+	var up: Dictionary = a.roster.upkeep_of(a.roster.spawn_division(0, acity.cell))
+	ok(float(up.cash) == float(a.roster.templates.infantry.upkeep.get("cash", 0)) + 1.0, "Assembly: +1 cash upkeep per division")
+	var pod: Division = a.roster.spawn_division(0, acity.cell, "colony_pod")
+	ok(float(a.roster.upkeep_of(pod).get("cash", 0.0)) == float(a.roster.templates.colony_pod.get("upkeep", {}).get("cash", 0.0)), "Assembly: colony pods pay no extra upkeep")
+	ok(bm.traits.mod(0, "occupy_annex_turns", -1) == -1, "no faction: no occupy_annex_turns trait")
+	var a2 := trait_setup({0: "assembly", 1: "syndicate"})
+	a2.roster.economy = a2.eco
+	var cities1 := nation_cities(a2.map, 1)
+	var g1: Division = a2.roster.division_at(cities1[0].cell)
+	if g1:
+		a2.roster.divisions.erase(g1)
+	capture_with({"map": a2.map, "roster": a2.roster, "eco": a2.eco}, cities1[0], 0, "occupy")
+	ok(cities1[0].occupy_turns_left == 3, "Assembly: Occupy annexes after 3 turns (not 5)")
+	# --- 8 cities count as 6 ---
+	ok(am.traits.counted_cities(8) == 6 and am.traits.counted_cities(4) == 4, "the flat per-city bonuses count at most 6 cities (8 cities = the 6-city value)")
+	var many := trait_setup({0: "assembly"})
+	var mm: HexMap = many.map
+	var first: Dictionary = nation_cities(mm, 0)[0]
+	var before_cash: float = many.eco.cash_income(0, mm)
+	var need := 8 - nation_cities(mm, 0).size()
+	for i in maxi(need, 0):
+		var extra := first.duplicate(true)
+		extra.id = 500 + i
+		mm.cities.append(extra)
+	var cash8: float = many.eco.cash_income(0, mm)
+	var income8 := 0.0
+	for c in nation_cities(mm, 0):
+		income8 += float(many.eco.city_income(c).cash)
+	ok(is_equal_approx(cash8, income8 + 12.0), "Assembly with 8 cities earns the 6-city flat cash bonus (+12), not +16")
+	# --- Directorate ---
+	var d := trait_setup({0: "directorate"})
+	var dm: HexMap = d.map
+	var dcity: Dictionary = nation_cities(dm, 0)[0]
+	var inf: Division = d.roster.spawn_division(0, dcity.cell)
+	var inf_b: Division = base.roster.spawn_division(0, bcity.cell)
+	ok(is_equal_approx(inf.max_org, inf_b.max_org * 1.1) and inf.org == inf.max_org, "Directorate: max org x1.1 at spawn")
+	ok(d.roster.fortify(inf) and inf.fortify_level == 2, "Directorate: first fortify turn reaches level 2")
+	inf.moves_left = inf.move
+	d.roster.fortify(inf)
+	inf_b.moves_left = inf_b.move
+	base.roster.fortify(inf_b)
+	ok(inf.fortify_level == 3 and inf_b.fortify_level == 1, "Directorate: max fortify in 2 turns (others gain 1 a turn)")
+	ok(dm.growth_mods[0] == -0.003 and is_equal_approx(dm.growth_rate(dcity, 0.0) - bm.growth_rate(bcity, 0.0), -0.003 * dm.terrain_growth_mult(dcity)), "Directorate: -0.3% growth, through growth_mods")
+	var home: Division = d.roster.spawn_division(0, dcity.cell)
+	home.org = 10.0
+	home.supplied = true
+	var home_b: Division = base.roster.spawn_division(0, bcity.cell)
+	home_b.org = 10.0
+	d.roster.end_turn(dm)
+	base.roster.end_turn(bm)
+	ok(is_equal_approx(home.org - home_b.org, 5.0), "Directorate: +5 org regen on its own territory")
+	# --- Syndicate ---
+	var sy := trait_setup({0: "syndicate"})
+	var sm: HexMap = sy.map
+	var scity: Dictionary = nation_cities(sm, 0)[0]
+	var sraw := 0.0
+	for c in nation_cities(sm, 0):
+		sraw += float(sy.eco.city_income(c).cash)
+	ok(is_equal_approx(sy.eco.cash_income(0, sm), sraw + 3.0 * mini(nation_cities(sm, 0).size(), 6)), "Syndicate: +3 cash per city")
+	var sdiv: Division = sy.roster.spawn_division(0, scity.cell)
+	ok(is_equal_approx(sdiv.max_org, inf_b.max_org * 0.9), "Syndicate: max org x0.9")
+	var enemy := nation_cities(sm, 1)[0]
+	var guard1: Division = sy.roster.division_at(enemy.cell)
+	if guard1:
+		sy.roster.divisions.erase(guard1)
+	var enemy_pop := float(enemy.population)
+	var pl := capture_with(sy, enemy, 0, "plunder")
+	ok(is_equal_approx(float(pl.cash), enemy_pop / 1000.0 * float(sm.city_rules.capture.options.plunder.cash_per_1000_people) * 1.5), "Syndicate: Plunder cash x1.5")
+	sy.eco.stocks[0].cash = 100.0
+	sy.eco.pending[scity.id] = {"kind": "infantry", "labor": 0, "cost": 10}
+	ok(sy.eco.rush_block_reason(scity, 0) == "" and sy.eco.rush_training(scity, 0) and sy.eco.pending[scity.id].labor == 1 and is_equal_approx(float(sy.eco.stocks[0].cash), 90.0), "Syndicate: rush 1 labor point for 10 cash")
+	for i in 10:
+		sy.eco.rush_training(scity, 0)
+	var rushed: Dictionary = sy.eco.pending[scity.id]
+	ok(sy.eco.rush_spent[0] == 5 and sy.eco.rush_block_reason(scity, 0) == "rush cap reached" and rushed.labor == 5, "Syndicate: rush is capped at 5 labor per turn")
+	sy.eco.pending.erase(scity.id)
+	sy.eco.end_turn(sm, sy.roster)
+	ok(sy.eco.rush_spent.is_empty() and base.eco.rush_block_reason(bcity, 0) == "no rush-buy", "the rush cap resets each turn; other factions cannot rush")
+	# --- Verdant Accord ---
+	var v := trait_setup({0: "verdant_accord"})
+	var vm: HexMap = v.map
+	var vcity: Dictionary = nation_cities(vm, 0)[0]
+	var vcity_b: Dictionary = nation_cities(bm, 0)[0]
+	ok(vm.housing_cap(vcity) == bm.housing_cap(vcity_b) + 2000, "Verdant: +2,000 housing in each of the first 6 cities")
+	var vn := nation_cities(vm, 0)
+	if vn.size() > 6:
+		ok(vm.housing_cap(vn[6]) == bm.housing_cap(nation_cities(bm, 0)[6]), "Verdant: no housing bonus past the 6th city")
+	ok(v.eco.infra_labor_per_level(0) == 13 and base.eco.infra_labor_per_level(0) == int(base.eco.config.labor.infra_labor_per_level), "Verdant: infrastructure costs 13 labor per level")
+	var vdiv: Division = v.roster.spawn_division(0, vcity.cell)
+	var vdiv_b: Division = base.roster.spawn_division(0, bcity.cell)
+	var vhex := Vector2i(1, 1)
+	vdiv.hex = vhex
+	vdiv_b.hex = vhex
+	vm.terrain[vhex] = "forest"
+	bm.terrain[vhex] = "forest"
+	ok(vm.city_at(vhex).is_empty() and bm.city_at(vhex).is_empty(), "the defense test hex is not a city")
+	ok(is_equal_approx(v.roster.defense_of(vdiv, vm) / base.roster.defense_of(vdiv_b, bm), 1.15), "Verdant: x1.15 defense in forest")
+	vm.terrain[vhex] = "hills"
+	bm.terrain[vhex] = "hills"
+	ok(is_equal_approx(v.roster.defense_of(vdiv, vm) / base.roster.defense_of(vdiv_b, bm), 1.15), "Verdant: x1.15 defense in hills")
+	vm.terrain[vhex] = "plains"
+	bm.terrain[vhex] = "plains"
+	ok(is_equal_approx(v.roster.defense_of(vdiv, vm) / base.roster.defense_of(vdiv_b, bm), 1.0), "Verdant: no defense bonus on plains")
+	var up_from := Vector2i(0, 0)
+	var up_to := Vector2i(1, 0)
+	vm.elevation[up_from] = 1
+	vm.elevation[up_to] = 2
+	bm.elevation[up_from] = 1
+	bm.elevation[up_to] = 2
+	vm.terrain[up_to] = "forest"
+	bm.terrain[up_to] = "forest"
+	ok(vm.step_cost(up_from, up_to, 0) == int(vm.terrain_of(up_to).move_cost) and bm.step_cost(up_from, up_to, 0) == int(bm.terrain_of(up_to).move_cost) + int(bm.elevation_rules.climb_cost), "Verdant: no uphill climb cost into forest (others pay it)")
+	vm.terrain[up_to] = "plains"
+	ok(vm.step_cost(up_from, up_to, 0) == int(vm.terrain_of(up_to).move_cost) + int(vm.elevation_rules.climb_cost), "Verdant: still pays the climb cost on other terrain")
+	# --- Covenant ---
+	var co := trait_setup({0: "covenant"})
+	var cm: HexMap = co.map
+	var ccity: Dictionary = nation_cities(cm, 0)[0]
+	var ccity_b: Dictionary = nation_cities(bm, 0)[0]
+	ccity.population = 10000
+	ccity_b.population = 10000
+	ok(cm.pool_cap(ccity) - bm.pool_cap(ccity_b) == 300, "Covenant: recruit cap +3% of the city's people (+300 at 10,000)")
+	ok(is_equal_approx(co.eco.cash_income(0, cm), base.eco.cash_income(0, bm) * 0.85), "Covenant: -15% cash income")
+	var cdiv: Division = co.roster.spawn_division(0, ccity.cell)
+	var cdiv_b: Division = base.roster.spawn_division(0, ccity_b.cell)
+	co.roster._damage(cdiv, 20.0, 1.15)
+	base.roster._damage(cdiv_b, 20.0)
+	ok(cdiv_b.org < cdiv.org and is_equal_approx((cdiv.max_org - cdiv.org) * 1.15, cdiv_b.max_org - cdiv_b.org), "Covenant: org damage / 1.15 (org x1.15) when defending")
+	var loss_div: Division = co.roster.spawn_division(0, ccity.cell)
+	loss_div.org = 50.0
+	co.roster._lose_org_on_city_lost(0)
+	ok(is_equal_approx(loss_div.org, 40.0), "Covenant: every division loses 10 org when a city is lost")
+	# --- Collective ---
+	var cl := trait_setup({0: "collective"})
+	var lm: HexMap = cl.map
+	var lcity: Dictionary = nation_cities(lm, 0)[0]
+	ok(lm.labor_points(lcity) == bm.labor_points(bcity) + 1, "Collective: +1 labor in each of the first 6 cities")
+	ok(lm.pool_fill(lcity) == int(floor(float(lcity.population) * float(lm.city_rules.pool_fill_rate) * 1.25)), "Collective: recruit pool fills x1.25")
+	var lraw := 0.0
+	for c in nation_cities(lm, 0):
+		lraw += float(cl.eco.city_income(c).cash)
+	ok(lm.growth_mods[0] == -0.003 and is_equal_approx(cl.eco.cash_income(0, lm), lraw * 0.9), "Collective: -0.3% growth and -10% cash")
+	lcity.occupied = true
+	bcity.occupied = true
+	var occ := float(lm.city_rules.capture.options.occupy.labor_mult)
+	ok(lm.labor_points(lcity) - 1 == HexMap.labor_points_for(lcity, lm.city_rules, 0.75) and 0.75 < occ + 1.0, "Collective: its occupied cities give x0.75 labor")
+	# --- Lyceum ---
+	var ly := trait_setup({0: "lyceum"})
+	ok(ly.eco.infra_labor_per_level(0) == 8, "Lyceum: infrastructure costs 8 labor per level")
+	var ldiv: Division = ly.roster.spawn_division(0, nation_cities(ly.map, 0)[0].cell)
+	var ldiv_b: Division = base.roster.spawn_division(0, bcity.cell)
+	ok(is_equal_approx(ly.roster.attack_of(ldiv), ldiv_b.attack * 0.9), "Lyceum: attack x0.9")
+	ok(ly.roster.traits.mod(0, "supply_range_bonus", 0) == 1 and ly.roster.traits.mod(0, "intel_start_level", 0) == 2, "Lyceum: +1 supply range and intel start level 2 are in the data (no intel system yet)")
+	# --- Free Tide ---
+	var ft := trait_setup({0: "free_tide"})
+	var fm: HexMap = ft.map
+	add_naval(ft.roster)
+	add_naval(base.roster)
+	var fcity: Dictionary = nation_cities(fm, 0)[0]
+	var nav: Division = ft.roster.spawn_division(0, fcity.cell, "naval")
+	var nav_b: Division = base.roster.spawn_division(0, bcity.cell, "naval")
+	ok(is_equal_approx(ft.roster.attack_of(nav), nav_b.attack * 1.2) and is_equal_approx(ft.roster.attack_of(ft.roster.spawn_division(0, fcity.cell)), nav_b.attack), "Free Tide: naval attack x1.2 (land units unchanged)")
+	ok(fm.growth_mods[0] == -0.003 and ft.roster.max_fortify_for(nav) == int(ft.roster.combat.max_fortify) - 1, "Free Tide: -0.3% growth and max fortify -1")
+	var ft2 := trait_setup({0: "free_tide", 1: "assembly"})
+	ft2.roster.economy = ft2.eco
+	var ft_city: Dictionary = nation_cities(ft2.map, 1)[0]
+	var ftg: Division = ft2.roster.division_at(ft_city.cell)
+	if ftg:
+		ft2.roster.divisions.erase(ftg)
+	ft_city.population = 40000
+	var plr := capture_with(ft2, ft_city, 0, "plunder")
+	ok(is_equal_approx(float(plr.cash), 50.0), "Free Tide: Plunder cash x2 but capped at 50 (40,000 people = 100 x2 -> 50)")
+	# --- Deepwater Guild ---
+	var dw := trait_setup({0: "deepwater_guild"})
+	var wm: HexMap = dw.map
+	add_naval(dw.roster)
+	var wcity: Dictionary = nation_cities(wm, 0)[0]
+	wm.terrain[wcity.cell] = "coast"
+	ok(wm.growth_terrain_key(wcity) != "" and wm.traits.is_sea_city(wm, wcity) == (wm.growth_terrain_key(wcity) in ["coast", "shallow_ocean"]), "sea city = coast or shallow ocean terrain")
+	var wnav: Division = dw.roster.spawn_division(0, wcity.cell, "naval")
+	ok(is_equal_approx(wnav.strength, float(dw.roster.templates.naval.strength) * 0.9), "Deepwater: naval strength x0.9")
+	# --- Drift ---
+	var dr := trait_setup({0: "drift"})
+	var drm: HexMap = dr.map
+	add_naval(dr.roster)
+	var drcity: Dictionary = nation_cities(drm, 0)[0]
+	ok(drm.housing_cap(drcity) == int(floor(float(bm.housing_cap(bcity)) * 0.75)), "Drift: housing x0.75")
+	var dnav: Division = dr.roster.spawn_division(0, drcity.cell, "naval")
+	ok(dnav.move == int(dr.roster.templates.naval.move) + 1, "Drift: naval move +1")
+	ok(dr.roster.traits.mod(0, "sea_supply_range_bonus", 0) == 2, "Drift: +2 sea supply range")
+
+
+func test_plunder_cooldown() -> void:
+	var s := trait_setup({0: "syndicate", 1: "assembly", 2: "free_tide"})
+	var m: HexMap = s.map
+	var roster: DivisionRoster = s.roster
+	var cities := nation_cities(m, 1)
+	var c: Dictionary = cities[0]
+	var guard: Division = roster.division_at(c.cell)
+	if guard:
+		roster.divisions.erase(guard)
+	m.current_turn = 5
+	ok(m.plunder_turns_left(0, int(c.id)) == 0 and m.capture_block_reason(0, "plunder", int(c.id)) == "", "plunder is open before any plunder")
+	capture_with(s, c, 0, "plunder")
+	ok(c.last_plundered_turn == 5 and m.plunder_last_turn[0] == 5, "plundering records the turn on the city and the nation")
+	ok(m.capture_block_reason(0, "plunder", int(c.id)) == "plunder on cooldown: 20 turns left", "plunder is blocked for 20 turns (the popup text)")
+	m.current_turn = 6
+	ok(m.plunder_turns_left(0, int(c.id)) == 19 and m.capture_block_reason(0, "plunder", int(c.id)).ends_with("19 turns left"), "one turn later: 19 turns left")
+	m.current_turn = 24
+	ok(m.capture_block_reason(0, "plunder", int(c.id)) == "plunder on cooldown: 1 turn left", "turn 24: 1 turn left")
+	m.current_turn = 25
+	ok(m.capture_block_reason(0, "plunder", int(c.id)) == "", "plunder is allowed again at turn 5 + 20")
+	# Per city (the spec's default scope): another city and another nation are not blocked.
+	m.current_turn = 6
+	ok(m.capture_block_reason(0, "plunder", int(cities[1].id)) == "", "city scope: a different city can still be plundered")
+	ok(m.capture_block_reason(2, "plunder", int(c.id)) != "" or not m.allowed_capture_options(2).has("plunder"), "city scope: nobody can plunder the same city (any nation)")
+	ok(m.capture_block_reason(0, "annex", int(c.id)) == "" and m.capture_block_reason(0, "occupy", int(c.id)) == "", "other options are unaffected")
+	# The captor falls back to Annex if plunder is chosen while blocked.
+	var back: Dictionary = {}
+	m.take_city(c.cell, 2)
+	back = roster.apply_capture(int(c.id), "plunder", m)
+	ok(back.option == "annex", "a blocked Plunder is applied as Annex")
+	# Nation scope toggle.
+	m.traits.globals["plunder_cooldown_scope"] = "nation"
+	m.current_turn = 6
+	ok(m.plunder_turns_left(0, int(cities[1].id)) == 19 and m.plunder_turns_left(2, int(cities[1].id)) == 0, "nation scope: the plundering nation is blocked everywhere, others are not")
+	# Save/load keeps the cooldown.
+	var g := save_game_setup(3)
+	g.map.plunder_last_turn[0] = 5
+	g.map.cities[0].last_plundered_turn = 5
+	var st := save_state(g, 6)
+	var g2 := save_game_setup(3)
+	var turn2 := SaveGame.restore(st, g2.map, g2.roster, g2.eco)
+	ok(turn2 == 6 and g2.map.plunder_last_turn[0] == 5 and g2.map.current_turn == 6 and g2.map.cities[0].last_plundered_turn == 5, "the plunder cooldown and the current turn survive a save and load")

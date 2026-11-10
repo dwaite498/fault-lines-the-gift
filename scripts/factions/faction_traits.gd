@@ -43,3 +43,34 @@ func global_value(key: String, default: Variant = 0) -> Variant:
 ## How many cities of a flat `*_per_city` bonus count: at most flat_bonus_city_cap.
 func counted_cities(city_count: int) -> int:
 	return mini(city_count, int(global_value("flat_bonus_city_cap", city_count)))
+
+
+## 0-based position of the city among its nation's cities by id (the first
+## flat_bonus_city_cap cities get the flat per-city bonuses).
+func city_rank(hex_map: HexMap, city: Dictionary) -> int:
+	var rank := 0
+	for c in hex_map.cities:
+		if c.nation == city.nation and int(c.id) < int(city.id):
+			rank += 1
+	return rank
+
+
+## True if the city is one of the first flat_bonus_city_cap cities of its nation.
+func within_city_cap(hex_map: HexMap, city: Dictionary) -> bool:
+	return city_rank(hex_map, city) < int(global_value("flat_bonus_city_cap", 1 << 20))
+
+
+## A sea city: on coast or shallow ocean (global sea_city_terrains).
+func is_sea_city(hex_map: HexMap, city: Dictionary) -> bool:
+	return global_value("sea_city_terrains", []).has(hex_map.growth_terrain_key(city))
+
+
+## True if the city is one of the first flat_bonus_city_cap SEA cities of its nation.
+func within_sea_city_cap(hex_map: HexMap, city: Dictionary) -> bool:
+	if not is_sea_city(hex_map, city):
+		return false
+	var rank := 0
+	for c in hex_map.cities:
+		if c.nation == city.nation and int(c.id) < int(city.id) and is_sea_city(hex_map, c):
+			rank += 1
+	return rank < int(global_value("flat_bonus_city_cap", 1 << 20))

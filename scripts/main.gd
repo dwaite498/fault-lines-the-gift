@@ -58,7 +58,9 @@ func _ready() -> void:
 			"res://data/terrain_config.json", factions.sea_nations(), map_cfg)
 	_view.hex_map.nation_factions = factions.nation_ids()
 	_view.hex_map.load_faction_views(factions.all)
+	_view.hex_map.load_faction_traits(factions.all, FactionRoster.load_global())
 	_view.roster = DivisionRoster.new()
+	_view.roster.traits = _view.hex_map.traits
 	_view.roster.spawn_at_cities(_view.hex_map)
 	_view.hidden_nations = _view.roster.neutral_nations
 	_fog = Fog.from_config(map_cfg, PLAYER_NATION)
@@ -84,6 +86,10 @@ func _ready() -> void:
 	_city_panel.roster = _view.roster
 	_city_panel.player_nation = PLAYER_NATION
 	_city_panel.recruit_pressed.connect(_on_recruit_pressed)
+	_city_panel.rush_pressed.connect(func() -> void:
+			if not _city.is_empty() and _city.nation == PLAYER_NATION:
+				_economy.rush_training(_city, PLAYER_NATION)
+			_refresh_panels())
 	_city_panel.scout_pressed.connect(func() -> void:
 			message.text = ""
 			if not _city.is_empty() and _city.nation == PLAYER_NATION:
@@ -248,8 +254,11 @@ func _resolve_captures() -> void:
 	var victim := _view.hex_map.city_by_id(int(info.city_id))
 	var blocked := {}
 	for id in _view.hex_map.city_rules.capture.order:
-		if _view.hex_map.capture_block_reason(PLAYER_NATION, id) != "":
+		var reason := _view.hex_map.capture_block_reason(PLAYER_NATION, id, int(info.city_id))
+		if reason == "not allowed for this faction":
 			blocked[id] = "Not available to the %s." % _view.factions.name_of(PLAYER_NATION)
+		elif reason != "":
+			blocked[id] = reason.capitalize() + "."  # e.g. the plunder cooldown, with turns left
 	_capture_popup.open(victim, _view.factions.name_of(int(info.victim)), _view.hex_map.city_rules, blocked)
 	_refresh_panels()
 
@@ -275,6 +284,7 @@ func _finish_turn() -> void:
 	_view.hex_map.grow_cities(roster.unit_cells())
 	_economy.end_turn(_view.hex_map, roster)
 	turn += 1
+	_view.hex_map.current_turn = turn
 	var stalled := _economy.stalled_cities(PLAYER_NATION, _view.hex_map)
 	if not stalled.is_empty():
 		message.text = "Recruit stalled in city %s: assign Training labor" % ", ".join(stalled.map(func(i: int) -> String: return str(i)))
