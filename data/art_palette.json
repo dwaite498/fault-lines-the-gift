@@ -5,9 +5,7 @@
 		"hills": "#C8B88A",
 		"mountains": "#9C8F78",
 		"water": "#5E7A8C",
-		"coast": "#7E97A3",
-		"crater": "#2A2626",
-		"scorched": "#5A524A"
+		"coast": "#7E97A3"
 	},
 	"grid": {
 		"color": "#000000",
@@ -22,26 +20,11 @@
 		"alpha": 1.0
 	},
 	"nations": [
-		"#3E5C8A",
-		"#9A4A3E",
-		"#B08A3A",
-		"#5E7F4F",
-		"#6E5A8A",
-		"#3F7F7A",
-		"#8A5A72",
-		"#7A6A4A",
-		"#4F6F9A",
-		"#A0663E",
-		"#6A8A3E",
-		"#5A4A6E",
-		"#8E7A3A",
-		"#3E6E5A",
-		"#9A5A5A",
-		"#4A5A7A"
+		"#3FA7D6", "#D64545", "#E3C14B", "#5DBB63", "#9B6FD1",
+		"#E07B39", "#3CC4B0", "#D65FA0", "#C9C9C9", "#7A8FE0"
 	],
-	"nation_names": ["Blue", "Red", "Ochre", "Green", "Purple", "Teal", "Plum", "Umber",
-		"Steel", "Rust", "Olive", "Indigo", "Mustard", "Pine", "Rose", "Slate"],
-	"player_name": "Concord",
+	"nation_names": ["Assembly", "Directorate", "Syndicate", "Verdant Accord", "Covenant",
+		"Collective", "Lyceum", "Free Tide", "Deepwater Guild", "Drift"],
 	"counter": {
 		"player_fill": "#1E3550",
 		"neutral_fill": "#6F6F6A",
