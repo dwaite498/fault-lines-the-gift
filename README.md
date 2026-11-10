@@ -1,4 +1,4 @@
-# Fault Lines: The Gift
+# Fault Lines: Planetfall
 
 A turn-based, civ-style strategy game where nations and factions rise, clash, and negotiate as the world fractures around them.
 
@@ -6,7 +6,7 @@ A turn-based, civ-style strategy game where nations and factions rise, clash, an
 
 1. Install [Godot 4.7.2 (stable)](https://godotengine.org/download) (standard build, not .NET).
 2. Open Godot, click **Import**, and pick `project.godot` in this folder.
-3. Press **Play** (F5). A blank window titled "Fault Lines: The Gift" opens.
+3. Press **Play** (F5). A blank window titled "Fault Lines: Planetfall" opens.
 
 From a terminal: `godot --path .`
 
