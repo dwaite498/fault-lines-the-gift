@@ -4,7 +4,7 @@ Last updated: Nov 9 2026 (Task 34)
 
 ## Current direction
 An Alpha Centauri (SMAC) homage with landfall and 10 ideological factions.
-Pending the Designer's pivot brief.
+See [docs/PIVOT.md](PIVOT.md) for the pivot brief.
 
 ## Built
 - Combat
@@ -18,9 +18,9 @@ Pending the Designer's pivot brief.
 - Elevation rules: climb cost, cliffs, uphill attack penalty, smoothed and reachable maps; headless tests in tests/run_tests.gd
 
 ## Next
-- The pivot brief
-- Faction data
-- A naval slice
+- Task 31: remove doom systems
+- Task 32: factions.json, 4 factions with 1 sea
+- Then the naval slice
 
 ## On hold
 - Rail Tasks 27 and 28
