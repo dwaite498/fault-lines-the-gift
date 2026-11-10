@@ -35,3 +35,19 @@ Aggressive factions (Directorate, Collective, Free Tide, Drift) pick their harsh
 ## Size: S-M, 2 PRs
 1. Capture popup and effects, including the Occupy timer, refugee transfer, last-city raze elimination, and the reputation_event log stub.
 2. Faction gating table in data, and AI choice by personality.
+
+## Atrocity views per faction (David's ruling, Nov 9, 2026)
+The `reputation_event` keeps its base severity. Raze is always `atrocity: true`. Each observing faction then judges the event using its own `views_as_atrocity` list in `data/factions.json`. If the event's type is on the observer's list, that observer treats it as an atrocity: its attitude toward the captor gets the atrocity penalty, scaled by its atrocity sensitivity. Otherwise the observer treats it as a normal event of that severity. Raze is on every list.
+| Faction | `views_as_atrocity` | Reason |
+|---|---|---|
+| Assembly | raze, enslave, plunder | Its civic rights cover everyone, including people in conquered cities. |
+| Directorate | raze | It sees forced labor as discipline and spoils as the price of war. |
+| Syndicate | raze | It treats labor and loot as assets. Destroying a city only wastes them. |
+| Verdant Accord | raze, enslave, plunder | It regards stripping people or land as a violation of the planet's balance. |
+| Covenant | raze, enslave | It holds that every soul is sacred, while tribute is acceptable. |
+| Collective | raze | It sees enslavement as labor re-education for the common good. |
+| Lyceum | raze, enslave | It considers enslavement a waste of minds, while plunder is ordinary war economics. |
+| Free Tide | raze | For pirates, loot and captives are part of the trade. |
+| Deepwater Guild | raze | It views indentured labor and salvage as standard Guild practice. |
+| Drift | raze, enslave | Its nomads value freedom of movement above everything else. |
+Consistency: other than Raze, no faction's list includes a capture choice that faction is allowed to make. Raze is condemned by everyone, including the factions that can raze (Directorate, Collective, Drift). Those factions just have low or mid atrocity sensitivity.

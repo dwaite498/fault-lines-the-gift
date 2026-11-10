@@ -155,7 +155,7 @@ func apply_capture(city_id: int, option: String, hex_map: HexMap) -> Dictionary:
 func resolve_ai_captures(hex_map: HexMap, player_nation: int) -> void:
 	for info in pending_captures.duplicate():
 		if info.captor != player_nation:
-			apply_capture(int(info.city_id), hex_map.ai_capture_option(), hex_map)
+			apply_capture(int(info.city_id), hex_map.ai_capture_option(int(info.captor), rng), hex_map)
 	for city in hex_map.cities:
 		if city.nation != player_nation and hex_map.can_annex_occupied(city):
 			hex_map.annex_occupied(int(city.id))

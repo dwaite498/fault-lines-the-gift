@@ -33,7 +33,9 @@ func is_open() -> bool:
 
 
 ## Shows the choices for `city` (captured from `victim_name`). rules is city_rules.
-func open(city: Dictionary, victim_name: String, rules: Dictionary) -> void:
+## blocked maps an option id to the short reason it is gated (see HexMap.capture_block_reason):
+## that button is disabled and shows the reason instead of the effects.
+func open(city: Dictionary, victim_name: String, rules: Dictionary, blocked := {}) -> void:
 	for b in buttons.values():
 		b.get_parent().queue_free()
 	buttons.clear()
@@ -47,6 +49,9 @@ func open(city: Dictionary, victim_name: String, rules: Dictionary) -> void:
 		b.pressed.connect(_on_pressed.bind(String(id)))
 		var desc := Label.new()
 		desc.text = effect_text(String(id), rules)
+		if blocked.has(id):
+			b.disabled = true
+			desc.text = String(blocked[id])
 		desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		desc.custom_minimum_size = Vector2(460, 0)
 		row.add_child(b)

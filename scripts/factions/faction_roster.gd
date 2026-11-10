@@ -96,6 +96,19 @@ func has_nation(nation: int) -> bool:
 	return nation >= 0 and nation < assigned.size()
 
 
+## The faction id of a nation ("" if none).
+func id_of(nation: int) -> String:
+	return str(assigned[nation].id) if has_nation(nation) else ""
+
+
+## Nation index -> faction id for every assigned nation.
+func nation_ids() -> Dictionary:
+	var out := {}
+	for i in assigned.size():
+		out[i] = str(assigned[i].id)
+	return out
+
+
 func name_of(nation: int) -> String:
 	return str(assigned[nation].name) if has_nation(nation) else "Neutral"
 

@@ -29,6 +29,23 @@
 		"order": ["annex", "occupy", "plunder", "reduce", "raze", "enslave"],
 		"annexed_recruit_lockout_turns": 10,
 		"ai_default_option": "annex",
+		"aggressive_factions": ["directorate", "collective", "free_tide", "drift"],
+		"aggressive_harsh_chance": 0.5,
+		"default_views_as_atrocity": ["raze"],
+		"atrocity_weight": 3.0,
+		"harshness_order": ["annex", "occupy", "plunder", "reduce", "enslave", "raze"],
+		"faction_options": {
+			"assembly": ["annex", "occupy"],
+			"directorate": ["annex", "occupy", "reduce", "raze"],
+			"syndicate": ["annex", "occupy", "plunder"],
+			"verdant_accord": ["annex", "occupy", "reduce"],
+			"covenant": ["annex", "occupy", "reduce"],
+			"collective": ["annex", "occupy", "enslave", "raze"],
+			"lyceum": ["annex", "occupy"],
+			"free_tide": ["annex", "occupy", "plunder", "enslave"],
+			"deepwater_guild": ["annex", "occupy", "plunder", "enslave"],
+			"drift": ["annex", "plunder", "raze"]
+		},
 		"options": {
 			"annex": {"pop_loss": 0.25, "infra_loss": 0.3, "severity": 0, "atrocity": false},
 			"occupy": {"pop_loss": 0.1, "infra_loss": 0.0, "severity": 0, "atrocity": false, "turns": 5, "labor_mult": 0.5},
