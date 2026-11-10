@@ -15,6 +15,9 @@ var swatch := MapView.make_swatch()
 var factions: FactionRoster
 ## Emitted when the Recruit button is clicked (same action as the R key).
 signal recruit_pressed
+## Emitted when the Annex button (an occupied city whose timer ran out) is clicked.
+signal annex_pressed
+var annex_button := Button.new()
 ## Emitted by a labor row's -/+ button: the sink name and +1 or -1.
 signal labor_pressed(sink: String, delta: int)
 ## sink -> {"label": Label, "minus": Button, "plus": Button}
@@ -31,6 +34,10 @@ func _init() -> void:
 	panel.add_child(button)
 	button.focus_mode = Control.FOCUS_NONE
 	button.pressed.connect(func(): recruit_pressed.emit())
+	panel.add_child(annex_button)
+	annex_button.focus_mode = Control.FOCUS_NONE
+	annex_button.text = "Annex (occupation over)"
+	annex_button.pressed.connect(func(): annex_pressed.emit())
 	for sink in NationEconomy.SINKS:
 		var row := {"label": Label.new(), "minus": Button.new(), "plus": Button.new()}
 		row.minus.text = "-"
@@ -83,6 +90,16 @@ func refresh(city: Dictionary) -> void:
 				people_text(hex_map.pool_fill(city)), people_text(hex_map.pool_cap(city))]
 		if city.get("besieged", false):
 			label.text += "\nBESIEGED: no growth, -%d%% pop/turn, labor halved" % roundi(float(hex_map.city_rules.siege_pop_loss) * 100.0)
+		if city.get("occupied", false):
+			label.text += "\nOCCUPIED: labor x%s, no pool or training; %s" % [
+					String.num(float(hex_map.city_rules.capture.options.occupy.labor_mult)),
+					"can be annexed now" if hex_map.can_annex_occupied(city)
+					else "annexable in %d turns" % int(city.get("occupy_turns_left", 0))]
+		if city.get("enslaved", false):
+			label.text += "\nENSLAVED: no growth, pool or training, labor x%s" % String.num(
+					float(hex_map.city_rules.capture.options.enslave.labor_mult))
+		if int(city.get("recruit_lockout", 0)) > 0:
+			label.text += "\nRecruit lockout: %d turns" % int(city.recruit_lockout)
 		label.text += "\nOutput/turn: cash +%.1f, capacity +%.1f" % [income.cash, income.capacity]
 		var per_level := economy.infra_labor_per_level()
 		label.text += "\nInfra build %d/%d (+%d/turn)" % [int(city.get("infra_progress", 0)), per_level, economy.infra_points(city)]
@@ -114,6 +131,11 @@ func refresh(city: Dictionary) -> void:
 		row.minus.disabled = pts <= 0
 		row.plus.disabled = economy.unassigned_labor(city) <= 0 or (sink == "training" and city.get("enslaved", false))
 		psize = Vector2(maxf(psize.x, 226.0), psize.y + ROW_HEIGHT)
+	annex_button.visible = button.visible and hex_map.can_annex_occupied(city)
+	if annex_button.visible:
+		annex_button.position = Vector2(8, psize.y)
+		annex_button.size = annex_button.get_minimum_size()
+		psize = Vector2(maxf(psize.x, annex_button.size.x + 16), psize.y + annex_button.size.y + 8)
 	if button.visible:
 		var reason := economy.recruit_block_reason(city, player_nation, roster)
 		button.disabled = reason != ""

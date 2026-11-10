@@ -36,6 +36,8 @@ func _initialize() -> void:
 	test_stalled_recruit()
 	test_pillars_rules()
 	test_ai_upkeep_cap()
+	test_capture_choices()
+	test_capture_flow()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -1167,3 +1169,170 @@ func test_ai_upkeep_cap() -> void:
 	cap.population = 10000
 	eco.run_ai(0, m, roster)
 	ok(not eco.pending.has(cap.id), "the AI queues no recruit when upkeep after it (9) would exceed its income (6)")
+
+
+## A map where nation 0 captures nation 1's first city: {"map", "eco", "roster", "city", "other"}.
+func cap_setup() -> Dictionary:
+	var s := pool_setup()
+	s.roster.economy = s.eco
+	var cities := nation_cities(s.map, 1)
+	var guard: Division = s.roster.division_at(cities[0].cell)
+	if guard:
+		s.roster.divisions.erase(guard)  # an empty enemy city, so it can be captured
+	s["city"] = cities[0]
+	s["other"] = cities[1]
+	return s
+
+
+## take_city + apply_capture through the roster (credits plunder), returns the result.
+func capture_with(s: Dictionary, city: Dictionary, captor: int, option: String) -> Dictionary:
+	s.roster.pending_captures.append(s.map.take_city(city.cell, captor))
+	return s.roster.apply_capture(int(city.id), option, s.map)
+
+
+func test_capture_choices() -> void:
+	# Taking a city only hands it over; the choice applies the effects.
+	var s := cap_setup()
+	var c: Dictionary = s.city
+	var m: HexMap = s.map
+	var taken: Dictionary = m.take_city(c.cell, 0)
+	ok(c.nation == 0 and c.capture_pending and c.population == 10000 and taken.victim == 1 and taken.eliminated.is_empty(), "take_city hands the city over and flags it pending, with no losses yet")
+	ok(m.apply_capture(int(c.id), "annex").option == "annex" and m.apply_capture(int(c.id), "annex").is_empty(), "a choice applies once")
+	# Annex.
+	var s1 := cap_setup()
+	var c1: Dictionary = s1.city
+	var r1 := capture_with(s1, c1, 0, "annex")
+	ok(c1.population == 7500 and is_equal_approx(float(c1.infrastructure), 7.0) and c1.rebuild_target == 10.0 and c1.rebuild_turns_left == 26, "Annex: -25% people, -30% infra (10 -> 7), rebuilds over 26 turns")
+	ok(c1.pool == 0 and c1.recruit_lockout == 10 and not c1.has("capture_pending"), "Annex: pool 0 and a 10-turn recruit lockout")
+	var reason: String = s1.eco.recruit_block_reason(c1, 0, s1.roster)
+	ok(reason.contains("locked out"), "Annex: the lockout blocks recruiting (%s)" % reason)
+	for i in 9:
+		s1.map.grow_cities({})
+	ok(c1.recruit_lockout == 1 and s1.eco.training_blocked(c1) != "", "Annex: still locked after 9 end turns")
+	s1.map.grow_cities({})
+	ok(c1.recruit_lockout == 0 and s1.eco.training_blocked(c1) == "", "Annex: the lockout ends after 10 end turns")
+	ok(r1.severity == 0 and not r1.atrocity and s1.map.reputation.count("annex") == 1, "Annex logs a severity-0 reputation_event")
+	# Occupy.
+	var s2 := cap_setup()
+	var c2: Dictionary = s2.city
+	c2.pool = 800
+	var r2 := capture_with(s2, c2, 0, "occupy")
+	ok(c2.population == 9000 and float(c2.infrastructure) == 10.0 and not c2.has("rebuild_turns_left") and c2.occupied and c2.occupy_turns_left == 5, "Occupy: -10% people, no infra loss, a 5-turn timer")
+	ok(s2.eco.labor_points(c2) == 2 and s2.eco.training_blocked(c2) == "occupied", "Occupy: labor at 50% (9,000 people: 4.5 x 0.5 -> 2 points), no training")
+	s2.map.grow_cities({})
+	ok(c2.pool == 0 and c2.occupy_turns_left == 4 and not s2.map.annex_occupied(int(c2.id)), "Occupy: the pool stays 0, the timer counts down and an early annex is refused")
+	for i in 4:
+		s2.map.grow_cities({})
+	ok(s2.map.can_annex_occupied(c2), "Occupy: annexable after 5 end turns")
+	var pop2 := int(c2.population)
+	ok(s2.map.annex_occupied(int(c2.id)) and int(c2.population) == pop2 and not c2.has("occupied") and c2.recruit_lockout == 10 and c2.pool == 0, "annexing an occupied city costs no more people, starts the 10-turn lockout and keeps pool 0")
+	ok(s2.map.reputation.count("occupy") == 1 and s2.map.reputation.count("annex") == 1 and r2.severity == 0, "Occupy and the later Annex each log an event")
+	# Plunder.
+	var s3 := cap_setup()
+	var c3: Dictionary = s3.city
+	var cash3: float = s3.eco.stocks[0].cash
+	var r3 := capture_with(s3, c3, 0, "plunder")
+	ok(is_equal_approx(float(r3.cash), 50.0) and is_equal_approx(s3.eco.stocks[0].cash, cash3 + 50.0), "Plunder: +5 cash per 1,000 people (10,000 people -> +50 cash, credited to the captor)")
+	ok(c3.population == 8500 and is_equal_approx(float(c3.infrastructure), 5.0) and c3.recruit_lockout == 10 and c3.pool == 0, "Plunder: -15% people, -50% infra, annexed with the lockout")
+	ok(r3.severity == 1 and not r3.atrocity, "Plunder logs severity 1")
+	# Reduce.
+	var s4 := cap_setup()
+	var c4: Dictionary = s4.city
+	var other4: Dictionary = s4.other
+	var r4 := capture_with(s4, c4, 0, "reduce")
+	ok(c4.population == 5000 and is_equal_approx(float(c4.infrastructure), 5.0) and c4.recruit_lockout == 10, "Reduce: -50% people, -50% infra, annexed with the lockout")
+	ok(other4.population == 15000 and r4.refugees == 5000 and r4.lost_people == 0, "Reduce: the displaced 5,000 flee to the old owner's nearest city (+5,000 refugees)")
+	ok(r4.severity == 2 and not r4.atrocity, "Reduce logs severity 2")
+	# Raze.
+	var s5 := cap_setup()
+	var c5: Dictionary = s5.city
+	var other5: Dictionary = s5.other
+	var cell5: Vector2i = c5.cell
+	var r5 := capture_with(s5, c5, 0, "raze")
+	ok(s5.map.city_by_id(int(c5.id)).is_empty() and s5.map.city_at(cell5).is_empty() and s5.map.cells[cell5] != 1, "Raze: the city is removed and its hex no longer belongs to the old owner")
+	ok(other5.population == 15000 and r5.refugees == 5000 and r5.lost_people == 5000, "Raze: 50% of the people flee to the old owner's nearest city (+5,000), the rest die")
+	ok(r5.severity == 3 and r5.atrocity and s5.map.reputation.atrocities(0).size() == 1 and s5.map.reputation.events[0].type == "raze", "Raze logs an atrocity with severity 3")
+	# Raze on a last city eliminates the nation, with its armies surrendering as POWs.
+	var s6 := cap_setup()
+	var c6: Dictionary = s6.city
+	var m6: HexMap = s6.map
+	m6.remove_city(int(s6.other.id))
+	var cell6: Vector2i = c6.cell
+	var taken6: Dictionary = m6.take_city(cell6, 0)
+	s6.roster.surrender(taken6.eliminated, 0)
+	s6.roster.pending_captures.append(taken6)
+	var r6: Dictionary = s6.roster.apply_capture(int(c6.id), "raze", m6)
+	ok(taken6.eliminated == [1] and not m6.nations.has(1) and m6.city_by_id(int(c6.id)).is_empty(), "Raze on a last city is allowed and eliminates the nation")
+	ok(r6.atrocity and r6.severity == 3 and r6.refugees == 0 and r6.lost_people == 10000, "a last-city Raze is still an atrocity; with no city left the refugees are lost")
+	ok(s6.roster.divisions.all(func(d: Division) -> bool: return d.nation != 1) and s6.eco.pows_held(0) > 0.0, "the eliminated nation's divisions surrender as POWs held by the captor")
+	# Enslave.
+	var s7 := cap_setup()
+	var c7: Dictionary = s7.city
+	c7.pool = 700
+	var r7 := capture_with(s7, c7, 0, "enslave")
+	ok(c7.population == 9000 and float(c7.infrastructure) == 10.0 and c7.enslaved and not c7.has("rebuild_turns_left"), "Enslave: -10% people, no infra loss, city.enslaved set")
+	ok(s7.map.growth_rate(c7) == 0.0 and s7.eco.labor_points(c7) == 6 and s7.eco.training_blocked(c7) == "enslaved", "Enslave: no growth, labor x1.5 (9,000 people: 4.5 x 1.5 -> 6 points), no training")
+	var pop7 := int(c7.population)
+	s7.map.grow_cities({})
+	ok(c7.pool == 0 and c7.population == pop7, "Enslave: the pool stays 0 and the population stays put")
+	ok(r7.severity == 3 and not r7.atrocity, "Enslave logs severity 3 (not flagged an atrocity: only Raze always is)")
+	# Re-capture clears the previous capture's states.
+	var s8 := cap_setup()
+	var c8: Dictionary = s8.city
+	capture_with(s8, c8, 0, "enslave")
+	capture_with(s8, c8, 1, "annex")
+	ok(c8.nation == 1 and not c8.has("enslaved") and c8.recruit_lockout == 10, "re-capturing an enslaved city clears enslaved and applies the new choice")
+	ok(s8.map.reputation.count() == 2, "every choice logged exactly one reputation_event")
+	# Config: all numbers come from city_rules.capture.
+	var s9 := cap_setup()
+	s9.map.city_rules.capture.options.occupy.pop_loss = 0.2
+	s9.map.city_rules.capture.annexed_recruit_lockout_turns = 3
+	capture_with(s9, s9.city, 0, "occupy")
+	ok(s9.city.population == 8000, "the capture numbers are config (occupy pop_loss 0.2 -> 8,000)")
+
+
+func test_capture_flow() -> void:
+	# Capturing an empty enemy city with a move leaves the choice pending.
+	var s := cap_setup()
+	var m: HexMap = s.map
+	var roster: DivisionRoster = s.roster
+	var city: Dictionary = s.city
+	var guard := roster.division_at(city.cell)
+	if guard:
+		roster.divisions.erase(guard)
+	var from := Vector2i(-1, -1)
+	for n in m.neighbors(city.cell):
+		if m.can_step(n, city.cell) and roster.division_at(n) == null:
+			from = n
+			break
+	ok(from != Vector2i(-1, -1), "setup: a land hex next to the enemy city")
+	var mover := roster.spawn_division(0, from, "infantry", 0)
+	mover.moves_left = 5
+	ok(roster.try_move(mover, city.cell, m) and city.nation == 0 and roster.pending_captures.size() == 1 and city.capture_pending and city.population == 10000, "moving into an empty enemy city takes it and queues the choice (no effects yet)")
+	# The AI's captures take the default choice (Annex); the player's stay pending for the popup.
+	roster.resolve_ai_captures(m, 0)
+	ok(roster.pending_captures.size() == 1, "the player's capture stays pending after the AI resolves")
+	roster.resolve_ai_captures(m, 5)
+	ok(roster.pending_captures.is_empty() and city.population == 7500 and city.recruit_lockout == 10, "a non-player capture takes the AI default (Annex)")
+	# The AI default is a config key; an AI Occupy is auto-annexed when its timer is up.
+	var s2 := cap_setup()
+	s2.map.city_rules.capture.ai_default_option = "occupy"
+	s2.roster.pending_captures.append(s2.map.take_city(s2.city.cell, 1 if s2.city.nation == 0 else 0))
+	s2.roster.resolve_ai_captures(s2.map, 99)
+	ok(s2.city.occupied and s2.city.occupy_turns_left == 5, "ai_default_option occupy: the AI occupies")
+	for i in 5:
+		s2.map.grow_cities({})
+	s2.roster.resolve_ai_captures(s2.map, 99)
+	ok(not s2.city.get("occupied", false) and s2.city.recruit_lockout == 10, "the AI annexes an occupied city once its timer is up")
+	# The popup lists the six choices and reports the pick.
+	var popup := CapturePopup.new()
+	popup.open(city, "Nation 1", m.city_rules)
+	ok(popup.is_open() and popup.buttons.keys() == ["annex", "occupy", "plunder", "reduce", "raze", "enslave"], "the capture popup offers Annex, Occupy, Plunder, Reduce, Raze and Enslave in order")
+	var picked := []
+	popup.chosen.connect(func(o: String) -> void: picked.append(o))
+	popup.buttons.raze.pressed.emit()
+	ok(picked == ["raze"] and not popup.is_open(), "pressing a choice reports it and closes the popup")
+	var annex_text := CapturePopup.effect_text("annex", m.city_rules)
+	ok(annex_text.contains("25%") and annex_text.contains("30%") and annex_text.contains("10 turns"), "the popup text comes from the config numbers")
+	ok(CapturePopup.effect_text("raze", m.city_rules).contains("ATROCITY"), "Raze is marked an atrocity in the popup")
+	popup.free()

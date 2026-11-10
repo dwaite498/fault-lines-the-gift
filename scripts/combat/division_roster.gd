@@ -17,6 +17,9 @@ var economy: NationEconomy = null
 var turn_log: Array[String] = []
 ## Nations treated as neutral: their hexes can be neither ordered into nor attacked.
 var neutral_nations: Array[int] = []
+## Cities taken this turn that still await a capture choice: the result of
+## HexMap.take_city, in capture order. Resolved by resolve_ai_captures and the popup.
+var pending_captures: Array[Dictionary] = []
 var _defer_after_combat := false
 var _pending_captor := {}
 
@@ -118,10 +121,44 @@ func try_move(d: Division, hex: Vector2i, hex_map: HexMap) -> bool:
 	d.fortify_level = 0
 	var city := hex_map.city_at(hex)
 	if not city.is_empty() and city.nation != d.nation:
-		var eliminated := hex_map.capture_city(hex, d.nation)
-		disband(eliminated)
+		var taken := hex_map.take_city(hex, d.nation)
+		var eliminated: Array[int] = []
+		eliminated.assign(taken.eliminated)
+		surrender(eliminated, d.nation)
+		pending_captures.append(taken)
 		print("Nation %d captured a city at %s; eliminated: %s" % [d.nation, hex, eliminated])
 	return true
+
+
+## Every division of the given (eliminated) nations surrenders to captor as POWs, then is
+## removed.
+func surrender(nations: Array[int], captor: int) -> void:
+	for d in divisions:
+		if nations.has(d.nation) and economy:
+			economy.add_pows(captor, d.nation, d.strength)
+	disband(nations)
+
+
+## Applies a capture choice to a pending capture and credits plunder cash to the captor.
+## Returns HexMap.apply_capture's result ({} if the city was not pending).
+func apply_capture(city_id: int, option: String, hex_map: HexMap) -> Dictionary:
+	pending_captures.assign(pending_captures.filter(func(c: Dictionary) -> bool: return c.city_id != city_id))
+	var result := hex_map.apply_capture(city_id, option)
+	if not result.is_empty() and economy and float(result.cash) > 0.0 and economy.stocks.has(result.captor):
+		economy.stocks[result.captor].cash += float(result.cash)
+	return result
+
+
+## Resolves the AI's captures with its default choice, auto-annexes AI-held occupied
+## cities whose timer is up, and leaves the player's captures pending for the popup.
+## The AI choice by personality is Task 40.
+func resolve_ai_captures(hex_map: HexMap, player_nation: int) -> void:
+	for info in pending_captures.duplicate():
+		if info.captor != player_nation:
+			apply_capture(int(info.city_id), hex_map.ai_capture_option(), hex_map)
+	for city in hex_map.cities:
+		if city.nation != player_nation and hex_map.can_annex_occupied(city):
+			hex_map.annex_occupied(int(city.id))
 
 
 ## Removes every division of the given nations.

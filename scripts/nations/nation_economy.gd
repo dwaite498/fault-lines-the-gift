@@ -278,9 +278,12 @@ func pay_upkeep(hex_map: HexMap, roster: DivisionRoster) -> void:
 			print("Nation %d could not pay upkeep for divisions %s: they lose %d org" % [nation, unpaid, int(loss)])
 
 
-## Why training is blocked in the city ("besieged", "starving", "enslaved"), or "".
+## Why training is blocked in the city ("besieged", "starving", "enslaved", "occupied",
+## "locked out after annexation"), or "".
 ## "starving" reads city.starving, a hook for the Food resource (nothing sets it yet);
-## "enslaved" reads city.enslaved (set by Enslave in Task 39).
+## "enslaved" reads city.enslaved and "occupied" city.occupied (set by the Enslave and
+## Occupy capture choices); the lockout reads city.recruit_lockout, the turns left after
+## an Annex (CAPTURE.md).
 func training_blocked(city: Dictionary) -> String:
 	if city.get("besieged", false):
 		return "besieged"
@@ -288,6 +291,10 @@ func training_blocked(city: Dictionary) -> String:
 		return "starving"
 	if city.get("enslaved", false):
 		return "enslaved"
+	if city.get("occupied", false):
+		return "occupied"
+	if int(city.get("recruit_lockout", 0)) > 0:
+		return "locked out after annexation"
 	return ""
 
 
@@ -301,7 +308,7 @@ func recruit_block_reason(city: Dictionary, nation: int, roster: DivisionRoster)
 		return "city hex occupied"
 	var blocked := training_blocked(city)
 	if blocked != "":
-		return "a %s city cannot train" % blocked
+		return "cannot train: city is %s" % blocked
 	var people_cost := int(city_rules.division_people_cost)
 	if int(city.get("pool", 0)) < people_cost:
 		return "recruit pool too small"
@@ -345,7 +352,7 @@ func spawn_pending(hex_map: HexMap, roster: DivisionRoster) -> void:
 			if not city.is_empty():
 				end_auto_training(city)
 			continue
-		# No training progress while besieged, starving or enslaved: the queue waits.
+		# No training progress while besieged, starving, enslaved, occupied or locked out: the queue waits.
 		if training_blocked(city) != "":
 			continue
 		entry.turns_left = maxi(entry.turns_left - 1, 0)
