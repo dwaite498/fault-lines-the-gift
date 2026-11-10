@@ -10,6 +10,9 @@ const NO_FACTION_COLOR := Color(0.5, 0.5, 0.5)
 var all: Array[Dictionary] = []
 ## Nation index -> faction dictionary. Nation 0 is the player's.
 var assigned: Array[Dictionary] = []
+## Set by pick() when player_faction was given but matched nothing ("" otherwise).
+## The match is exact and case-sensitive on id or name; the player then gets a random faction.
+var player_warning := ""
 
 
 static func load_all(path := FACTIONS_PATH) -> Array[Dictionary]:
@@ -43,6 +46,14 @@ func pick(count: int, seed_value: int, player_id := "") -> void:
 			if f.id == player_id or f.name == player_id:
 				chosen.append(f)
 	var forced := not chosen.is_empty()
+	player_warning = ""
+	if player_id != "" and not forced:
+		var hint := ""
+		for f in pool:
+			if str(f.id).to_lower() == player_id.to_lower() or str(f.name).to_lower() == player_id.to_lower():
+				hint = " (did you mean \"%s\"? ids and names are case-sensitive)" % f.id
+		player_warning = "map_config player_faction \"%s\" matches no faction%s; picking a random player faction" % [player_id, hint]
+		push_warning(player_warning)
 	for f in chosen:
 		pool.erase(f)
 	# Guarantee a sea faction: take one at random unless already chosen.

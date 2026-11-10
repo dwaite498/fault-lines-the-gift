@@ -164,8 +164,7 @@ func projected_recovery(d: Division, with_growth := true) -> Dictionary:
 				continue
 			var c2: Dictionary = city.duplicate()
 			if with_growth:
-				c2.population = mini(int(city.population) + int(_map.city_rules.growth_per_turn),
-						int(_map.city_rules.max_population))
+				c2.population = _map.grown_population(city)
 			pool += float(economy.city_income(c2).manpower)
 	var order := roster.divisions.filter(func(x): return x.nation == d.nation)
 	order.sort_custom(func(a, b): return a.id < b.id)
