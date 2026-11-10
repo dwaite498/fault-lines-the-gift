@@ -198,34 +198,61 @@ func test_mountains() -> void:
 	var untagged := 0
 	var edges := 0
 	var open_edges := 0
+	var cliff_edges := 0
 	var mountains := 0
+	var lowered := 0
 	var foothills := 0
 	var ridges := 0
-	var all3 := true
+	var false_ridges := 0
 	for seed_value in range(1, 21):
 		var m := build(seed_value)
 		ridges += m.ridge_edges.size()
+		for key in m.ridge_edges:
+			var ra := Vector2i(key.x, key.y)
+			var rb := Vector2i(key.z, key.w)
+			if absi(m.elevation[ra] - m.elevation[rb]) < int(terrain_cfg.elevation.cliff_diff):
+				false_ridges += 1
 		for cell in m.terrain:
 			if m.terrain[cell] != "mountains":
 				continue
 			mountains += 1
+			if m.elevation[cell] != int(terrain_cfg.elevation.by_terrain.mountains):
+				lowered += 1
 			for n in m.neighbors(cell):
 				if not m.terrain_of(n).passable or m.terrain[n] == "mountains":
 					continue
 				edges += 1
 				if m.can_step(cell, n) and m.can_step(n, cell):
 					open_edges += 1
+				else:
+					cliff_edges += 1
 				if absi(m.elevation[cell] - m.elevation[n]) > 1 and not m.is_ridge_edge(cell, n):
 					untagged += 1
 				if m.terrain[n] == "hills" and m.elevation[n] == 2:
 					foothills += 1
 	ok(mountains > 0 and edges > 0, "20 seeds have mountains (%d) with lowland edges (%d)" % [mountains, edges])
+	ok(lowered == 0, "every mountain stays at elevation 3 on 20 seeds (%d of %d lowered)" % [lowered, mountains])
+	ok(false_ridges == 0, "every tagged ridge edge is a real cliff (%d tagged, %d false)" % [ridges, false_ridges])
 	ok(untagged == 0, "no mountain borders a level-1 tile across a cliff unless the edge is a tagged ridge (%d untagged)" % untagged)
-	ok(float(open_edges) / float(maxi(edges, 1)) > 0.5, "most mountain edges are walkable (%d of %d), %d ridge edges tagged" % [open_edges, edges, ridges])
+	ok(float(open_edges) / float(maxi(edges, 1)) > 0.5, "most mountain edges are walkable (%d of %d); kept cliffs %d (%.1f%%)" % [open_edges, edges, cliff_edges, 100.0 * cliff_edges / maxi(edges, 1)])
 	ok(foothills > 0, "mountains get hills foothills (%d)" % foothills)
 	var m1 := build(7)
 	var m2 := build(7)
 	ok(m1.ridge_edges == m2.ridge_edges and m1.terrain == m2.terrain, "ridge tags and foothills are deterministic")
+	# QA repro: seed 3 used to lower the mountain at (3,9) to 2.
+	var q := HexMap.new()
+	q.generate(20, 12, 3, 0.6, 4, 2, 3)
+	q.generate_terrain(terrain_cfg)
+	ok(q.terrain[Vector2i(3, 9)] != "mountains" or q.elevation[Vector2i(3, 9)] == 3, "seed 3 (3,9) is no longer a lowered mountain")
+	# A pass into a mountain raises the low side to a foothill instead of lowering the mountain.
+	var w := make_map(3, 1, {Vector2i(0, 0): 1, Vector2i(1, 0): 3, Vector2i(2, 0): 3})
+	w.terrain[Vector2i(1, 0)] = "mountains"
+	w.terrain[Vector2i(2, 0)] = "mountains"
+	w.cities.append({"id": 0, "nation": 0, "cell": Vector2i(0, 0)})
+	w.ridge_edges[HexMap.edge_key(Vector2i(0, 0), Vector2i(1, 0))] = true
+	ok(w.ensure_reachable() == 1 and w.elevation[Vector2i(1, 0)] == 3 and w.elevation[Vector2i(0, 0)] == 2, "a pass into a mountain raises the low side to 2 and leaves the mountain at 3")
+	ok(w.terrain[Vector2i(0, 0)] == "plains", "a city hex raised for a pass keeps its terrain")
+	ok(w.ridge_edges.is_empty(), "cutting a pass drops that edge from ridge_edges")
 
 
 func build(seed_value: int) -> HexMap:
