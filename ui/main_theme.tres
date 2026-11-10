@@ -5,64 +5,64 @@ content_margin_left = 8.0
 content_margin_top = 8.0
 content_margin_right = 8.0
 content_margin_bottom = 8.0
-bg_color = Color(0.2901961, 0.3215686, 0.2666667, 1)
+bg_color = Color(0.08235294, 0.1294118, 0.1176471, 1)
 border_width_left = 1
 border_width_top = 1
 border_width_right = 1
 border_width_bottom = 1
-border_color = Color(0.172549, 0.227451, 0.270588, 1)
+border_color = Color(0.3098039, 0.4196078, 0.3843137, 1)
 
 [sub_resource type="StyleBoxFlat" id="btn"]
 content_margin_left = 8.0
 content_margin_top = 4.0
 content_margin_right = 8.0
 content_margin_bottom = 4.0
-bg_color = Color(0.2901961, 0.3215686, 0.2666667, 1)
+bg_color = Color(0.08235294, 0.1294118, 0.1176471, 1)
 border_width_left = 1
 border_width_top = 1
 border_width_right = 1
 border_width_bottom = 1
-border_color = Color(0.172549, 0.227451, 0.270588, 1)
+border_color = Color(0.3098039, 0.4196078, 0.3843137, 1)
 
 [sub_resource type="StyleBoxFlat" id="btn_hover"]
 content_margin_left = 8.0
 content_margin_top = 4.0
 content_margin_right = 8.0
 content_margin_bottom = 4.0
-bg_color = Color(0.2901961, 0.3215686, 0.2666667, 1)
+bg_color = Color(0.1098039, 0.172549, 0.1568627, 1)
 border_width_left = 1
 border_width_top = 1
 border_width_right = 1
 border_width_bottom = 1
-border_color = Color(0.7882353, 0.7019608, 0.4941176, 1)
+border_color = Color(0.372549, 0.827451, 0.7529412, 1)
 
 [sub_resource type="StyleBoxFlat" id="btn_pressed"]
 content_margin_left = 8.0
 content_margin_top = 4.0
 content_margin_right = 8.0
 content_margin_bottom = 4.0
-bg_color = Color(0.7882353, 0.7019608, 0.4941176, 1)
+bg_color = Color(0.372549, 0.827451, 0.7529412, 1)
 border_width_left = 1
 border_width_top = 1
 border_width_right = 1
 border_width_bottom = 1
-border_color = Color(0.7882353, 0.7019608, 0.4941176, 1)
+border_color = Color(0.372549, 0.827451, 0.7529412, 1)
 
 [sub_resource type="StyleBoxFlat" id="bar"]
 content_margin_left = 8.0
 content_margin_top = 4.0
 content_margin_right = 8.0
 content_margin_bottom = 4.0
-bg_color = Color(0.1215686, 0.1647059, 0.2, 1)
+bg_color = Color(0.05098039, 0.08627451, 0.07843137, 1)
 border_width_bottom = 1
-border_color = Color(0.172549, 0.227451, 0.270588, 1)
+border_color = Color(0.3098039, 0.4196078, 0.3843137, 1)
 
 [sub_resource type="StyleBoxLine" id="sep_h"]
-color = Color(0.9098, 0.8863, 0.8157, 0.25)
+color = Color(0.372549, 0.827451, 0.7529412, 0.25)
 thickness = 1
 
 [sub_resource type="StyleBoxLine" id="sep_v"]
-color = Color(0.9098, 0.8863, 0.8157, 0.25)
+color = Color(0.372549, 0.827451, 0.7529412, 0.25)
 thickness = 1
 vertical = true
 
@@ -70,15 +70,16 @@ vertical = true
 default_font_size = 12
 Panel/styles/panel = SubResource("panel")
 PanelContainer/styles/panel = SubResource("panel")
-Button/colors/font_color = Color(0.9098039, 0.8862745, 0.8156863, 1)
-Button/colors/font_hover_color = Color(0.9098039, 0.8862745, 0.8156863, 1)
-Button/colors/font_pressed_color = Color(0.1215686, 0.1647059, 0.2, 1)
+Button/colors/font_color = Color(0.9019608, 0.7215686, 0.3607843, 1)
+Button/colors/font_hover_color = Color(0.9019608, 0.7215686, 0.3607843, 1)
+Button/colors/font_pressed_color = Color(0.05098039, 0.08627451, 0.07843137, 1)
+Button/colors/font_disabled_color = Color(0.4862745, 0.5490196, 0.5176471, 1)
 Button/styles/normal = SubResource("btn")
 Button/styles/hover = SubResource("btn_hover")
 Button/styles/pressed = SubResource("btn_pressed")
 Button/styles/disabled = SubResource("btn")
-Label/colors/font_color = Color(0.9098039, 0.8862745, 0.8156863, 1)
-RichTextLabel/colors/default_color = Color(0.9098039, 0.8862745, 0.8156863, 1)
+Label/colors/font_color = Color(0.9019608, 0.7215686, 0.3607843, 1)
+RichTextLabel/colors/default_color = Color(0.9019608, 0.7215686, 0.3607843, 1)
 HSeparator/constants/separation = 9
 HSeparator/styles/separator = SubResource("sep_h")
 VSeparator/styles/separator = SubResource("sep_v")
