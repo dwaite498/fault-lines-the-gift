@@ -31,11 +31,11 @@ var _mode := ""
 func _ready() -> void:
 	get_window().title = GAME_TITLE
 	_view = MapView.new()
-	var map_cfg: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(MAP_CONFIG_PATH))
+	var map_cfg := GameSession.apply(JSON.parse_string(FileAccess.get_file_as_string(MAP_CONFIG_PATH)))
 	var factions := FactionRoster.from_config(map_cfg)
 	_view.factions = factions
 	_view.hex_map = HexMap.from_config_file(MAP_CONFIG_PATH, "res://data/cities_config.json",
-			"res://data/terrain_config.json", factions.sea_nations())
+			"res://data/terrain_config.json", factions.sea_nations(), map_cfg)
 	_view.hex_map.nation_factions = factions.nation_ids()
 	_view.hex_map.load_faction_views(factions.all)
 	_view.roster = DivisionRoster.new()

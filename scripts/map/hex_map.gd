@@ -123,8 +123,9 @@ var terrain_types: Dictionary = {}
 static func from_config_file(map_path: String,
 		cities_path := "res://data/cities_config.json",
 		terrain_path := "res://data/terrain_config.json",
-		coastal: Array[int] = []) -> HexMap:
-	var map_cfg: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(map_path))
+		coastal: Array[int] = [], map_override := {}) -> HexMap:
+	var map_cfg: Dictionary = map_override if not map_override.is_empty() \
+			else JSON.parse_string(FileAccess.get_file_as_string(map_path))
 	var city_cfg: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(cities_path))
 	var hex_map := HexMap.new()
 	hex_map.coastal_nations = coastal
