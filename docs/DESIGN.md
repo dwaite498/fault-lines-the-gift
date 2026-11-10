@@ -1,4 +1,4 @@
-# Fault Lines: The Gift — Design
+# Fault Lines: Planetfall — Design
 
 Open questions are marked **TBD**.
 
@@ -7,64 +7,9 @@ Open questions are marked **TBD**.
 - 2D turn-based, civ-style strategy game built in Godot.
 - Planet layer only for now. Space comes later.
 
-## Premise
-
-- On turn 1, an alien object called **the Gift** hits the planet and destroys one region.
-- **The doom** is a slow, overwhelming alien force. It escalates through a hidden **attention counter** that every faction can raise or lower.
-- Attention stages:
-  1. **Ignored**
-  2. **Curious**: scouts
-  3. **Interested**: signals
-  4. **Engaged**: envoys. The doom objectives are revealed here.
-  5. **Threatened**: army and invasion
-- Players see only flavor events and hints until they research the tech to talk to the doom.
-- TBD: the attention thresholds and which actions raise or lower attention.
-
-## Core pillar
-
-Every fix costs part of the faction's soul, and those costs are permanent. Bad choices pile up.
-
-## Factions
-
-### Playable public factions
-
-| Faction | Stance | Meter |
-| --- | --- | --- |
-| **Concord** | Unites humanity the old way. | Unity |
-| **Accord** | Welcomes the doom, and pays a heavy price for the doom's help. | Devotion |
-| **Ascendants** | Take doom tech without serving the doom, and oppose doom troops on the planet. | Humanity |
-
-- When Ascendant Humanity drops, it brings social, diplomatic, doom-whisper, and identity-drift effects.
-- TBD: the specific Accord costs and Humanity effects.
-
-### Hidden AI minor factions
-
-These factions secretly take over nations that still look neutral.
-
-- Humanity First, plus Terran Guard
-- Insurgents
-- Syndicate, plus Exodus
-
-## Collapse
-
-- When a faction's meter drops low enough, the faction splinters by dice roll.
-- The pieces range from extreme to moderate. A piece's trait strength depends on how extreme it is. Some neutral nations also split off.
-- The player keeps one piece.
-- Pieces can reunite slowly: through diplomacy for the Concord, and through doctrine for the Accord. TBD: how Ascendant pieces reunite.
-- **Concord:**
-  - Collapse risk starts below 25% Unity and grows as Unity falls.
-  - Nation requests raise or lower Unity.
-  - Desperate measures unlock as Unity drops.
-- TBD: the collapse thresholds for Devotion and Humanity.
-
 ## Victory
 
 - Each faction has a weighted mix of win conditions.
-- Each faction also picks one **doom objective** at the reveal, and that choice is locked in. Factions can share an objective.
-- Example doom objectives:
-  - A defense station, which means permanent self-exile
-  - Pushing the doom back past a line
-  - A black hole bomb
 - TBD: the full list of win conditions and their weights.
 
 ## Map
@@ -110,13 +55,12 @@ These factions secretly take over nations that still look neutral.
 - POWs return to the owner's manpower pool on peace, or immediately if the captor joins the owner's side.
 - If a nation is eliminated, the POWs it holds and the POWs held from it stay recorded.
 - Later: POW exchanges, POWs as bargaining chips, and a soul-cost mistreatment option.
+
 ## First playable version
 
 - The Concord only, against simple AI
 - Units: infantry, armor, and artillery
 - Influence-based diplomacy
-- Unity with a few requests and events
-- The Gift's impact plus the first doom stages
 
 ## MVP Systems Spec (Oct 29)
 
@@ -140,7 +84,6 @@ Status tags: **[Built]** is in the game now. **[Partial]** is partly built. **[P
 - **Operations.**
 - **Manpower** comes from population and caps recruiting and reinforcement.
 - **Capacity** builds divisions and infrastructure, and later launch and orbital work.
-- **Faction meters.**
 - **Research** is funded with cash. Parked.
 
 ### 4. Espionage [Planned, PROVISIONAL, parked]
@@ -162,5 +105,4 @@ Status tags: **[Built]** is in the game now. **[Partial]** is partly built. **[P
 - The UI must never leak hidden control.
 
 ### 7. Parked
-- A space race pivot around the Engaged stage.
 - Strategic materials.

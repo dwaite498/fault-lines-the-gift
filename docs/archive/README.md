@@ -4,5 +4,4 @@ Nothing in this folder is deleted, only moved out of the active docs.
 
 ## Moved files
 
-None yet. docs/ held only DESIGN.md and the top level only README.md. Both mix Gift
-material with general design, so they stay in place until the Designer's pivot brief.
+- [DESIGN_gift.md](DESIGN_gift.md): the Gift-only sections of the old docs/DESIGN.md (premise and the doom, Concord/Accord/Ascendants and collapse, soul cost, doom objectives, and a few Gift lines), verbatim.
