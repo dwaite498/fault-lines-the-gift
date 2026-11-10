@@ -49,6 +49,11 @@ var city_rules := {
 	"siege_growth": 0.0, "siege_pop_loss": 0.02, "siege_labor_mult": 0.5,
 	"display_round": 100,
 	"rebuild_turns": 26,
+	"colonization": {
+		"labor_turns": 15, "population_cost": 3000, "min_remaining_population": 5000,
+		"outpost_population": 3000, "outpost_infrastructure": 10, "min_city_distance": 3,
+		"ai_build_pods": true, "ai_max_pods": 1,
+	},
 	"capture": {
 		"order": ["annex", "occupy", "plunder", "reduce", "raze", "enslave"],
 		"annexed_recruit_lockout_turns": 10, "ai_default_option": "annex",
@@ -705,6 +710,52 @@ func _radius_for(population: int) -> int:
 	if population >= int(city_rules.grown_radius_population):
 		return int(city_rules.grown_claim_radius)
 	return int(city_rules.claim_radius)
+
+
+# --- Colonization (Task 40e) ---
+
+## Why a colony pod of `nation` cannot found a city on `cell`, or "" if it can: the hex must
+## be land the nation can settle (its own territory or unclaimed, not another nation's) and at
+## least colonization.min_city_distance hexes from every city.
+func found_block_reason(cell: Vector2i, nation: int) -> String:
+	if not cells.has(cell) or int(territory.get(cell, WATER)) == WATER or not terrain_of(cell).passable:
+		return "not land"
+	var owner := int(cells.get(cell, UNCLAIMED))
+	if owner != UNCLAIMED and owner != nation:
+		return "foreign territory"
+	var min_dist := int(city_rules.colonization.min_city_distance)
+	for c in cities:
+		if hex_distance(c.cell, cell) < min_dist:
+			return "too close to a city"
+	return ""
+
+
+## Every cell where `nation` could found a city (see found_block_reason), sorted.
+func colony_sites(nation: int) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	for cell in cells:
+		if found_block_reason(cell, nation) == "":
+			out.append(cell)
+	out.sort()
+	return out
+
+
+## Founds an Outpost for `nation` on `cell` (colonization.outpost_population people),
+## or returns {} if found_block_reason says no. Returns the new city.
+func found_city(nation: int, cell: Vector2i) -> Dictionary:
+	if found_block_reason(cell, nation) != "":
+		return {}
+	var rules: Dictionary = city_rules.colonization
+	var next_id := 0
+	for c in cities:
+		next_id = maxi(next_id, int(c.id) + 1)
+	var pop := int(rules.outpost_population)
+	var city := {"id": next_id, "nation": nation, "cell": cell, "population": pop,
+			"pool": mini(int(city_rules.colony_start_pool), pop), "radius": _radius_for(pop),
+			"infrastructure": int(rules.outpost_infrastructure)}
+	cities.append(city)
+	update_ownership()
+	return city
 
 
 ## Removes a city, then removes any nation left with no cities.

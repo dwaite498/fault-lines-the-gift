@@ -25,6 +25,16 @@
 	"siege_labor_mult": 0.5,
 	"display_round": 100,
 	"rebuild_turns": 26,
+	"colonization": {
+		"labor_turns": 15,
+		"population_cost": 3000,
+		"min_remaining_population": 5000,
+		"outpost_population": 3000,
+		"outpost_infrastructure": 10,
+		"min_city_distance": 3,
+		"ai_build_pods": true,
+		"ai_max_pods": 1
+	},
 	"capture": {
 		"order": ["annex", "occupy", "plunder", "reduce", "raze", "enslave"],
 		"annexed_recruit_lockout_turns": 10,

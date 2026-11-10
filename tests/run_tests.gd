@@ -43,6 +43,7 @@ func _initialize() -> void:
 	test_main_menu()
 	test_save_load()
 	test_victory()
+	test_colonizers()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -971,6 +972,7 @@ func test_siege_capture_ai() -> void:
 	var roster: DivisionRoster = s.roster
 	roster.divisions.clear()
 	eco2.config.ai_recruit_chance = 1.0
+	eco2.city_rules.colonization.ai_build_pods = false  # these checks are about division recruiting
 	for c in m2.cities:
 		c.pool = 0
 	for nation in m2.nations:
@@ -1101,6 +1103,7 @@ func test_pillars_rules() -> void:
 	for flag in ["besieged", "starving", "enslaved"]:
 		var a := pool_setup()
 		a.roster.divisions.clear()
+		a.eco.city_rules.colonization.ai_build_pods = false
 		a.eco.config.ai_recruit_chance = 1.0
 		for nation in a.map.nations:
 			a.eco.stocks[nation].capacity = 100.0
@@ -1152,6 +1155,7 @@ func test_ai_upkeep_cap() -> void:
 	var eco: NationEconomy = a.eco
 	var roster: DivisionRoster = a.roster
 	eco.config.ai_recruit_chance = 1.0
+	eco.city_rules.colonization.ai_build_pods = false  # these checks are about division recruiting
 	var nation: int = m.nations.filter(func(n: int) -> bool: return n != 0)[0]
 	for n in m.nations:
 		eco.stocks[n].capacity = 100.0
@@ -1736,3 +1740,151 @@ func test_victory() -> void:
 	screen.open(er, "")
 	ok(screen.title.text == "Defeat" and screen.message.text.contains("eliminated"), "the defeat screen says the nation was eliminated")
 	screen.free()
+
+
+# --- Task 40e: colony pods ---
+
+func test_colonizers() -> void:
+	var s := pool_setup()
+	var m: HexMap = s.map
+	var eco: NationEconomy = s.eco
+	var roster: DivisionRoster = s.roster
+	roster.divisions.clear()
+	var rules: Dictionary = m.city_rules.colonization
+	ok(rules.labor_turns == 15 and rules.population_cost == 3000 and rules.min_remaining_population == 5000 and rules.outpost_population == 3000 and rules.min_city_distance == 3, "colonization config: 15 labor-turns, 3,000 people, 5,000 left, 3k Outpost, 3 hexes")
+	var pod_template: Dictionary = roster.templates.colony_pod
+	ok(pod_template.move == 2 and pod_template.attack == 0 and pod_template.colonizer and pod_template.upkeep.is_empty(), "the pod template: move 2, attack 0, colonizer, no upkeep")
+	# Queue: people leave the population at queue time, nothing else is paid.
+	var city: Dictionary = nation_cities(m, 0)[0]
+	var cash_before := float(eco.stocks[0].cash)
+	var cap_before := float(eco.stocks[0].capacity)
+	ok(eco.colony_block_reason(city, 0) == "", "a 10,000-person city can queue a colony pod")
+	ok(eco.queue_colony_pod(city, 0), "the pod is queued")
+	var entry: Dictionary = eco.pending[city.id]
+	ok(city.population == 7000 and entry.kind == "colony_pod" and entry.cost == 15 and entry.turns_left == 0, "3,000 people drawn at queue time; a 15 labor-turn pod entry")
+	ok(float(eco.stocks[0].cash) == cash_before and float(eco.stocks[0].capacity) == cap_before, "a pod costs no cash or capacity")
+	ok(city.pool <= int(floor(7000 * 0.15)), "the recruit pool is held under the smaller city's cap")
+	ok(eco.colony_block_reason(city, 0) == "already recruiting" and not eco.recruit(city, 0, roster), "one queue per city: a pod blocks a second pod and a division")
+	ok(NationEconomy.queue_text(entry).begins_with("Colony pod 0/15 labor"), "the queue text names the pod")
+	# Labor gating: 5 Training points per turn needs 3 turns.
+	city.labor.training = 5
+	eco.spawn_pending(m, roster)
+	eco.spawn_pending(m, roster)
+	ok(roster.divisions.is_empty() and eco.pending[city.id].labor == 10, "after 2 turns of 5 labor the pod is not ready (10/15)")
+	eco.spawn_pending(m, roster)
+	ok(roster.divisions.size() == 1 and not eco.pending.has(city.id), "after 3 turns (15 labor-turns) the pod appears on the city hex")
+	var pod: Division = roster.divisions[0]
+	ok(pod.unit_type == "colony_pod" and pod.hex == city.cell and pod.move == 2 and roster.is_colonizer(pod) and roster.upkeep_of(pod).is_empty(), "the pod stands on the city hex, moves 2, no upkeep")
+	# The 5,000 floor: 7,999 is blocked, 8,000 is allowed.
+	var c2: Dictionary = nation_cities(m, 0)[1] if nation_cities(m, 0).size() > 1 else city
+	c2.population = 7999
+	ok(eco.colony_block_reason(c2, 0).begins_with("city needs 5000"), "7,999 people: the city would keep under 5,000, blocked")
+	c2.population = 8000
+	ok(eco.colony_block_reason(c2, 0) == "" if c2 != city else true, "8,000 people: it keeps exactly 5,000, allowed")
+	ok(eco.colony_block_reason(nation_cities(m, 1)[0], 0) == "not your city", "not another nation's city")
+	var enslaved: Dictionary = nation_cities(m, 1)[0]
+	enslaved["enslaved"] = true
+	ok(eco.colony_block_reason(enslaved, 1).contains("enslaved"), "no pods in an enslaved city")
+	enslaved.erase("enslaved")
+	# Unarmed: cannot attack, dig in, or capture.
+	var foe_city: Dictionary = nation_cities(m, 1)[0]
+	var foe := roster.spawn_division(1, m.neighbors(pod.hex)[0], "infantry", int(foe_city.id))
+	ok(not roster.can_attack(pod, foe, m) and not roster.valid_actions(pod, m).has("attack") and not roster.valid_actions(pod, m).has("dig_in"), "a pod cannot attack or dig in")
+	ok(not roster.fortify(pod), "a pod cannot fortify")
+	ok(roster.can_attack(foe, pod, m), "the pod can be attacked")
+	roster.divisions.erase(foe)
+	var near_foe: Vector2i = foe_city.cell
+	var step: Vector2i = m.neighbors(near_foe)[0]
+	pod.hex = step
+	pod.moves_left = 2
+	ok(not roster.can_move(pod, near_foe, m), "a pod cannot step onto an enemy city (no capture)")
+	pod.hex = city.cell
+	# Founding: valid sites keep 3 hexes from every city, on land the nation can settle.
+	var sites := m.colony_sites(0)
+	ok(not sites.is_empty(), "the test map has valid colony sites")
+	var spaced := true
+	for cell in sites:
+		for c in m.cities:
+			if HexMap.hex_distance(c.cell, cell) < 3:
+				spaced = false
+	ok(spaced, "every valid site is at least 3 hexes from every city")
+	var too_close: Vector2i = Vector2i(-1, -1)
+	for cell in m.cells:
+		if HexMap.hex_distance(city.cell, cell) == 2 and int(m.territory.get(cell, -2)) != HexMap.WATER and m.terrain_of(cell).passable:
+			too_close = cell
+			break
+	ok(m.found_block_reason(too_close, 0) == "too close to a city", "2 hexes from a city is too close")
+	var water: Vector2i = Vector2i(-1, -1)
+	var foreign: Vector2i = Vector2i(-1, -1)
+	for cell in m.cells:
+		if int(m.territory[cell]) == HexMap.WATER and water.x < 0:
+			water = cell
+		if int(m.cells[cell]) == 1 and foreign.x < 0:
+			foreign = cell
+	if water.x >= 0:
+		ok(m.found_block_reason(water, 0) == "not land", "water is not a site")
+	if foreign.x >= 0:
+		ok(m.found_block_reason(foreign, 0) == "foreign territory", "another nation's territory is not a site")
+	pod.hex = sites[0]
+	ok(roster.valid_actions(pod, m).has("found"), "a pod on a valid site is offered Found city")
+	var cities_before := m.cities.size()
+	var founded := roster.found_city(pod, m)
+	ok(not founded.is_empty() and m.cities.size() == cities_before + 1 and founded.nation == 0 and founded.population == 3000 and founded.cell == sites[0], "founding makes a 3,000-person Outpost on the pod's hex")
+	ok(not roster.divisions.has(pod) and m.city_at(sites[0]).id == founded.id and m.cells[sites[0]] == 0, "the pod is used up and the new city claims its hex")
+	ok(founded.id == m.cities.map(func(c: Dictionary) -> int: return c.id).max() and eco.labor_points(founded) == 1, "the new city has a fresh id and its own labor")
+	var pod2 := roster.spawn_division(0, city.cell, "colony_pod", int(city.id))
+	ok(roster.found_city(pod2, m).is_empty() and roster.divisions.has(pod2), "founding on an invalid hex (next to a city) does nothing")
+	# Pods are not divisions for the AI's division cap or upkeep, and do not reinforce.
+	var before_count := eco.division_count(0, roster)
+	pod2.strength = 50.0
+	eco.pending[nation_cities(m, 0)[0].id] = {"nation": 0, "kind": "colony_pod", "turns_left": 0, "labor": 0, "cost": 15}
+	ok(eco.division_count(0, roster) == before_count and eco.pod_count(0, roster) == 2, "pods do not count as divisions (1 fielded, 1 queued pod counted separately)")
+	var plan := eco.reinforce_plan(roster, m, eco.current_pools(m))
+	ok(not plan.gains.has(pod2.id), "a damaged pod is not reinforced from the pools")
+	# The AI.
+	var g := pool_setup()
+	var gm: HexMap = g.map
+	var geco: NationEconomy = g.eco
+	var groster: DivisionRoster = g.roster
+	groster.divisions.clear()
+	geco.config.ai_recruit_chance = 0.0
+	geco.run_ai(0, gm, groster)
+	var queued := {}
+	for id in geco.pending:
+		if geco.pending[id].kind == "colony_pod":
+			queued[geco.pending[id].nation] = int(queued.get(geco.pending[id].nation, 0)) + 1
+	ok(not queued.is_empty() and queued.values().all(func(n: int) -> bool: return n == 1) and not queued.has(0), "each AI nation with a valid site queues one pod; the player's nations do not")
+	var no_site := pool_setup()
+	no_site.map.city_rules.colonization.min_city_distance = 99
+	no_site.roster.divisions.clear()
+	no_site.eco.config.ai_recruit_chance = 0.0
+	no_site.eco.run_ai(0, no_site.map, no_site.roster)
+	ok(no_site.eco.pending.is_empty(), "the AI queues no pod when there is no valid site")
+	var small := pool_setup()
+	small.roster.divisions.clear()
+	small.eco.config.ai_recruit_chance = 0.0
+	for c in small.map.cities:
+		c.population = 7000
+	small.eco.run_ai(0, small.map, small.roster)
+	ok(small.eco.pending.is_empty(), "the AI queues no pod when its cities cannot spare the people")
+	var off := pool_setup()
+	off.map.city_rules.colonization.ai_build_pods = false
+	off.roster.divisions.clear()
+	off.eco.config.ai_recruit_chance = 0.0
+	off.eco.run_ai(0, off.map, off.roster)
+	ok(off.eco.pending.is_empty(), "ai_build_pods = false turns the AI's pods off")
+	# A full AI game: pods are built, walk to a site and found new cities.
+	var game := save_game_setup(5)
+	var start_cities: int = game.map.cities.size()
+	game.eco.config.ai_recruit_chance = 1.0
+	for t in 40:
+		save_play_turn(game)
+	var gm_cities: int = game.map.cities.size()
+	ok(gm_cities > start_cities, "40 turns of AI play: the AI founded new cities (%d -> %d)" % [start_cities, gm_cities])
+	var founded_ok := true
+	for c in game.map.cities:
+		for o in game.map.cities:
+			if c.id != o.id and HexMap.hex_distance(c.cell, o.cell) < 3:
+				founded_ok = false
+	ok(founded_ok, "no two cities are closer than 3 hexes after AI colonization")
+	ok(MapView.symbol_for("colony_pod") == "plus", "a pod draws a plus counter")
