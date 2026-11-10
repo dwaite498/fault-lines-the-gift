@@ -24,7 +24,18 @@
 	"siege_pop_loss": 0.02,
 	"siege_labor_mult": 0.5,
 	"display_round": 100,
-	"capture_pop_loss": 0.25,
-	"capture_infra_loss": 0.3,
-	"rebuild_turns": 26
+	"rebuild_turns": 26,
+	"capture": {
+		"order": ["annex", "occupy", "plunder", "reduce", "raze", "enslave"],
+		"annexed_recruit_lockout_turns": 10,
+		"ai_default_option": "annex",
+		"options": {
+			"annex": {"pop_loss": 0.25, "infra_loss": 0.3, "severity": 0, "atrocity": false},
+			"occupy": {"pop_loss": 0.1, "infra_loss": 0.0, "severity": 0, "atrocity": false, "turns": 5, "labor_mult": 0.5},
+			"plunder": {"pop_loss": 0.15, "infra_loss": 0.5, "severity": 1, "atrocity": false, "cash_per_1000_people": 5},
+			"reduce": {"pop_loss": 0.5, "infra_loss": 0.5, "severity": 2, "atrocity": false},
+			"raze": {"refugee_share": 0.5, "severity": 3, "atrocity": true},
+			"enslave": {"pop_loss": 0.1, "infra_loss": 0.0, "severity": 3, "atrocity": false, "labor_mult": 1.5}
+		}
+	}
 }

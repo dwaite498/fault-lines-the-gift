@@ -28,7 +28,9 @@ var territory: Dictionary = {}
 ## Each city is {"id", "nation", "cell": Vector2i, "population" (people), "pool" (recruitable
 ## people, part of population), "infrastructure", "radius"}, kept in ascending id order.
 ## radius is that city's claim radius. "besieged" is set each end turn (see update_sieges).
-## A recently captured city also has "rebuild_target" and "rebuild_turns_left".
+## A recently captured city also has "rebuild_target" and "rebuild_turns_left". Capture
+## flags (CAPTURE.md): "capture_pending" until the captor picks a choice, "occupied" with
+## "occupy_turns_left" (annexable at 0), "enslaved", and "recruit_lockout" (turns left).
 var cities: Array[Dictionary] = []
 ## Nations that still have at least one city.
 var nations: Array[int] = []
@@ -46,8 +48,27 @@ var city_rules := {
 	"train_min_city_pop": 5000,
 	"siege_growth": 0.0, "siege_pop_loss": 0.02, "siege_labor_mult": 0.5,
 	"display_round": 100,
-	"capture_pop_loss": 0.25, "capture_infra_loss": 0.3, "rebuild_turns": 26,
+	"rebuild_turns": 26,
+	"capture": {
+		"order": ["annex", "occupy", "plunder", "reduce", "raze", "enslave"],
+		"annexed_recruit_lockout_turns": 10, "ai_default_option": "annex",
+		"options": {
+			"annex": {"pop_loss": 0.25, "infra_loss": 0.3, "severity": 0, "atrocity": false},
+			"occupy": {"pop_loss": 0.1, "infra_loss": 0.0, "severity": 0, "atrocity": false,
+					"turns": 5, "labor_mult": 0.5},
+			"plunder": {"pop_loss": 0.15, "infra_loss": 0.5, "severity": 1, "atrocity": false,
+					"cash_per_1000_people": 5},
+			"reduce": {"pop_loss": 0.5, "infra_loss": 0.5, "severity": 2, "atrocity": false},
+			"raze": {"refugee_share": 0.5, "severity": 3, "atrocity": true},
+			"enslave": {"pop_loss": 0.1, "infra_loss": 0.0, "severity": 3, "atrocity": false,
+					"labor_mult": 1.5},
+		},
+	},
 }
+## Every capture choice logs a reputation_event here (a stub; nothing reads it yet).
+var reputation := ReputationLog.new()
+## The result of the latest apply_capture, see apply_capture.
+var last_capture := {}
 ## Additive growth-rate modifier per nation (a trait hook for Task 41; empty today).
 ## Added to base_growth before the terrain multiplier, e.g. -0.003 for a penalized faction.
 var growth_mods: Dictionary = {}
@@ -403,6 +424,7 @@ func grow_cities(unit_cells := {}) -> bool:
 	for city in cities:
 		_advance_people(city)
 		_rebuild_step(city)
+		_tick_capture_timers(city)
 		var radius := _radius_for(int(city.population))
 		if radius != int(city.radius):
 			city.radius = radius
@@ -418,11 +440,16 @@ func housing_cap(city: Dictionary) -> int:
 
 
 ## Labor points of a city: population / people_per_labor_point rounded down, times
-## siege_labor_mult while the city is besieged.
+## siege_labor_mult while besieged, the Occupy labor_mult while occupied and the Enslave
+## labor_mult while enslaved.
 static func labor_points_for(city: Dictionary, rules: Dictionary) -> int:
 	var points := float(city.population) / float(rules.people_per_labor_point)
 	if city.get("besieged", false):
 		points *= float(rules.siege_labor_mult)
+	if city.get("occupied", false):
+		points *= float(rules.capture.options.occupy.labor_mult)
+	if city.get("enslaved", false):
+		points *= float(rules.capture.options.enslave.labor_mult)
 	return int(floor(points))
 
 
@@ -470,6 +497,8 @@ func terrain_growth_mult(city: Dictionary) -> float:
 func growth_rate(city: Dictionary, share_override := -1.0) -> float:
 	if city.get("besieged", false):
 		return float(city_rules.siege_growth)
+	if city.get("enslaved", false):
+		return 0.0  # an enslaved city never grows (CAPTURE.md)
 	var share := share_override
 	if share < 0.0:
 		var total := labor_points(city)
@@ -621,8 +650,8 @@ func _advance_people(city: Dictionary) -> void:
 		var pop := int(city.population)
 		city.population = pop - int(floor(pop * float(city_rules.siege_pop_loss)))
 	city.population = grown_population(city)
-	# An enslaved city's pool stays 0 permanently (POPULATION and Pillars rules).
-	city.pool = 0 if city.get("enslaved", false) else clampi(pool_of(city) + pool_fill(city), 0, pool_cap(city))
+	# An enslaved or occupied city's pool stays 0 (POPULATION, Pillars and CAPTURE rules).
+	city.pool = 0 if city.get("enslaved", false) or city.get("occupied", false) else clampi(pool_of(city) + pool_fill(city), 0, pool_cap(city))
 
 
 ## A copy of the city as it will stand after this end turn's growth and pool fill.
@@ -667,32 +696,154 @@ func remove_city(city_id: int) -> Array[int]:
 	return eliminated
 
 
-## Hands the city on cell to new_nation, reruns ownership, and removes any
-## nation left with no cities. Returns the eliminated nation indexes.
-## The city loses capture_pop_loss of its pop (rounded down) and
-## capture_infra_loss of its infra, then rebuilds over rebuild_turns turns. Its recruit
-## pool is emptied and its labor assignment resets to the new owner's default.
-## Re-capture during a rebuild keeps the original target and restarts the timer.
-func capture_city(cell: Vector2i, new_nation: int) -> Array[int]:
-	for city in cities:
-		if city.cell == cell:
-			city.nation = new_nation
+## Capture timers (one per end turn): Occupy counts down to annexable, and the recruit
+## lockout after an annex counts down to 0.
+func _tick_capture_timers(city: Dictionary) -> void:
+	if city.get("occupied", false):
+		city.occupy_turns_left = maxi(int(city.get("occupy_turns_left", 0)) - 1, 0)
+	if int(city.get("recruit_lockout", 0)) > 0:
+		city.recruit_lockout = int(city.recruit_lockout) - 1
+
+
+## The capture choices in menu order: [{"id", plus the option's config numbers}].
+func capture_choices() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for id in city_rules.capture.order:
+		var opt: Dictionary = city_rules.capture.options[id].duplicate()
+		opt["id"] = id
+		out.append(opt)
+	return out
+
+
+## The option the AI picks until personalities decide (Task 40).
+func ai_capture_option() -> String:
+	return String(city_rules.capture.ai_default_option)
+
+
+## True if the city is occupied and its occupy timer has run out (it may be annexed).
+func can_annex_occupied(city: Dictionary) -> bool:
+	return city.get("occupied", false) and int(city.get("occupy_turns_left", 0)) <= 0
+
+
+## Step 1 of a capture: hands the city on cell to new_nation, reruns ownership and
+## removes any nation left with no cities (taking its last city eliminates it, whatever
+## is chosen next). The city is flagged "capture_pending" with "capture_victim" until
+## apply_capture picks the choice. Returns {"city_id", "captor", "victim", "eliminated"},
+## or {} if there is no city there.
+func take_city(cell: Vector2i, new_nation: int) -> Dictionary:
+	var city := city_at(cell)
+	if city.is_empty():
+		return {}
+	var victim := int(city.nation)
+	city.nation = new_nation
+	city.capture_pending = true
+	city.capture_victim = victim
+	city.besieged = false
+	var eliminated := eliminate_nations_without_cities()
+	update_ownership()
+	return {"city_id": int(city.id), "captor": new_nation, "victim": victim, "eliminated": eliminated}
+
+
+## Step 2 of a capture (CAPTURE.md): applies option ("annex", "occupy", "plunder",
+## "reduce", "raze" or "enslave"; anything else is "annex") to a city taken with take_city,
+## and logs the reputation_event. Numbers come from city_rules.capture.options. Returns
+## {"option", "city_id", "captor", "victim", "population_loss", "cash" (plunder, for the
+## caller to credit), "refugees" (people who reached the victim's nearest city),
+## "lost_people" (died or had nowhere to go), "severity", "atrocity", "eliminated"}, or {}
+## if the city is not awaiting a choice. Raze removes the city, so its land is freed.
+func apply_capture(city_id: int, option: String) -> Dictionary:
+	var city := city_by_id(city_id)
+	if city.is_empty() or not city.get("capture_pending", false):
+		return {}
+	if not city_rules.capture.options.has(option):
+		option = "annex"
+	var opt: Dictionary = city_rules.capture.options[option]
+	var victim := int(city.capture_victim)
+	var captor := int(city.nation)
+	var cell: Vector2i = city.cell
+	var pop := int(city.population)
+	var result := {"option": option, "city_id": city_id, "captor": captor, "victim": victim,
+			"population_loss": 0, "cash": 0.0, "refugees": 0, "lost_people": 0,
+			"severity": int(opt.severity), "atrocity": bool(opt.atrocity), "eliminated": []}
+	city.erase("capture_pending")
+	city.erase("capture_victim")
+	if option == "raze":
+		var fled := int(floor(pop * float(opt.refugee_share)))
+		result.population_loss = pop
+		result.eliminated = remove_city(city_id)
+		_settle_refugees(result, victim, cell, fled, pop)
+	else:
+		var loss := int(floor(pop * float(opt.get("pop_loss", 0.0))))
+		var infra_loss := float(opt.get("infra_loss", 0.0))
+		result.population_loss = loss
+		if infra_loss > 0.0:
 			if not city.has("rebuild_target"):
 				city.rebuild_target = float(city.infrastructure)
 			city.rebuild_turns_left = int(city_rules.rebuild_turns)
-			var pop := int(city.population)
-			city.population = pop - int(floor(pop * float(city_rules.capture_pop_loss)))
-			city.infrastructure = float(city.infrastructure) * (1.0 - float(city_rules.capture_infra_loss))
-			city.radius = _radius_for(int(city.population))
-			# The old owner's recruits, labor plan and infra build do not carry over.
-			city.pool = 0
-			city.besieged = false
-			city.erase("enslaved")
-			city.infra_progress = 0
-			city.erase("labor")
-			city.erase("labor_auto")
-	var eliminated := eliminate_nations_without_cities()
-	update_ownership()
+			city.infrastructure = float(city.infrastructure) * (1.0 - infra_loss)
+		city.population = pop - loss
+		city.radius = _radius_for(int(city.population))
+		# The old owner's recruits, labor plan, infra build and capture states do not carry over.
+		city.pool = 0
+		city.infra_progress = 0
+		city.erase("labor")
+		city.erase("labor_auto")
+		for key in ["enslaved", "occupied", "occupy_turns_left", "recruit_lockout"]:
+			city.erase(key)
+		match option:
+			"occupy":
+				city.occupied = true
+				city.occupy_turns_left = int(opt.turns)
+			"enslave":
+				city.enslaved = true
+			"plunder":
+				result.cash = float(pop) / 1000.0 * float(opt.cash_per_1000_people)
+			"reduce":
+				_settle_refugees(result, victim, cell, loss, loss)
+		if option in ["annex", "plunder", "reduce"]:
+			city.recruit_lockout = int(city_rules.capture.annexed_recruit_lockout_turns)
+	reputation.log_event(option, captor, victim, int(opt.severity), bool(opt.atrocity),
+			{"city": city_id, "cell": cell})
+	last_capture = result
+	return result
+
+
+## Sends `fled` people to the victim's nearest city (recorded in result.refugees); the
+## rest of the `of` people, and everyone if the victim has no city left, are lost.
+func _settle_refugees(result: Dictionary, victim: int, cell: Vector2i, fled: int, of: int) -> void:
+	var received := 0
+	if fled > 0 and return_people(victim, -1, cell, fled) >= 0:
+		received = fled
+	result.refugees = received
+	result.lost_people = of - received
+
+
+## Annexes an occupied city whose timer has run out, with no extra loss: Annex's recruit
+## lockout starts, the pool stays 0. Logs an "annex" reputation_event. False if it cannot.
+func annex_occupied(city_id: int) -> bool:
+	var city := city_by_id(city_id)
+	if city.is_empty() or not can_annex_occupied(city):
+		return false
+	city.erase("occupied")
+	city.erase("occupy_turns_left")
+	city.pool = 0
+	city.recruit_lockout = int(city_rules.capture.annexed_recruit_lockout_turns)
+	var annex: Dictionary = city_rules.capture.options.annex
+	reputation.log_event("annex", int(city.nation), -1, int(annex.severity), bool(annex.atrocity),
+			{"city": city_id, "cell": city.cell, "from_occupy": true})
+	return true
+
+
+## Both capture steps at once: hands the city on cell to new_nation, applies `option`
+## (the default is Annex) and returns the eliminated nation indexes. The full result is
+## in last_capture (including plunder cash, which the caller credits).
+func capture_city(cell: Vector2i, new_nation: int, option := "annex") -> Array[int]:
+	var taken := take_city(cell, new_nation)
+	if taken.is_empty():
+		return []
+	apply_capture(int(taken.city_id), option)
+	var eliminated: Array[int] = []
+	eliminated.assign(taken.eliminated)
 	return eliminated
 
 

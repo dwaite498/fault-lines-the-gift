@@ -3,7 +3,7 @@ extends Node2D
 ## Controls: click your division to select it, then click a reachable hex to order
 ## a move or an adjacent enemy to order an attack (right-click without dragging, or Esc, clears the
 ## order). Camera: arrow keys pan, middle/right-drag pans, wheel zooms at the cursor. F fortifies. Space ends the turn and executes all orders (AI orders are
-## issued at the start of each turn, before yours). With your city panel open, R recruits infantry. N toggles the military panel. Debug: K removes the newest city.
+## issued at the start of each turn, before yours). With your city panel open, R recruits infantry. N toggles the military panel. Capturing a city opens a popup to choose Annex, Occupy, Plunder, Reduce, Raze or Enslave; an occupied city shows an Annex button once its timer is up. Debug: K removes the newest city.
 
 const GAME_TITLE := "Fault Lines: Planetfall"
 const MAP_CONFIG_PATH := "res://data/map_config.json"
@@ -19,6 +19,7 @@ var _economy: NationEconomy
 var _city: Dictionary = {}
 var _nation_panel: NationPanel
 var _military_panel: MilitaryPanel
+var _capture_popup := CapturePopup.new()
 var _top_bar := TopBar.new()
 ## Brief on-screen message (e.g. why R was blocked). Cleared on the next action.
 var message := Label.new()
@@ -58,6 +59,9 @@ func _ready() -> void:
 	_city_panel.player_nation = PLAYER_NATION
 	_city_panel.recruit_pressed.connect(_on_recruit_pressed)
 	_city_panel.labor_pressed.connect(_on_labor_pressed)
+	_city_panel.annex_pressed.connect(_on_annex_pressed)
+	_capture_popup.chosen.connect(_on_capture_chosen)
+	add_child(_capture_popup)
 	_panel.roster = _view.roster
 	_panel.player_nation = PLAYER_NATION
 	_panel.factions = factions
@@ -90,21 +94,15 @@ func _unhandled_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
 	if not key or not key.pressed or key.echo:
 		return
+	if _capture_popup.is_open():
+		return  # the capture choice comes first
 	message.text = ""
 	var roster := _view.roster
 	if key.keycode == KEY_SPACE:
 		_set_mode("")
 		_economy.run_ai(PLAYER_NATION, _view.hex_map, roster)
 		roster.execute_orders(_view.hex_map)
-		roster.end_turn(_view.hex_map)
-		_view.hex_map.grow_cities(roster.unit_cells())
-		_economy.end_turn(_view.hex_map, roster)
-		turn += 1
-		var stalled := _economy.stalled_cities(PLAYER_NATION, _view.hex_map)
-		if not stalled.is_empty():
-			message.text = "Recruit stalled in city %s: assign Training labor" % ", ".join(stalled.map(func(i: int) -> String: return str(i)))
-		roster.run_ai(PLAYER_NATION, _view.hex_map)
-		print("Turn ended")
+		_resolve_captures()
 	elif ACTION_KEYS.has(key.keycode):
 		do_action(ACTION_KEYS[key.keycode])
 		return
@@ -126,6 +124,55 @@ func _unhandled_input(event: InputEvent) -> void:
 		select_unit(null)
 	if not _view.hex_map.cities.has(_city):
 		_city = {}
+	_refresh_panels()
+
+
+## After the orders ran: the AI's captures take its default choice, then each of the
+## player's captures asks for a choice in the popup. The turn finishes once none is left.
+func _resolve_captures() -> void:
+	var roster := _view.roster
+	roster.resolve_ai_captures(_view.hex_map, PLAYER_NATION)
+	if roster.pending_captures.is_empty():
+		_finish_turn()
+		return
+	var info: Dictionary = roster.pending_captures[0]
+	var victim := _view.hex_map.city_by_id(int(info.city_id))
+	_capture_popup.open(victim, _view.factions.name_of(int(info.victim)), _view.hex_map.city_rules)
+	_refresh_panels()
+
+
+func _on_capture_chosen(option: String) -> void:
+	var roster := _view.roster
+	var info: Dictionary = roster.pending_captures[0]
+	var result := roster.apply_capture(int(info.city_id), option, _view.hex_map)
+	message.text = "City %d: %s" % [int(info.city_id), option]
+	print("Capture choice: %s" % [result])
+	_resolve_captures()
+	if _view.selected and not roster.divisions.has(_view.selected):
+		select_unit(null)
+	if not _view.hex_map.cities.has(_city):
+		_city = {}
+	_refresh_panels()
+
+
+## The rest of the turn, after every capture is resolved.
+func _finish_turn() -> void:
+	var roster := _view.roster
+	roster.end_turn(_view.hex_map)
+	_view.hex_map.grow_cities(roster.unit_cells())
+	_economy.end_turn(_view.hex_map, roster)
+	turn += 1
+	var stalled := _economy.stalled_cities(PLAYER_NATION, _view.hex_map)
+	if not stalled.is_empty():
+		message.text = "Recruit stalled in city %s: assign Training labor" % ", ".join(stalled.map(func(i: int) -> String: return str(i)))
+	roster.run_ai(PLAYER_NATION, _view.hex_map)
+	print("Turn ended")
+
+
+func _on_annex_pressed() -> void:
+	message.text = ""
+	if not _city.is_empty() and _city.nation == PLAYER_NATION and _view.hex_map.annex_occupied(int(_city.id)):
+		message.text = "City %d annexed" % int(_city.id)
 	_refresh_panels()
 
 
@@ -200,7 +247,7 @@ func _refresh_panels() -> void:
 ## selects: a unit (any nation; a second click on it shows the city under it),
 ## else the city there, else nothing. It never creates an order.
 func _on_hex_clicked(hex: Vector2i) -> void:
-	if hex == Vector2i(-1, -1):
+	if hex == Vector2i(-1, -1) or _capture_popup.is_open():
 		return
 	var roster := _view.roster
 	message.text = ""
