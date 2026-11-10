@@ -40,7 +40,7 @@
 		"size_outline": "#1F2A33",
 		"org": "#E8E2D0",
 		"str": "#C9B37E",
-		"track": "#1F2A33",
+		"track": "#0D1614",
 		"selected": "#C9B37E",
 		"spent_alpha": 0.55
 	},
@@ -49,16 +49,16 @@
 		"ring": "#E8E2D0",
 		"star": "#C9B37E",
 		"label": "#E8E2D0",
-		"plate": "#1F2A33"
+		"plate": "#15211E"
 	},
 	"ui": {
-		"frame": "#1F2A33",
-		"panel": "#4A5244",
-		"text": "#E8E2D0",
-		"dim": "#A9A48F",
-		"accent": "#C9B37E",
-		"divider": "#E8E2D0",
+		"frame": "#070C0B",
+		"panel": "#15211E",
+		"text": "#E6B85C",
+		"dim": "#7C8C84",
+		"accent": "#5FD3C0",
+		"divider": "#5FD3C0",
 		"divider_alpha": 0.25,
-		"supply_out": "#C0603E"
+		"supply_out": "#E0583A"
 	}
 }
