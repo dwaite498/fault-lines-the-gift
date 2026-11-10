@@ -2,8 +2,8 @@
 
 ## Part A: the minimum native layer
 ### Files
-- `data/natives.json`: unit types, spawner, AI, and pressure config.
-- `scripts/natives/native_spawner.gd`, `scripts/natives/native_ai.gd`, and `scripts/natives/pressure.gd`.
+- `data/natives.json`: unit types, spawner, AI, raid, fungus and (Part B) pressure config.
+- `scripts/natives/native_spawner.gd` and `scripts/natives/native_ai.gd`. (`scripts/natives/pressure.gd` belongs to Part B.)
 - Natives are a special nation (`NATIVE_NATION = -2`). They're hostile to everyone, own no cities, have no economy, and never surrender.
 
 ### Unit types (from art_concepts/alien_fauna_sheet.jpg)
@@ -25,6 +25,25 @@ Natives use the normal combat resolution. They don't fortify and can't capture c
 - Strider herds also flee away from adjacent enemies when org is below 50%.
 - Worms attack adjacent city hexes too. They do org damage only and can't take the city.
 - Natives issue orders through the normal simultaneous-orders system, collected blind like the AI's.
+
+### Minimum natives (PM ruling, implemented in Task 44)
+- After turn 3 there are always at least 2 native groups (`spawner.min_natives` 2): whenever the count falls short, a Rust Strider is placed on a valid plains tile.
+
+### Strider raids (PM ruling)
+- At end of turn, a Rust Strider adjacent to an undefended Outpost or Base takes `raid.pop_loss` (5%) of that city's people.
+- Each city can be raided at most once per 5 turns (per-city cooldown) and is never reduced below 1,000 people. The city is never captured.
+
+### Fungus attrition
+- A non-native division on a fungus tile loses 5 org and 2 strength per turn and pays +1 move cost to enter it.
+- Verdant Accord takes half of this (`fungus_attrition_mult` 0.5; the +1 move cost rounds down to 0).
+- Strength never drops below 1 from attrition. Natives are exempt. Scouts are not exempt.
+
+### Fungus seeding
+- At new-game creation, `fungus.patches` (4) patches of radius 2 are placed away from cities with a seeded RNG. Density is 4 at the centre and one less per ring.
+- Fungus is saved with the game. It does not grow or spread (out of scope).
+
+### Visibility
+- Aliens are drawn and can be targeted only on tiles the viewing nation currently sees (Visible under fog), like every enemy unit. They own no city, so they never count for domination.
 
 ## Part B: Pressure and escalation
 ### Pressure score (planet-wide, 0-100, stored with per-faction contributions)
