@@ -53,6 +53,8 @@ var elevation: Dictionary = {}
 ## The "elevation" block of terrain_config.json: climb_cost, cliff_diff, smooth_max_step,
 ## ridge_terrain. Without it there are no elevation rules (no climb cost, no cliffs).
 var elevation_rules: Dictionary = {}
+## Tagged ridge edges (edge_key) left as cliffs between a mountain and lower land.
+var ridge_edges: Dictionary = {}
 ## Terrain name -> {color, move_cost, defense_mult, passable} from terrain_config.json.
 var terrain_types: Dictionary = {}
 
@@ -144,21 +146,64 @@ func _is_ridge(cell: Vector2i) -> bool:
 	return elevation_rules.get("ridge_terrain", []).has(terrain_name(cell))
 
 
-## Lowers the higher of any two neighboring land hexes that differ by more than
-## smooth_max_step, except when either is a ridge terrain (mountains). Deterministic.
+## Cell pair -> key for ridge_edges (order-independent).
+static func edge_key(a: Vector2i, b: Vector2i) -> Vector4i:
+	var lo := a if (a.x < b.x or (a.x == b.x and a.y < b.y)) else b
+	var hi := b if lo == a else a
+	return Vector4i(lo.x, lo.y, hi.x, hi.y)
+
+
+## True if the edge between a and b is a tagged ridge: a deliberate cliff left between
+## a mountain and lower land (see _smooth_elevation).
+func is_ridge_edge(a: Vector2i, b: Vector2i) -> bool:
+	return ridge_edges.has(edge_key(a, b))
+
+
+## Deterministic pick (seed plus the two cells, integer hash, no RNG) of whether the
+## mountain-to-lowland edge a-b is a ridge. The chance is ridge_edge_chance (0..1).
+func _picks_ridge(a: Vector2i, b: Vector2i) -> bool:
+	var k := edge_key(a, b)
+	var h := (k.x * 73856093) ^ (k.y * 19349663) ^ (k.z * 83492791) ^ (k.w * 2654435761) ^ (seed_value * 374761393)
+	h = (h ^ (h >> 13)) & 0x7fffffff
+	return float(h % 1000) < float(elevation_rules.get("ridge_edge_chance", 0.0)) * 1000.0
+
+
+## Makes land neighbors differ by at most smooth_max_step, everywhere except on tagged
+## ridge edges. Between two non-mountain hexes the higher one is lowered. Next to a
+## mountain (ridge_terrain) the lower hex is raised to a foothill, one step under the
+## mountain: its terrain becomes foothill_terrain (hills) unless it is a city hex (those
+## only get the elevation), except that a deterministic ~ridge_edge_chance of the
+## mountain-to-lowland edges stay as cliffs and are tagged in ridge_edges. Deterministic.
 func _smooth_elevation() -> void:
+	ridge_edges.clear()
 	var max_step := int(elevation_rules.get("smooth_max_step", 1 << 20))
+	var foothill := str(elevation_rules.get("foothill_terrain", ""))
+	var city_cells := {}
+	for city in cities:
+		city_cells[city.cell] = true
 	var keys: Array = terrain.keys()
 	keys.sort()
 	for pass_index in keys.size():
 		var changed := false
 		for cell in keys:
-			if not terrain_of(cell).passable or _is_ridge(cell):
+			if not terrain_of(cell).passable:
 				continue
 			for n in neighbors(cell):
-				if terrain_of(n).passable and not _is_ridge(n) and elevation[cell] > elevation[n] + max_step:
+				if not terrain_of(n).passable or elevation[cell] <= elevation[n] + max_step:
+					continue
+				# cell is more than max_step above n.
+				if _is_ridge(cell) or _is_ridge(n):
+					if ridge_edges.has(edge_key(cell, n)):
+						continue
+					if _picks_ridge(cell, n):
+						ridge_edges[edge_key(cell, n)] = true
+						continue
+					elevation[n] = elevation[cell] - max_step
+					if foothill != "" and not _is_ridge(n) and not city_cells.has(n) and terrain_types.has(foothill):
+						terrain[n] = foothill
+				else:
 					elevation[cell] = elevation[n] + max_step
-					changed = true
+				changed = true
 		if not changed:
 			break
 

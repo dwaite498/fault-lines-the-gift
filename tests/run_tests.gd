@@ -176,16 +176,53 @@ func test_reachability() -> void:
 				if not reach.has(c):
 					all_ok = false
 					worst = "seed %d cell %s" % [seed_value, str(c)]
-		# Neighbors differ by at most 1 except where a mountain is involved.
+		# Neighbors differ by at most 1 everywhere except on tagged ridge edges.
 		for cell in m.elevation:
 			for n in m.neighbors(cell):
 				if absi(m.elevation[cell] - m.elevation[n]) > 1 and m.terrain_of(cell).passable and m.terrain_of(n).passable \
-						and m.terrain[cell] != "mountains" and m.terrain[n] != "mountains":
+						and not m.is_ridge_edge(cell, n):
 					all_ok = false
 					worst = "smooth seed %d %s" % [seed_value, str(cell)]
 	ok(all_ok, "all land reachable from its start on 20 seeds %s" % worst)
+	test_mountains()
 	ok(m_idempotent(), "ensure_reachable finds nothing more to fix")
 	ok(deterministic, "same seed gives the same elevations")
+
+
+# Mountains stay at 3 but get foothills: any mountain-to-land edge that is a cliff
+# (2+ levels) must be a tagged ridge, and most mountain edges can be walked.
+func test_mountains() -> void:
+	var untagged := 0
+	var edges := 0
+	var open_edges := 0
+	var mountains := 0
+	var foothills := 0
+	var ridges := 0
+	var all3 := true
+	for seed_value in range(1, 21):
+		var m := build(seed_value)
+		ridges += m.ridge_edges.size()
+		for cell in m.terrain:
+			if m.terrain[cell] != "mountains":
+				continue
+			mountains += 1
+			for n in m.neighbors(cell):
+				if not m.terrain_of(n).passable or m.terrain[n] == "mountains":
+					continue
+				edges += 1
+				if m.can_step(cell, n) and m.can_step(n, cell):
+					open_edges += 1
+				if absi(m.elevation[cell] - m.elevation[n]) > 1 and not m.is_ridge_edge(cell, n):
+					untagged += 1
+				if m.terrain[n] == "hills" and m.elevation[n] == 2:
+					foothills += 1
+	ok(mountains > 0 and edges > 0, "20 seeds have mountains (%d) with lowland edges (%d)" % [mountains, edges])
+	ok(untagged == 0, "no mountain borders a level-1 tile across a cliff unless the edge is a tagged ridge (%d untagged)" % untagged)
+	ok(float(open_edges) / float(maxi(edges, 1)) > 0.5, "most mountain edges are walkable (%d of %d), %d ridge edges tagged" % [open_edges, edges, ridges])
+	ok(foothills > 0, "mountains get hills foothills (%d)" % foothills)
+	var m1 := build(7)
+	var m2 := build(7)
+	ok(m1.ridge_edges == m2.ridge_edges and m1.terrain == m2.terrain, "ridge tags and foothills are deterministic")
 
 
 func build(seed_value: int) -> HexMap:
