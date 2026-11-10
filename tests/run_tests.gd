@@ -40,6 +40,12 @@ func _initialize() -> void:
 	test_capture_flow()
 	test_capture_gating()
 	test_atrocity_views()
+	test_main_menu()
+	test_save_load()
+	test_victory()
+	test_colonizers()
+	test_fog()
+	test_scout()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -968,6 +974,8 @@ func test_siege_capture_ai() -> void:
 	var roster: DivisionRoster = s.roster
 	roster.divisions.clear()
 	eco2.config.ai_recruit_chance = 1.0
+	eco2.city_rules.colonization.ai_build_pods = false  # these checks are about division recruiting
+	roster.templates.scout.recruit.ai_count = 0
 	for c in m2.cities:
 		c.pool = 0
 	for nation in m2.nations:
@@ -1098,6 +1106,8 @@ func test_pillars_rules() -> void:
 	for flag in ["besieged", "starving", "enslaved"]:
 		var a := pool_setup()
 		a.roster.divisions.clear()
+		a.eco.city_rules.colonization.ai_build_pods = false
+		a.roster.templates.scout.recruit.ai_count = 0
 		a.eco.config.ai_recruit_chance = 1.0
 		for nation in a.map.nations:
 			a.eco.stocks[nation].capacity = 100.0
@@ -1139,7 +1149,7 @@ func test_pillars_rules() -> void:
 	dv.strength = 60.0
 	ok(dm.roster.demobilize(dv, dm.map) == 300, "survivors return at the division type's people_per_strength (60 x 5 = 300)")
 	# QA nit: the main.gd header names the real keys.
-	var header := FileAccess.get_file_as_string("res://scripts/main.gd").substr(0, 900)
+	var header := FileAccess.get_file_as_string("res://scripts/main.gd").substr(0, 1500)
 	ok(header.contains("N toggles the military panel") and header.contains("K removes the newest city") and not header.contains("D removes"), "main.gd header comment names N and K (not M and D)")
 
 
@@ -1149,6 +1159,8 @@ func test_ai_upkeep_cap() -> void:
 	var eco: NationEconomy = a.eco
 	var roster: DivisionRoster = a.roster
 	eco.config.ai_recruit_chance = 1.0
+	eco.city_rules.colonization.ai_build_pods = false  # these checks are about division recruiting
+	roster.templates.scout.recruit.ai_count = 0
 	var nation: int = m.nations.filter(func(n: int) -> bool: return n != 0)[0]
 	for n in m.nations:
 		eco.stocks[n].capacity = 100.0
@@ -1509,3 +1521,647 @@ func test_atrocity_views() -> void:
 	var custom := [{"id": "x", "views_as_atrocity": ["raze"], "atrocity_sensitivity": 2.0}, {"id": "y"}]
 	m.load_faction_views(custom)
 	ok(is_equal_approx(m.reputation_weight_to("x", raze), w * 2.0) and is_equal_approx(m.reputation_weight_to("y", raze), w), "atrocity_sensitivity is read from the faction entry when present")
+
+
+# --- Task 40b: main menu and game setup ---
+
+func test_main_menu() -> void:
+	ok(ProjectSettings.get_setting("application/run/main_scene") == "res://scenes/menu.tscn", "the main menu is the project's main scene")
+	var limits := GameSession.setup_limits()
+	ok(limits.min_ai == 1 and limits.max_ai == 3 and limits.default_ai == 3, "config: setup screen allows 1 to 3 AI nations (default 3)")
+	var menu := MainMenu.new()
+	ok(menu.menu_box.visible and not menu.setup_box.visible, "the menu opens on New Game, Load Game and Quit")
+	ok(menu.new_button.text == "New Game" and menu.load_button.text == "Load Game" and menu.quit_button.text == "Quit", "the menu has New Game, Load Game and Quit")
+	menu.new_button.pressed.emit()
+	ok(menu.setup_box.visible and not menu.menu_box.visible, "New Game opens the setup screen")
+	var playable := FactionRoster.load_all().filter(func(f: Dictionary) -> bool: return f.get("playable", true))
+	ok(menu.faction_picker.item_count == playable.size() and menu.faction_picker.get_item_text(0) == playable[0].name, "the faction picker lists the playable factions")
+	ok(menu.ai_spin.min_value == 1 and menu.ai_spin.max_value == 3 and menu.ai_spin.value == 3, "the AI nation spinner uses the config range")
+	var before := menu.seed_field.text
+	ok(before == "12345", "the seed field starts at the config seed")
+	menu.random_button.pressed.emit()
+	ok(menu.seed_field.text.is_valid_int() and menu.seed_field.text != "", "the Random button puts a seed in the field")
+	menu.seed_field.text = "777"
+	menu.faction_picker.select(2)
+	menu.ai_spin.value = 2
+	var got := []
+	menu.new_game.connect(func(st: Dictionary) -> void: got.append(st))
+	menu.start_button.pressed.emit()
+	ok(got.size() == 1 and got[0] == {"player_faction": playable[2].id, "seed": 777, "ai_count": 2}, "Start emits the chosen faction, seed and AI count")
+	menu.seed_field.text = "abc"
+	ok(menu.build_settings().seed > 0 and menu.seed_field.text.is_valid_int(), "a bad seed gets replaced by a random one")
+	var loads := [0]
+	menu.load_game.connect(func() -> void: loads[0] += 1)
+	menu.load_button.pressed.emit()
+	ok(loads[0] == 1, "Load Game emits load_game")
+	menu.back_button.pressed.emit()
+	ok(menu.menu_box.visible and not menu.setup_box.visible, "Back returns to the menu")
+	menu.free()
+	# The settings drive the game: seed, nation count and player faction.
+	var base: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://data/map_config.json"))
+	ok(GameSession.apply(base, {}) == base, "no settings leaves the config unchanged")
+	for ai in [1, 2, 3]:
+		for sd in [3, 11, 25]:
+			var cfg := GameSession.apply(base, {"player_faction": "covenant", "seed": sd, "ai_count": ai})
+			var roster := FactionRoster.from_config(cfg)
+			var m := HexMap.from_config_file("res://data/map_config.json", "res://data/cities_config.json",
+					"res://data/terrain_config.json", roster.sea_nations(), cfg)
+			ok(m.seed_value == sd and m.nations.size() == ai + 1 and roster.assigned.size() == ai + 1 and roster.assigned[0].id == "covenant", "seed %d with %d AI: %d nations, the player is the Covenant" % [sd, ai, ai + 1])
+
+
+# --- Task 40c: save and load ---
+
+## A fresh all-AI game from map_config.json with the given seed: {"map", "eco", "roster", "cfg"}.
+func save_game_setup(seed_value: int) -> Dictionary:
+	var cfg: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://data/map_config.json"))
+	cfg["seed"] = seed_value
+	var m := HexMap.from_config_file("res://data/map_config.json", "res://data/cities_config.json",
+			"res://data/terrain_config.json", [], cfg)
+	var eco := NationEconomy.new()
+	eco.setup(m)
+	var roster := make_roster()
+	roster.spawn_at_cities(m)
+	roster.economy = eco
+	var fog := Fog.from_config(cfg)
+	roster.fog = fog
+	fog.explore_landing(m)
+	fog.update(m, roster)
+	return {"map": m, "eco": eco, "roster": roster, "cfg": cfg, "fog": fog}
+
+
+## One end turn with every nation run by the AI (the order main.gd uses).
+func save_play_turn(g: Dictionary) -> void:
+	var m: HexMap = g.map
+	var roster: DivisionRoster = g.roster
+	g.eco.run_ai(-1, m, roster)
+	roster.execute_orders(m)
+	roster.resolve_ai_captures(m, -1)
+	roster.end_turn(m)
+	m.grow_cities(roster.unit_cells())
+	g.eco.end_turn(m, roster)
+	roster.run_ai(-1, m)
+	g.fog.update(m, roster)
+
+
+func save_state(g: Dictionary, turn: int) -> Dictionary:
+	var ids: Array = []
+	for i in g.map.nations.size():
+		ids.append("f%d" % i)
+	g.fog.update(g.map, g.roster)
+	return SaveGame.capture(g.map, g.roster, g.eco, turn, g.cfg, ids, {"fog": g.fog.capture()})
+
+
+func test_save_load() -> void:
+	var g := save_game_setup(5)
+	g.eco.config.ai_recruit_chance = 1.0
+	for t in 4:
+		save_play_turn(g)
+	# Put the interesting state in: a capture with a reputation event and an occupied city,
+	# a plunder (cash), a queued recruit and a division with an order.
+	var m: HexMap = g.map
+	var roster: DivisionRoster = g.roster
+	var victims := nation_cities(m, 1)
+	var raider_cities := nation_cities(m, 0)
+	if not victims.is_empty():
+		var guard := roster.division_at(victims[0].cell)
+		if guard:
+			roster.divisions.erase(guard)
+		roster.pending_captures.append(m.take_city(victims[0].cell, 0))
+		roster.apply_capture(int(victims[0].id), "occupy", m)
+	var marked: Division = roster.divisions[0]
+	marked.order_path.append(m.neighbors(marked.hex)[0])
+	marked.attacked_from.append(m.neighbors(marked.hex)[1])
+	for t in 6:
+		save_play_turn(g)
+	var turn_n := 11
+	var state := save_state(g, turn_n)
+	var h1 := SaveGame.state_hash(state)
+	ok(state.map.reputation.size() >= 1 and state.economy.stocks.size() == m.nations.size() and state.roster.divisions.size() > 0, "the state holds reputation events, stocks and divisions")
+	ok(state.roster.divisions.any(func(d: Dictionary) -> bool: return not d.order_path.is_empty()), "division orders are part of the state")
+	ok(m.cities.any(func(c: Dictionary) -> bool: return c.get("occupied", false) or c.has("recruit_lockout")), "capture states (occupied or lockout) are in the saved cities")
+	# File round trip.
+	var path := "user://test_save_40c.sav"
+	ok(SaveGame.write(path, state), "the state is written to user://")
+	var read := SaveGame.read(path)
+	ok(SaveGame.state_hash(read) == h1, "the state read back from disk has the same hash")
+	# Load into fresh objects.
+	var g2 := save_game_setup(5)
+	var turn2 := SaveGame.restore(read, g2.map, g2.roster, g2.eco)
+	g2.fog.restore(read.extras.fog)
+	var h2 := SaveGame.state_hash(save_state(g2, turn2))
+	ok(turn2 == turn_n and h2 == h1, "saving on turn %d, loading and saving again gives the same state hash" % turn_n)
+	# The loaded game plays on exactly like the original (including the AI's random stream).
+	g2.eco.config.ai_recruit_chance = 1.0
+	for t in 6:
+		save_play_turn(g)
+		save_play_turn(g2)
+	ok(SaveGame.state_hash(save_state(g, turn_n + 6)) == SaveGame.state_hash(save_state(g2, turn_n + 6)), "6 more turns after loading end in the same state as the original game")
+	# A different state hashes differently, and unreadable saves load as empty.
+	ok(SaveGame.state_hash(save_state(g, turn_n + 6)) != h1, "the hash changes when the game moves on")
+	var bad := read.duplicate()
+	bad["version"] = 999
+	SaveGame.write(path, bad)
+	ok(SaveGame.read(path).is_empty() and SaveGame.read("user://no_such_save.sav").is_empty(), "a save of another version or a missing file reads as empty")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	# Menus.
+	var menu := MainMenu.new()
+	ok(menu.load_button.disabled == not SaveGame.has_save(), "Load Game is enabled only when a save exists")
+	menu.free()
+	var pause := PauseMenu.new()
+	var presses := []
+	pause.save_pressed.connect(func() -> void: presses.append("save"))
+	pause.main_menu_pressed.connect(func() -> void: presses.append("menu"))
+	pause.open()
+	pause.save_button.pressed.emit()
+	pause.menu_button.pressed.emit()
+	ok(pause.is_open() and presses == ["save", "menu"] and pause.save_button.text == "Save Game", "the Esc menu offers Save Game and Main Menu")
+	pause.close()
+	ok(not pause.is_open(), "Resume closes the Esc menu")
+	pause.free()
+
+
+# --- Task 40d: domination victory and defeat ---
+
+func test_victory() -> void:
+	var share := Victory.domination_share()
+	ok(is_equal_approx(share, 0.85), "victory.domination_share is 0.85 in map_config.json")
+	var g := save_game_setup(5)
+	var m: HexMap = g.map
+	var player := 0
+	var total := m.cities.size()
+	ok(Victory.check(m, player, share).over == false, "a fresh game is not over")
+	# Give the player cities until just under 85%, then to 85%.
+	var need := ceili(share * total - 0.000001)
+	var others: Array[Dictionary] = []
+	for c in m.cities:
+		if c.nation != player:
+			others.append(c)
+	for i in need - 1 - nation_cities(m, player).size():
+		others[i].nation = player
+	var held := nation_cities(m, player).size()
+	var r := Victory.check(m, player, share)
+	ok(held == need - 1 and not r.over, "%d of %d cities (below the share) is not a win" % [held, total])
+	# One more city reaches the share.
+	for c in m.cities:
+		if c.nation != player:
+			c.nation = player
+			break
+	r = Victory.check(m, player, share)
+	ok(r.over and r.result == "victory" and r.reason == "domination" and r.winner == player, "%d of %d cities (the share) is a domination win" % [nation_cities(m, player).size(), total])
+	# An AI nation reaching the share is a defeat for the player.
+	var ai_game := save_game_setup(5)
+	var am: HexMap = ai_game.map
+	var keep: Dictionary = nation_cities(am, 0)[0]
+	for c in am.cities:
+		if c.id != keep.id:
+			c.nation = 1
+	var ar := Victory.check(am, 0, share)
+	ok(ar.over and ar.result == "defeat" and ar.reason == "domination" and ar.winner == 1, "an AI nation with the share defeats the player")
+	# Natives and alien sites are not counted, as owners or in the total.
+	var nm := pop_map()
+	nm.cities.clear()
+	for i in 7:
+		nm.cities.append({"id": i, "nation": 0, "cell": Vector2i(i, 0)})
+	nm.cities.append({"id": 7, "nation": 1, "cell": Vector2i(7, 0)})
+	var native_city := {"id": 8, "nation": 2, "cell": Vector2i(8, 0)}
+	var alien_city := {"id": 9, "nation": 3, "cell": Vector2i(9, 0), "alien_site": true}
+	var native_flag := {"id": 10, "nation": 1, "cell": Vector2i(10, 0), "native": true}
+	for i in 5:
+		nm.cities.append(native_city.merged({"id": 20 + i}))
+	nm.cities.append(alien_city)
+	nm.cities.append(native_flag)
+	ok(Victory.dominating_nation(nm, share, [2]) == 0, "7 of 8 counted cities wins when neutral natives and alien sites are left out")
+	ok(Victory.dominating_nation(nm, share, []) == -1, "the same map without excluding natives is not a win (7 of 14)")
+	# Elimination.
+	var em := save_game_setup(5)
+	var em_map: HexMap = em.map
+	for c in nation_cities(em_map, 0).duplicate():
+		em_map.remove_city(c.id)
+	var er := Victory.check(em_map, 0, share)
+	ok(er.over and er.result == "defeat" and er.reason == "elimination", "the player with no cities is eliminated: defeat")
+	# The end screen.
+	var screen := GameOverScreen.new()
+	var pressed := []
+	screen.new_game_pressed.connect(func() -> void: pressed.append("new"))
+	screen.main_menu_pressed.connect(func() -> void: pressed.append("menu"))
+	screen.open(r, "")
+	ok(screen.is_open() and screen.title.text == "Victory", "the victory screen opens")
+	screen.new_button.pressed.emit()
+	screen.menu_button.pressed.emit()
+	ok(pressed == ["new", "menu"], "the end screen offers New Game and Main Menu")
+	screen.open(er, "")
+	ok(screen.title.text == "Defeat" and screen.message.text.contains("eliminated"), "the defeat screen says the nation was eliminated")
+	screen.free()
+
+
+# --- Task 40e: colony pods ---
+
+func test_colonizers() -> void:
+	var s := pool_setup()
+	var m: HexMap = s.map
+	var eco: NationEconomy = s.eco
+	var roster: DivisionRoster = s.roster
+	roster.divisions.clear()
+	var rules: Dictionary = m.city_rules.colonization
+	ok(rules.labor_turns == 15 and rules.population_cost == 3000 and rules.min_remaining_population == 5000 and rules.outpost_population == 3000 and rules.min_city_distance == 3, "colonization config: 15 labor-turns, 3,000 people, 5,000 left, 3k Outpost, 3 hexes")
+	var pod_template: Dictionary = roster.templates.colony_pod
+	ok(pod_template.move == 2 and pod_template.attack == 0 and pod_template.colonizer and pod_template.upkeep.is_empty(), "the pod template: move 2, attack 0, colonizer, no upkeep")
+	# Queue: people leave the population at queue time, nothing else is paid.
+	var city: Dictionary = nation_cities(m, 0)[0]
+	var cash_before := float(eco.stocks[0].cash)
+	var cap_before := float(eco.stocks[0].capacity)
+	ok(eco.colony_block_reason(city, 0) == "", "a 10,000-person city can queue a colony pod")
+	ok(eco.queue_colony_pod(city, 0), "the pod is queued")
+	var entry: Dictionary = eco.pending[city.id]
+	ok(city.population == 7000 and entry.kind == "colony_pod" and entry.cost == 15 and entry.turns_left == 0, "3,000 people drawn at queue time; a 15 labor-turn pod entry")
+	ok(float(eco.stocks[0].cash) == cash_before and float(eco.stocks[0].capacity) == cap_before, "a pod costs no cash or capacity")
+	ok(city.pool <= int(floor(7000 * 0.15)), "the recruit pool is held under the smaller city's cap")
+	ok(eco.colony_block_reason(city, 0) == "already recruiting" and not eco.recruit(city, 0, roster), "one queue per city: a pod blocks a second pod and a division")
+	ok(NationEconomy.queue_text(entry).begins_with("Colony pod 0/15 labor"), "the queue text names the pod")
+	# Labor gating: 5 Training points per turn needs 3 turns.
+	city.labor.training = 5
+	eco.spawn_pending(m, roster)
+	eco.spawn_pending(m, roster)
+	ok(roster.divisions.is_empty() and eco.pending[city.id].labor == 10, "after 2 turns of 5 labor the pod is not ready (10/15)")
+	eco.spawn_pending(m, roster)
+	ok(roster.divisions.size() == 1 and not eco.pending.has(city.id), "after 3 turns (15 labor-turns) the pod appears on the city hex")
+	var pod: Division = roster.divisions[0]
+	ok(pod.unit_type == "colony_pod" and pod.hex == city.cell and pod.move == 2 and roster.is_colonizer(pod) and roster.upkeep_of(pod).is_empty(), "the pod stands on the city hex, moves 2, no upkeep")
+	# The 5,000 floor: 7,999 is blocked, 8,000 is allowed.
+	var c2: Dictionary = nation_cities(m, 0)[1] if nation_cities(m, 0).size() > 1 else city
+	c2.population = 7999
+	ok(eco.colony_block_reason(c2, 0).begins_with("city needs 5000"), "7,999 people: the city would keep under 5,000, blocked")
+	c2.population = 8000
+	ok(eco.colony_block_reason(c2, 0) == "" if c2 != city else true, "8,000 people: it keeps exactly 5,000, allowed")
+	ok(eco.colony_block_reason(nation_cities(m, 1)[0], 0) == "not your city", "not another nation's city")
+	var enslaved: Dictionary = nation_cities(m, 1)[0]
+	enslaved["enslaved"] = true
+	ok(eco.colony_block_reason(enslaved, 1).contains("enslaved"), "no pods in an enslaved city")
+	enslaved.erase("enslaved")
+	# Unarmed: cannot attack, dig in, or capture.
+	var foe_city: Dictionary = nation_cities(m, 1)[0]
+	var foe := roster.spawn_division(1, m.neighbors(pod.hex)[0], "infantry", int(foe_city.id))
+	ok(not roster.can_attack(pod, foe, m) and not roster.valid_actions(pod, m).has("attack") and not roster.valid_actions(pod, m).has("dig_in"), "a pod cannot attack or dig in")
+	ok(not roster.fortify(pod), "a pod cannot fortify")
+	ok(roster.can_attack(foe, pod, m), "the pod can be attacked")
+	roster.divisions.erase(foe)
+	var near_foe: Vector2i = foe_city.cell
+	var step: Vector2i = m.neighbors(near_foe)[0]
+	pod.hex = step
+	pod.moves_left = 2
+	ok(not roster.can_move(pod, near_foe, m), "a pod cannot step onto an enemy city (no capture)")
+	pod.hex = city.cell
+	# Founding: valid sites keep 3 hexes from every city, on land the nation can settle.
+	var sites := m.colony_sites(0)
+	ok(not sites.is_empty(), "the test map has valid colony sites")
+	var spaced := true
+	for cell in sites:
+		for c in m.cities:
+			if HexMap.hex_distance(c.cell, cell) < 3:
+				spaced = false
+	ok(spaced, "every valid site is at least 3 hexes from every city")
+	var too_close: Vector2i = Vector2i(-1, -1)
+	for cell in m.cells:
+		if HexMap.hex_distance(city.cell, cell) == 2 and int(m.territory.get(cell, -2)) != HexMap.WATER and m.terrain_of(cell).passable:
+			too_close = cell
+			break
+	ok(m.found_block_reason(too_close, 0) == "too close to a city", "2 hexes from a city is too close")
+	var water: Vector2i = Vector2i(-1, -1)
+	var foreign: Vector2i = Vector2i(-1, -1)
+	for cell in m.cells:
+		if int(m.territory[cell]) == HexMap.WATER and water.x < 0:
+			water = cell
+		if int(m.cells[cell]) == 1 and foreign.x < 0:
+			foreign = cell
+	if water.x >= 0:
+		ok(m.found_block_reason(water, 0) == "not land", "water is not a site")
+	if foreign.x >= 0:
+		ok(m.found_block_reason(foreign, 0) == "foreign territory", "another nation's territory is not a site")
+	pod.hex = sites[0]
+	ok(roster.valid_actions(pod, m).has("found"), "a pod on a valid site is offered Found city")
+	var cities_before := m.cities.size()
+	var founded := roster.found_city(pod, m)
+	ok(not founded.is_empty() and m.cities.size() == cities_before + 1 and founded.nation == 0 and founded.population == 3000 and founded.cell == sites[0], "founding makes a 3,000-person Outpost on the pod's hex")
+	ok(not roster.divisions.has(pod) and m.city_at(sites[0]).id == founded.id and m.cells[sites[0]] == 0, "the pod is used up and the new city claims its hex")
+	ok(founded.id == m.cities.map(func(c: Dictionary) -> int: return c.id).max() and eco.labor_points(founded) == 1, "the new city has a fresh id and its own labor")
+	var pod2 := roster.spawn_division(0, city.cell, "colony_pod", int(city.id))
+	ok(roster.found_city(pod2, m).is_empty() and roster.divisions.has(pod2), "founding on an invalid hex (next to a city) does nothing")
+	# Pods are not divisions for the AI's division cap or upkeep, and do not reinforce.
+	var before_count := eco.division_count(0, roster)
+	pod2.strength = 50.0
+	eco.pending[nation_cities(m, 0)[0].id] = {"nation": 0, "kind": "colony_pod", "turns_left": 0, "labor": 0, "cost": 15}
+	ok(eco.division_count(0, roster) == before_count and eco.pod_count(0, roster) == 2, "pods do not count as divisions (1 fielded, 1 queued pod counted separately)")
+	var plan := eco.reinforce_plan(roster, m, eco.current_pools(m))
+	ok(not plan.gains.has(pod2.id), "a damaged pod is not reinforced from the pools")
+	# The AI.
+	var g := pool_setup()
+	var gm: HexMap = g.map
+	var geco: NationEconomy = g.eco
+	var groster: DivisionRoster = g.roster
+	groster.divisions.clear()
+	geco.config.ai_recruit_chance = 0.0
+	geco.run_ai(0, gm, groster)
+	var queued := {}
+	for id in geco.pending:
+		if geco.pending[id].kind == "colony_pod":
+			queued[geco.pending[id].nation] = int(queued.get(geco.pending[id].nation, 0)) + 1
+	ok(not queued.is_empty() and queued.values().all(func(n: int) -> bool: return n == 1) and not queued.has(0), "each AI nation with a valid site queues one pod; the player's nations do not")
+	var no_site := pool_setup()
+	no_site.map.city_rules.colonization.min_city_distance = 99
+	no_site.roster.templates.scout.recruit.ai_count = 0
+	no_site.roster.divisions.clear()
+	no_site.eco.config.ai_recruit_chance = 0.0
+	no_site.eco.run_ai(0, no_site.map, no_site.roster)
+	ok(no_site.eco.pending.is_empty(), "the AI queues no pod when there is no valid site")
+	var small := pool_setup()
+	small.roster.divisions.clear()
+	small.roster.templates.scout.recruit.ai_count = 0
+	small.eco.config.ai_recruit_chance = 0.0
+	for c in small.map.cities:
+		c.population = 7000
+	small.eco.run_ai(0, small.map, small.roster)
+	ok(small.eco.pending.is_empty(), "the AI queues no pod when its cities cannot spare the people")
+	var off := pool_setup()
+	off.map.city_rules.colonization.ai_build_pods = false
+	off.roster.templates.scout.recruit.ai_count = 0
+	off.roster.divisions.clear()
+	off.eco.config.ai_recruit_chance = 0.0
+	off.eco.run_ai(0, off.map, off.roster)
+	ok(off.eco.pending.is_empty(), "ai_build_pods = false turns the AI's pods off")
+	# A full AI game: pods are built, walk to a site and found new cities.
+	var game := save_game_setup(5)
+	var start_cities: int = game.map.cities.size()
+	game.eco.config.ai_recruit_chance = 1.0
+	for t in 40:
+		save_play_turn(game)
+	var gm_cities: int = game.map.cities.size()
+	ok(gm_cities > start_cities, "40 turns of AI play: the AI founded new cities (%d -> %d)" % [start_cities, gm_cities])
+	var founded_ok := true
+	for c in game.map.cities:
+		for o in game.map.cities:
+			if c.id != o.id and HexMap.hex_distance(c.cell, o.cell) < 3:
+				founded_ok = false
+	ok(founded_ok, "no two cities are closer than 3 hexes after AI colonization")
+	ok(MapView.symbol_for("colony_pod") == "plus", "a pod draws a plus counter")
+
+
+# --- Task 40f: fog of war ---
+
+func fog_world() -> Dictionary:
+	var m := make_map(12, 7)
+	m.nations.assign([0, 1])
+	var roster := make_roster()
+	var fog := Fog.load_config()
+	roster.fog = fog
+	return {"map": m, "roster": roster, "fog": fog}
+
+
+func fog_visible_count(fog: Fog, m: HexMap, nation: int) -> int:
+	var n := 0
+	for cell in m.cells:
+		if fog.state(nation, cell) == Fog.VISIBLE:
+			n += 1
+	return n
+
+
+func test_fog() -> void:
+	var cfg: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://data/map_config.json"))
+	var rules: Dictionary = cfg.fog
+	ok(rules.landfall_radius == 2 and rules.sight.infantry == 2 and rules.sight.scout == 3 and rules.sight.city == 2 and rules.city_sight_bonus == 1 and rules.elevated_sight_bonus == 1 and rules.blocking_terrain == ["mountains"], "fog config: landfall 2, infantry 2, scout 3, city 2 (+1 at City tier), +1 elevated, mountains block")
+	ok(cfg.ai.respects_fog == false, "ai.respects_fog is false (the AI is omniscient)")
+	# Hex lines.
+	var lines_ok := true
+	for pair in [[Vector2i(0, 0), Vector2i(5, 3)], [Vector2i(4, 1), Vector2i(1, 5)], [Vector2i(2, 2), Vector2i(2, 2)], [Vector2i(0, 3), Vector2i(6, 3)], [Vector2i(3, 0), Vector2i(3, 6)]]:
+		var line := HexMap.hex_line(pair[0], pair[1])
+		lines_ok = lines_ok and line.size() == HexMap.hex_distance(pair[0], pair[1]) + 1 and line[0] == pair[0] and line[-1] == pair[1]
+		for i in range(1, line.size()):
+			lines_ok = lines_ok and HexMap.hex_distance(line[i - 1], line[i]) == 1
+	ok(lines_ok, "hex_line runs from a to b in unit steps")
+	# Sight ranges.
+	var w := fog_world()
+	var m: HexMap = w.map
+	var roster: DivisionRoster = w.roster
+	var fog: Fog = w.fog
+	var inf := roster.spawn_division(0, Vector2i(5, 3), "infantry")
+	fog.update(m, roster)
+	var within2 := 0
+	var all_in := true
+	for cell in m.cells:
+		var seen := fog.state(0, cell) == Fog.VISIBLE
+		if HexMap.hex_distance(inf.hex, cell) <= 2:
+			within2 += 1
+			all_in = all_in and seen
+		else:
+			all_in = all_in and not seen
+	ok(all_in and within2 == 19, "infantry sees exactly the 19 hexes within 2")
+	ok(fog_visible_count(fog, m, 1) == 0 and fog.state(1, inf.hex) == Fog.UNEXPLORED, "another nation with no units or cities sees nothing")
+	inf.unit_type = "scout"
+	fog.update(m, roster)
+	ok(fog_visible_count(fog, m, 0) == 37, "a scout sees 3 hexes (37 hexes)")
+	inf.unit_type = "infantry"
+	m.terrain[inf.hex] = "hills"
+	fog.update(m, roster)
+	ok(fog.sight_of_unit(inf, m) == 3 and fog_visible_count(fog, m, 0) == 37, "a unit on hills sees +1")
+	m.terrain[inf.hex] = "mountains"
+	ok(fog.sight_of_unit(inf, m) == 3, "a unit on mountains sees +1")
+	m.terrain[inf.hex] = "plains"
+	# Cities: sight 2, +1 at City tier (15,000).
+	m.cities.append({"id": 0, "nation": 0, "cell": Vector2i(9, 1), "population": 14999, "radius": 1})
+	ok(fog.sight_of_city(m.cities[0]) == 2 and fog.tier_of(14999) == "base", "a 14,999 city sees 2 (Base)")
+	m.cities[0].population = 15000
+	ok(fog.sight_of_city(m.cities[0]) == 3 and fog.tier_of(15000) == "city" and fog.tier_of(4999) == "outpost" and fog.tier_of(30000) == "metropolis", "a 15,000 city (City tier) sees 3")
+	# Mountains block sight to the tiles behind them, but can be seen themselves.
+	var w2 := fog_world()
+	var m2: HexMap = w2.map
+	var roster2: DivisionRoster = w2.roster
+	var fog2: Fog = w2.fog
+	var u := roster2.spawn_division(0, Vector2i(1, 3), "infantry")
+	m2.terrain[Vector2i(2, 3)] = "mountains"
+	fog2.update(m2, roster2)
+	ok(fog2.state(0, Vector2i(2, 3)) == Fog.VISIBLE, "the mountain itself is visible")
+	ok(fog2.state(0, Vector2i(3, 3)) != Fog.VISIBLE, "the tile directly behind a mountain is not")
+	ok(fog2.state(0, Vector2i(2, 2)) == Fog.VISIBLE or fog2.state(0, Vector2i(1, 2)) == Fog.VISIBLE, "tiles beside the mountain are still seen")
+	var mid_ok := fog2.sees(m2, Vector2i(1, 3), Vector2i(2, 3), 2) and not fog2.sees(m2, Vector2i(1, 3), Vector2i(3, 3), 2)
+	ok(mid_ok, "sees(): the mountain is seen, the tile behind it is not")
+	# A unit standing on a mountain is not blocked by its own tile.
+	m2.terrain[Vector2i(1, 3)] = "mountains"
+	m2.terrain[Vector2i(2, 3)] = "plains"
+	fog2.update(m2, roster2)
+	ok(fog2.state(0, Vector2i(3, 3)) == Fog.VISIBLE and fog2.state(0, Vector2i(4, 3)) == Fog.VISIBLE, "a unit on a mountain sees past its own tile (3 hexes)")
+	# Explored memory: owner and tier as last seen, no live updates.
+	var w3 := fog_world()
+	var m3: HexMap = w3.map
+	var roster3: DivisionRoster = w3.roster
+	var fog3: Fog = w3.fog
+	m3.cities.append({"id": 5, "nation": 1, "cell": Vector2i(6, 3), "population": 4000, "radius": 1})
+	m3.cells[Vector2i(6, 3)] = 1
+	m3.cells[Vector2i(5, 3)] = 1
+	var scout := roster3.spawn_division(0, Vector2i(4, 3), "infantry")
+	fog3.update(m3, roster3)
+	ok(fog3.state(0, Vector2i(6, 3)) == Fog.VISIBLE and fog3.last_seen(0, Vector2i(6, 3)).city.tier == "outpost" and fog3.last_seen(0, Vector2i(6, 3)).owner == 1, "a seen city is remembered with its owner and tier")
+	scout.hex = Vector2i(0, 3)
+	fog3.update(m3, roster3)
+	ok(fog3.state(0, Vector2i(6, 3)) == Fog.EXPLORED and fog3.state(0, Vector2i(11, 6)) == Fog.UNEXPLORED, "leaving it behind makes it Explored; never-seen tiles stay Unexplored")
+	m3.cities[0].nation = 2  # taken by a nation this one does not see
+	m3.cities[0].population = 16000
+	m3.cells[Vector2i(6, 3)] = 2
+	fog3.update(m3, roster3)
+	var memory := fog3.last_seen(0, Vector2i(6, 3))
+	ok(memory.owner == 1 and memory.city.nation == 1 and memory.city.tier == "outpost", "changes out of sight are not shown: still the old owner and tier")
+	scout.hex = Vector2i(4, 3)
+	fog3.update(m3, roster3)
+	memory = fog3.last_seen(0, Vector2i(6, 3))
+	ok(memory.owner == 2 and memory.city.nation == 2 and memory.city.tier == "city", "seeing it again refreshes the memory")
+	# MapView draws owners as remembered; unexplored is unowned.
+	var view := MapView.new()
+	view.hex_map = m3
+	view.fog = fog3
+	view.player_nation = 0
+	scout.hex = Vector2i(0, 3)
+	fog3.update(m3, roster3)
+	m3.cells[Vector2i(6, 3)] = 1
+	ok(view.owner_of(Vector2i(6, 3)) == 2 and view.owner_of(Vector2i(11, 6)) == HexMap.UNCLAIMED and view.fog_state(Vector2i(6, 3)) == Fog.EXPLORED, "the map shows the remembered owner on explored tiles")
+	view.free()
+	# Landfall: only radius 2 around the landing site is explored.
+	var w4 := fog_world()
+	var m4: HexMap = w4.map
+	var fog4: Fog = w4.fog
+	m4.cities.append({"id": 0, "nation": 0, "cell": Vector2i(5, 3), "population": 10000, "radius": 1})
+	fog4.explore_landing(m4)
+	var landing_ok := true
+	for cell in m4.cells:
+		var near := HexMap.hex_distance(Vector2i(5, 3), cell) <= 2
+		landing_ok = landing_ok and (fog4.state(0, cell) == Fog.EXPLORED) == near and fog4.state(1, cell) == Fog.UNEXPLORED
+	ok(landing_ok, "at landfall exactly the 19 hexes within 2 of the landing site are explored")
+	# Targeting: what the player cannot see cannot be targeted. The AI is not filtered.
+	var w5 := fog_world()
+	var m5: HexMap = w5.map
+	var roster5: DivisionRoster = w5.roster
+	var fog5: Fog = w5.fog
+	var mine := roster5.spawn_division(0, Vector2i(3, 3), "infantry")
+	var enemy := roster5.spawn_division(1, Vector2i(4, 3), "infantry")
+	mine.supplied = true
+	fog5.update(m5, roster5)
+	ok(roster5.action_targets(mine, "attack", m5).has(Vector2i(4, 3)) and not roster5.hides_from(0, Vector2i(4, 3)), "a visible adjacent enemy can be targeted")
+	fog5.visible[0] = {}
+	ok(not roster5.action_targets(mine, "attack", m5).has(Vector2i(4, 3)) and roster5.hides_from(0, Vector2i(4, 3)), "an enemy on a tile the player cannot see is not a target")
+	ok(not roster5.set_order(mine, Vector2i(4, 3), m5) and mine.order_path.is_empty(), "the player cannot order an attack on an unseen unit")
+	ok(not roster5.hides_from(1, Vector2i(3, 3)) and roster5.set_order(enemy, Vector2i(3, 3), m5), "the AI nation is not filtered: it can order the same attack")
+	fog5.respects_fog = true
+	fog5.visible[1] = {}
+	ok(roster5.hides_from(1, Vector2i(3, 3)), "with ai.respects_fog on, the AI would be filtered too")
+	fog5.respects_fog = false
+	# Fog off: everything is visible.
+	var off := Fog.new()
+	off.rules = {"enabled": false}
+	ok(off.state(0, Vector2i(0, 0)) == Fog.VISIBLE and not off.filters(0), "with fog disabled every tile is visible")
+	# Speed: a full update on the 20x12 test map with 4 nations.
+	var g := save_game_setup(5)
+	var t0 := Time.get_ticks_usec()
+	for i in 10:
+		g.fog.update(g.map, g.roster)
+	var per := (Time.get_ticks_usec() - t0) / 10000.0
+	ok(per < 50.0, "a fog update on the test map takes %.1f ms (under 50)" % per)
+
+
+# --- Task 40g: scout ---
+
+func test_scout() -> void:
+	var s := pool_setup()
+	var m: HexMap = s.map
+	var eco: NationEconomy = s.eco
+	var roster: DivisionRoster = s.roster
+	roster.divisions.clear()
+	var t: Dictionary = roster.templates.scout
+	ok(t.recruit.people == 200 and t.recruit.labor_turns == 5 and t.upkeep.cash == 1 and t.move == 3 and t.attack == 0 and t.defense == 1, "scout config: 200 people, 5 labor-turns, upkeep 1, move 3, attack 0, defense 1")
+	ok(t.unarmed and t.ignores_frontage_cap and not t.get("fungus_immune", false) and Fog.load_config().rules.sight.scout == 3, "scout: unarmed, ignores the frontage cap, no fungus exemption, sight 3")
+	ok(not roster.templates.infantry.get("ignores_frontage_cap", false), "infantry does not ignore the frontage cap")
+	# Queue: people from the pool and population, no capacity.
+	var city: Dictionary = nation_cities(m, 0)[0]
+	var pool0 := int(city.pool)
+	var cap0 := float(eco.stocks[0].capacity)
+	eco.stocks[0].capacity = 0.0
+	ok(eco.scout_block_reason(city, 0, roster) == "" and eco.queue_scout(city, 0, roster), "a city with a full pool queues a scout (no capacity needed)")
+	ok(city.pool == pool0 - 200 and city.population == 9800 and float(eco.stocks[0].capacity) == 0.0, "200 people leave the pool and the population")
+	var entry: Dictionary = eco.pending[city.id]
+	ok(entry.kind == "scout" and entry.cost == 5 and NationEconomy.queue_text(entry).begins_with("Scout 0/5 labor"), "a 5 labor-turn scout entry")
+	ok(eco.scout_block_reason(city, 0, roster) == "already recruiting", "one queue per city")
+	# 1 Training point a turn needs 5 turns.
+	city.labor.training = 1
+	for i in 4:
+		eco.spawn_pending(m, roster)
+	ok(roster.divisions.is_empty(), "after 4 turns of 1 labor the scout is not ready")
+	eco.spawn_pending(m, roster)
+	ok(roster.divisions.size() == 1 and roster.divisions[0].unit_type == "scout", "after 5 labor-turns the scout appears on the city hex")
+	var scout: Division = roster.divisions[0]
+	ok(scout.move == 3 and scout.strength == 20.0 and scout.attack == 0.0 and scout.defense == 1.0 and roster.upkeep_of(scout).cash == 1, "the scout: move 3, strength 20 (200 people), attack 0, defense 1, upkeep 1")
+	ok(eco.upkeep_due(0, roster) == {"cash": 1.0}, "its upkeep is 1 cash")
+	# Pool and size floors.
+	var c2: Dictionary = nation_cities(m, 1)[0]
+	c2.pool = 199
+	ok(eco.scout_block_reason(c2, 1, roster) == "recruit pool too small", "a pool under 200 blocks")
+	c2.pool = 1000
+	c2.population = 5199
+	ok(eco.scout_block_reason(c2, 1, roster) == "city too small to train", "5,199 people would leave under 5,000: blocked")
+	c2.population = 5200
+	ok(eco.scout_block_reason(c2, 1, roster) == "", "5,200 people keep exactly 5,000: allowed")
+	ok(eco.scout_block_reason(c2, 0, roster) == "not your city", "not another nation's city")
+	# Unarmed: no attack, no capture.
+	var foe := roster.spawn_division(1, m.neighbors(scout.hex)[0], "infantry", int(c2.id))
+	ok(not roster.can_attack(scout, foe, m) and not roster.valid_actions(scout, m).has("attack") and roster.action_targets(scout, "attack", m).is_empty(), "a scout cannot attack")
+	ok(roster.can_attack(foe, scout, m), "a scout can be attacked")
+	roster.divisions.erase(foe)
+	var enemy_city: Dictionary = nation_cities(m, 1)[0]
+	scout.hex = m.neighbors(enemy_city.cell)[0]
+	scout.moves_left = 3
+	ok(not roster.can_move(scout, enemy_city.cell, m), "a scout cannot step onto an enemy city (no capture)")
+	# Move 3 against infantry's 2.
+	var flat := make_map(12, 7)
+	var froster := make_roster()
+	var fs := froster.spawn_division(0, Vector2i(2, 3), "scout")
+	var fi := froster.spawn_division(0, Vector2i(2, 5), "infantry")
+	var far3 := Vector2i(5, 3)
+	var far3i := Vector2i(5, 5)
+	ok(HexMap.hex_distance(fs.hex, far3) == 3 and froster.set_order(fs, far3, flat) and froster.turns_to_arrive(fs, flat) == 1, "the scout covers 3 plains hexes in one turn")
+	ok(froster.set_order(fi, far3i, flat) and froster.turns_to_arrive(fi, flat) == 2, "infantry needs 2 turns for the same distance")
+	# Sight 3 through the fog.
+	var fog := Fog.load_config()
+	froster.fog = fog
+	flat.nations.assign([0])
+	fog.update(flat, froster)
+	var seen := 0
+	for cell in flat.cells:
+		if HexMap.hex_distance(fs.hex, cell) <= 3 and fog.state(0, cell) == Fog.VISIBLE:
+			seen += 1
+	ok(seen >= 30, "the scout sees 3 hexes out (%d tiles around it visible)" % seen)
+	# Reinforcement still works like any division (200 people at 10 per strength point).
+	ok(roster.people_per_strength(scout) == 10.0, "scout strength is worth 10 people a point")
+	# The AI builds one early.
+	var g := pool_setup()
+	g.roster.divisions.clear()
+	g.eco.config.ai_recruit_chance = 0.0
+	g.eco.city_rules.colonization.ai_build_pods = false
+	g.eco.run_ai(0, g.map, g.roster)
+	var queued := {}
+	for id in g.eco.pending:
+		if g.eco.pending[id].kind == "scout":
+			queued[g.eco.pending[id].nation] = int(queued.get(g.eco.pending[id].nation, 0)) + 1
+	ok(queued.size() == g.map.nations.size() - 1 and not queued.has(0) and queued.values().all(func(n: int) -> bool: return n == 1), "each AI nation queues exactly 1 scout on turn 1; the player's nation does not")
+	g.eco.run_ai(0, g.map, g.roster)
+	ok(queued.values().all(func(n: int) -> bool: return n == 1) and g.eco.pending.size() == queued.size(), "the AI does not queue a second scout")
+	# The AI uses it to explore.
+	var game := save_game_setup(5)
+	var initial := {}
+	for n in game.map.nations:
+		initial[n] = game.fog.explored[n].size()
+	for i in 25:
+		save_play_turn(game)
+	var grew := 0
+	var scouts := 0
+	for n in game.map.nations:
+		if game.fog.explored[n].size() > int(initial[n]) * 2:
+			grew += 1
+	for d in game.roster.divisions:
+		if d.unit_type == "scout":
+			scouts += 1
+	ok(scouts >= 1 and grew == game.map.nations.size(), "25 turns of AI play: scouts exist (%d) and every nation more than doubled its explored map (%s)" % [scouts, game.map.nations.map(func(n: int) -> String: return "%d->%d" % [initial[n], game.fog.explored[n].size()])])

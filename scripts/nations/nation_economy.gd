@@ -336,6 +336,126 @@ func recruit(city: Dictionary, nation: int, roster: DivisionRoster) -> bool:
 	return true
 
 
+# --- Scouts (Task 40g) ---
+
+const SCOUT_KIND := "scout"
+
+
+## divisions_config.json scout "recruit": {"people", "labor_turns", "ai_count"}.
+func scout_rules(roster: DivisionRoster) -> Dictionary:
+	return roster.templates.scout.recruit
+
+
+## Why the city cannot queue a scout for nation, or "" if it can. Like a division: one queue
+## per city, no training while besieged and so on, people from the recruit pool, and the city
+## keeps train_min_city_pop. Unlike a division it costs no capacity.
+func scout_block_reason(city: Dictionary, nation: int, roster: DivisionRoster) -> String:
+	if city.is_empty() or city.nation != nation:
+		return "not your city"
+	if pending.has(city.id):
+		return "already recruiting"
+	if roster.division_at(city.cell) != null:
+		return "city hex occupied"
+	var blocked := training_blocked(city)
+	if blocked != "":
+		return "cannot train: city is %s" % blocked
+	var people := int(scout_rules(roster).people)
+	if int(city.get("pool", 0)) < people:
+		return "recruit pool too small"
+	if int(city.population) - people < int(city_rules.train_min_city_pop):
+		return "city too small to train"
+	return ""
+
+
+## Queues a scout: draws its people from the city's pool and population now (not refunded),
+## then it needs labor_turns of Training labor. Returns false if blocked.
+func queue_scout(city: Dictionary, nation: int, roster: DivisionRoster) -> bool:
+	if scout_block_reason(city, nation, roster) != "":
+		return false
+	var rules := scout_rules(roster)
+	city.pool = int(city.pool) - int(rules.people)
+	city.population = int(city.population) - int(rules.people)
+	pending[city.id] = {"nation": nation, "kind": SCOUT_KIND, "turns_left": 0, "labor": 0, "cost": int(rules.labor_turns)}
+	auto_training(city)
+	return true
+
+
+## Scouts nation has fielded or queued.
+func scout_count(nation: int, roster: DivisionRoster) -> int:
+	var count := 0
+	for d in roster.divisions:
+		if d.nation == nation and d.unit_type == SCOUT_KIND:
+			count += 1
+	for id in pending:
+		if pending[id].nation == nation and pending[id].get("kind", "") == SCOUT_KIND:
+			count += 1
+	return count
+
+
+# --- Colony pods (Task 40e) ---
+
+const POD_KIND := "colony_pod"
+
+
+## colonization rules from cities_config.json.
+func colony_rules() -> Dictionary:
+	return city_rules.colonization
+
+
+## Why the city cannot queue a colony pod for nation, or "" if it can. A pod shares the
+## city's one training queue, needs no cash or capacity, and may be queued while a division
+## stands on the city hex (it waits to appear). The city must keep colonization.min_remaining_population people.
+func colony_block_reason(city: Dictionary, nation: int) -> String:
+	if city.is_empty() or city.nation != nation:
+		return "not your city"
+	if pending.has(city.id):
+		return "already recruiting"
+	var blocked := training_blocked(city)
+	if blocked != "":
+		return "cannot train: city is %s" % blocked
+	var rules := colony_rules()
+	if int(city.population) - int(rules.population_cost) < int(rules.min_remaining_population):
+		return "city needs %d people left" % int(rules.min_remaining_population)
+	return ""
+
+
+## Queues a colony pod: draws colonization.population_cost people from the city's population
+## now (not refunded), then it needs colonization.labor_turns labor-turns of Training before it
+## appears on the city hex. Returns false if blocked.
+func queue_colony_pod(city: Dictionary, nation: int) -> bool:
+	if colony_block_reason(city, nation) != "":
+		return false
+	var rules := colony_rules()
+	city.population = int(city.population) - int(rules.population_cost)
+	city.pool = mini(int(city.get("pool", 0)), int(floor(float(city.population) * float(city_rules.pool_cap))))
+	pending[city.id] = {"nation": nation, "kind": POD_KIND, "turns_left": 0, "labor": 0, "cost": int(rules.labor_turns)}
+	auto_training(city)
+	return true
+
+
+## Colony pods nation has fielded or queued.
+func pod_count(nation: int, roster: DivisionRoster) -> int:
+	var count := 0
+	for d in roster.divisions:
+		if d.nation == nation and roster.is_colonizer(d):
+			count += 1
+	for id in pending:
+		if pending[id].nation == nation and pending[id].get("kind", "") == POD_KIND:
+			count += 1
+	return count
+
+
+## True if the AI should queue a pod in this city: pods are on for the AI, the nation has
+## fewer than ai_max_pods, a valid site exists, and the city can spare the people.
+func ai_wants_pod(city: Dictionary, hex_map: HexMap, roster: DivisionRoster) -> bool:
+	var rules := colony_rules()
+	if not bool(rules.ai_build_pods) or colony_block_reason(city, city.nation) != "":
+		return false
+	if pod_count(city.nation, roster) >= int(rules.ai_max_pods):
+		return false
+	return not hex_map.colony_sites(city.nation).is_empty()
+
+
 ## Ticks training. A trained recruit spawns on its city hex, or waits there if
 ## the hex is occupied. If the city changed owner, the recruit is lost.
 func spawn_pending(hex_map: HexMap, roster: DivisionRoster) -> void:
@@ -356,9 +476,12 @@ func spawn_pending(hex_map: HexMap, roster: DivisionRoster) -> void:
 		if training_blocked(city) != "":
 			continue
 		entry.turns_left = maxi(entry.turns_left - 1, 0)
-		entry.labor = mini(int(entry.get("labor", 0)) + training_points(city), training_labor_cost())
-		if entry.turns_left == 0 and entry.labor >= training_labor_cost() and roster.division_at(city.cell) == null:
-			roster.spawn_division(entry.nation, city.cell, config.recruit_template, int(city.id))
+		var cost := int(entry.get("cost", training_labor_cost()))
+		entry.labor = mini(int(entry.get("labor", 0)) + training_points(city), cost)
+		if entry.turns_left == 0 and entry.labor >= cost and roster.division_at(city.cell) == null:
+			var kind: String = entry.get("kind", "")
+			var template: String = kind if kind == POD_KIND or kind == SCOUT_KIND else str(config.recruit_template)
+			roster.spawn_division(entry.nation, city.cell, template, int(city.id))
 			pending.erase(id)
 			end_auto_training(city)
 
@@ -386,7 +509,8 @@ func stalled_cities(nation: int, hex_map: HexMap) -> Array[int]:
 ## Queue text for one pending recruit, e.g. "Division 9/15 labor, 2 turns left".
 ## The labor cost comes from the entry, so no config is needed here.
 static func queue_text(entry: Dictionary) -> String:
-	var labor := "Division %d/%d labor, " % [int(entry.get("labor", 0)), int(entry.get("cost", 0))] if entry.has("cost") else ""
+	var what: String = {POD_KIND: "Colony pod", SCOUT_KIND: "Scout"}.get(entry.get("kind", ""), "Division")
+	var labor := "%s %d/%d labor, " % [what, int(entry.get("labor", 0)), int(entry.get("cost", 0))] if entry.has("cost") else ""
 	if entry.turns_left <= 0 and int(entry.get("labor", 0)) >= int(entry.get("cost", 0)):
 		return labor + "ready, waiting for hex to clear"
 	if entry.turns_left <= 0:
@@ -397,10 +521,10 @@ static func queue_text(entry: Dictionary) -> String:
 func division_count(nation: int, roster: DivisionRoster) -> int:
 	var count := 0
 	for d in roster.divisions:
-		if d.nation == nation:
+		if d.nation == nation and not roster.is_colonizer(d):
 			count += 1
 	for id in pending:
-		if pending[id].nation == nation:
+		if pending[id].nation == nation and pending[id].get("kind", "") != POD_KIND:
 			count += 1
 	return count
 
@@ -419,10 +543,15 @@ func cash_income(nation: int, hex_map: HexMap) -> float:
 func projected_cash_upkeep(nation: int, roster: DivisionRoster, extra_recruits := 0) -> float:
 	var total: float = float(upkeep_due(nation, roster).get("cash", 0.0))
 	var each := float(roster.templates.get(config.recruit_template, {}).get("upkeep", {}).get("cash", 0.0))
-	var queued := 0
+	var queued := 0.0
 	for id in pending:
-		if pending[id].nation == nation:
-			queued += 1
+		if pending[id].nation != nation:
+			continue
+		var kind: String = pending[id].get("kind", "")
+		if kind == SCOUT_KIND:
+			queued += float(roster.templates.scout.get("upkeep", {}).get("cash", 0.0)) / each if each > 0.0 else 0.0
+		elif kind != POD_KIND:
+			queued += 1.0
 	return total + each * (queued + extra_recruits)
 
 
@@ -431,8 +560,17 @@ func projected_cash_upkeep(nation: int, roster: DivisionRoster, extra_recruits :
 ## upkeep after the new division (fielded, queued and the new one) would not exceed
 ## its per-turn cash income.
 func run_ai(player_nation: int, hex_map: HexMap, roster: DivisionRoster) -> void:
-	for city in hex_map.cities:
-		if city.nation == player_nation or recruit_block_reason(city, city.nation, roster) != "":
+	for city in hex_map.cities.duplicate():
+		if city.nation == player_nation:
+			continue
+		if scout_count(city.nation, roster) < int(scout_rules(roster).ai_count) \
+				and scout_block_reason(city, city.nation, roster) == "":
+			queue_scout(city, city.nation, roster)  # the AI builds its scout first, to explore
+			continue
+		if ai_wants_pod(city, hex_map, roster):
+			queue_colony_pod(city, city.nation)
+			continue
+		if recruit_block_reason(city, city.nation, roster) != "":
 			continue
 		if division_count(city.nation, roster) >= int(config.ai_max_divisions):
 			continue
@@ -493,7 +631,8 @@ func reinforce_plan(roster: DivisionRoster, hex_map: HexMap, pools: Dictionary,
 	var order := roster.divisions.duplicate()
 	order.sort_custom(func(a, b): return a.id < b.id)
 	for d in order:
-		if (only_nation >= 0 and d.nation != only_nation) or not d.supplied or d.strength >= d.max_strength:
+		if (only_nation >= 0 and d.nation != only_nation) or not d.supplied or d.strength >= d.max_strength \
+				or roster.is_colonizer(d):
 			continue
 		var rate := roster.people_per_strength(d)
 		var gain := minf(cap * reinforce_mult(d, hex_map, d.fought_this_turn), d.max_strength - d.strength)

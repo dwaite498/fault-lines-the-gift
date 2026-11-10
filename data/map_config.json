@@ -7,6 +7,20 @@
 	"faction_count": 4,
 	"faction_seed": -1,
 	"player_faction": "",
+	"setup": {"min_ai": 1, "max_ai": 3, "default_ai": 3},
+	"victory": {"domination_share": 0.85},
+	"ai": {"respects_fog": false},
+	"fog": {
+		"enabled": true,
+		"landfall_radius": 2,
+		"sight": {"infantry": 2, "scout": 3, "colony_pod": 2, "default": 2, "city": 2},
+		"city_sight_bonus": 1,
+		"city_bonus_tier": "city",
+		"tier_thresholds": {"outpost": 0, "base": 5000, "city": 15000, "metropolis": 30000},
+		"elevated_sight_bonus": 1,
+		"elevated_terrain": ["hills", "mountains"],
+		"blocking_terrain": ["mountains"]
+	},
 	"camera": {
 		"zoom_min": 0.5,
 		"zoom_max": 2.0,

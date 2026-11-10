@@ -5,7 +5,7 @@ extends CanvasLayer
 
 signal action_pressed(action: String)
 
-const ACTION_LABELS := {"move": "Move (M)", "attack": "Attack (A)", "dig_in": "Dig in (D)",
+const ACTION_LABELS := {"move": "Move (M)", "attack": "Attack (A)", "dig_in": "Dig in (D)", "found": "Found city (B)",
 		"follow": "Follow/Swap (F)", "cancel": "Cancel order (Esc)"}
 
 var panel := Panel.new()

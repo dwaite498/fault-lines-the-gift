@@ -2,8 +2,8 @@ extends Node2D
 ## Entry scene. Builds the map and divisions from data/ configs and shows them.
 ## Controls: click your division to select it, then click a reachable hex to order
 ## a move or an adjacent enemy to order an attack (right-click without dragging, or Esc, clears the
-## order). Camera: arrow keys pan, middle/right-drag pans, wheel zooms at the cursor. F fortifies. Space ends the turn and executes all orders (AI orders are
-## issued at the start of each turn, before yours). With your city panel open, R recruits infantry. N toggles the military panel. Capturing a city opens a popup to choose Annex, Occupy, Plunder, Reduce, Raze or Enslave; an occupied city shows an Annex button once its timer is up. Debug: K removes the newest city.
+## order). Camera: arrow keys pan, middle/right-drag pans, wheel zooms at the cursor. F fortifies. Esc opens the menu (Save Game, Main Menu, Quit) when there is nothing to cancel. Space ends the turn and executes all orders (AI orders are
+## issued at the start of each turn, before yours). With your city panel open, R recruits infantry, S queues a scout, P queues a colony pod (B on a selected pod founds an Outpost). N toggles the military panel. Capturing a city opens a popup to choose Annex, Occupy, Plunder, Reduce, Raze or Enslave; an occupied city shows an Annex button once its timer is up. Debug: K removes the newest city.
 
 const GAME_TITLE := "Fault Lines: Planetfall"
 const MAP_CONFIG_PATH := "res://data/map_config.json"
@@ -20,6 +20,15 @@ var _city: Dictionary = {}
 var _nation_panel: NationPanel
 var _military_panel: MilitaryPanel
 var _capture_popup := CapturePopup.new()
+var _pause_menu := PauseMenu.new()
+var _fog: Fog
+var _game_over := GameOverScreen.new()
+## Share of nation-owned cities that wins by domination (map_config.json "victory").
+var _domination_share := Victory.DEFAULT_SHARE
+## The applied map config the game started from (saved with the game).
+var _map_cfg := {}
+## Set when this run was loaded from a save: skips the start-of-game AI orders.
+var _loaded := false
 var _top_bar := TopBar.new()
 ## Brief on-screen message (e.g. why R was blocked). Cleared on the next action.
 var message := Label.new()
@@ -31,16 +40,31 @@ var _mode := ""
 func _ready() -> void:
 	get_window().title = GAME_TITLE
 	_view = MapView.new()
-	var map_cfg: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(MAP_CONFIG_PATH))
+	var saved := {}
+	if GameSession.load_requested:
+		saved = SaveGame.read(SaveGame.latest_path())
+		if saved.is_empty():
+			push_warning("No readable save to load; starting a new game")
+	GameSession.load_requested = false
+	var map_cfg: Dictionary = saved.map_cfg if not saved.is_empty() else GameSession.apply(
+			JSON.parse_string(FileAccess.get_file_as_string(MAP_CONFIG_PATH)))
+	_map_cfg = map_cfg
 	var factions := FactionRoster.from_config(map_cfg)
+	if not saved.is_empty():
+		factions.assigned.assign(saved.faction_ids.map(func(id: String) -> Dictionary:
+				return factions.all.filter(func(f: Dictionary) -> bool: return f.id == id)[0]))
 	_view.factions = factions
 	_view.hex_map = HexMap.from_config_file(MAP_CONFIG_PATH, "res://data/cities_config.json",
-			"res://data/terrain_config.json", factions.sea_nations())
+			"res://data/terrain_config.json", factions.sea_nations(), map_cfg)
 	_view.hex_map.nation_factions = factions.nation_ids()
 	_view.hex_map.load_faction_views(factions.all)
 	_view.roster = DivisionRoster.new()
 	_view.roster.spawn_at_cities(_view.hex_map)
 	_view.hidden_nations = _view.roster.neutral_nations
+	_fog = Fog.from_config(map_cfg, PLAYER_NATION)
+	_view.roster.fog = _fog
+	_view.fog = _fog
+	_view.player_nation = PLAYER_NATION
 	add_child(_view)
 	_camera.configure(map_cfg.get("camera", {}))
 	add_child(_camera)
@@ -60,6 +84,16 @@ func _ready() -> void:
 	_city_panel.roster = _view.roster
 	_city_panel.player_nation = PLAYER_NATION
 	_city_panel.recruit_pressed.connect(_on_recruit_pressed)
+	_city_panel.scout_pressed.connect(func() -> void:
+			message.text = ""
+			if not _city.is_empty() and _city.nation == PLAYER_NATION:
+				_try_scout()
+			_refresh_panels())
+	_city_panel.pod_pressed.connect(func() -> void:
+			message.text = ""
+			if not _city.is_empty() and _city.nation == PLAYER_NATION:
+				_try_colony_pod()
+			_refresh_panels())
 	_city_panel.labor_pressed.connect(_on_labor_pressed)
 	_city_panel.annex_pressed.connect(_on_annex_pressed)
 	_capture_popup.chosen.connect(_on_capture_chosen)
@@ -84,8 +118,72 @@ func _ready() -> void:
 	message.add_theme_color_override("font_color", Color(1, 0.4, 0.4))
 	layer.add_child(message)
 	add_child(layer)
-	_view.roster.run_ai(PLAYER_NATION, _view.hex_map)
+	_pause_menu.resume_pressed.connect(_pause_menu.close)
+	_pause_menu.save_pressed.connect(_on_save_pressed)
+	_pause_menu.main_menu_pressed.connect(_on_main_menu_pressed)
+	_pause_menu.quit_pressed.connect(func() -> void: get_tree().quit())
+	add_child(_pause_menu)
+	_domination_share = float(map_cfg.get("victory", {}).get("domination_share", Victory.DEFAULT_SHARE))
+	_game_over.new_game_pressed.connect(_on_game_over_new_game)
+	_game_over.main_menu_pressed.connect(_on_main_menu_pressed)
+	add_child(_game_over)
+	if not saved.is_empty():
+		turn = SaveGame.restore(saved, _view.hex_map, _view.roster, _economy)
+		_fog.restore(saved.extras.get("fog", {}))
+		_loaded = true
+		print("Loaded the saved game at turn %d" % turn)
+	else:
+		_fog.explore_landing(_view.hex_map)
+		_view.roster.run_ai(PLAYER_NATION, _view.hex_map)
 	_refresh_panels()
+
+
+## The game state for saving.
+func _capture_state() -> Dictionary:
+	_fog.update(_view.hex_map, _view.roster)
+	var ids: Array = []
+	for i in _view.factions.assigned.size():
+		ids.append(_view.factions.id_of(i))
+	return SaveGame.capture(_view.hex_map, _view.roster, _economy, turn, _map_cfg, ids, {"fog": _fog.capture()})
+
+
+func _on_save_pressed() -> void:
+	_pause_menu.status.text = "Game saved" if SaveGame.write(SaveGame.SLOT_PATH, _capture_state()) else "Could not save"
+
+
+func _on_game_over_new_game() -> void:
+	GameSession.open_setup = true
+	get_tree().change_scene_to_file("res://scenes/menu.tscn")
+
+
+## Victory / defeat check, end of each turn. Shows the end screen and drops the autosave
+## (a finished game is not resumed). Returns true if the game is over.
+func _check_game_over() -> bool:
+	var result := Victory.check(_view.hex_map, PLAYER_NATION, _domination_share, _view.roster.neutral_nations)
+	if not result.over:
+		return false
+	var winner_name := ""
+	if int(result.winner) >= 0:
+		winner_name = str(_view.factions.assigned[int(result.winner)].get("name", ""))
+	_game_over.open(result, winner_name)
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(SaveGame.AUTOSAVE_PATH))
+	print("Game over: %s by %s (winner nation %d)" % [result.result, result.reason, result.winner])
+	return true
+
+
+func _on_main_menu_pressed() -> void:
+	get_tree().change_scene_to_file("res://scenes/menu.tscn")
+
+
+## Esc: leave a target mode, else cancel the selected unit's order, else toggle the menu.
+func _escape() -> void:
+	var d := _view.selected
+	if _pause_menu.is_open():
+		_pause_menu.close()
+	elif _mode != "" or (d and d.nation == PLAYER_NATION and not d.order_path.is_empty()):
+		do_action("cancel")
+	else:
+		_pause_menu.open()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -96,8 +194,13 @@ func _unhandled_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
 	if not key or not key.pressed or key.echo:
 		return
-	if _capture_popup.is_open():
-		return  # the capture choice comes first
+	if _game_over.is_open():
+		return  # only the end screen's buttons work
+	if key.keycode == KEY_ESCAPE and not _capture_popup.is_open():
+		_escape()
+		return
+	if _capture_popup.is_open() or _pause_menu.is_open() or _game_over.is_open():
+		return  # the capture choice or the menu comes first
 	message.text = ""
 	var roster := _view.roster
 	if key.keycode == KEY_SPACE:
@@ -112,6 +215,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		select_unit(next_idle_unit(_view.selected))
 	elif key.keycode == KEY_R and not _city.is_empty() and _city.nation == PLAYER_NATION:
 		_try_recruit()
+	elif key.keycode == KEY_P and not _city.is_empty() and _city.nation == PLAYER_NATION:
+		_try_colony_pod()
+	elif key.keycode == KEY_S and not _city.is_empty() and _city.nation == PLAYER_NATION:
+		_try_scout()
 	elif key.keycode == KEY_N:
 		_military_panel.toggle()
 	elif key.keycode == KEY_K and OS.is_debug_build():
@@ -171,7 +278,10 @@ func _finish_turn() -> void:
 	var stalled := _economy.stalled_cities(PLAYER_NATION, _view.hex_map)
 	if not stalled.is_empty():
 		message.text = "Recruit stalled in city %s: assign Training labor" % ", ".join(stalled.map(func(i: int) -> String: return str(i)))
+	if _check_game_over():
+		return
 	roster.run_ai(PLAYER_NATION, _view.hex_map)
+	SaveGame.write(SaveGame.AUTOSAVE_PATH, _capture_state())
 	print("Turn ended")
 
 
@@ -184,7 +294,7 @@ func _on_annex_pressed() -> void:
 
 ## Hotkeys for the unit panel's action buttons (Task 26). N toggles the military
 ## panel (was M); K is the debug remove-city key (was D).
-const ACTION_KEYS := {KEY_M: "move", KEY_A: "attack", KEY_D: "dig_in", KEY_F: "follow", KEY_ESCAPE: "cancel"}
+const ACTION_KEYS := {KEY_M: "move", KEY_A: "attack", KEY_D: "dig_in", KEY_F: "follow", KEY_B: "found", KEY_ESCAPE: "cancel"}
 
 
 ## Selects d (or nothing) and leaves any target mode.
@@ -214,6 +324,10 @@ func do_action(action: String) -> void:
 		elif action == "dig_in":
 			_view.roster.clear_order(d)
 			_view.roster.fortify(d)
+		elif action == "found":
+			var city := _view.roster.found_city(d, _view.hex_map)
+			message.text = "Founded an Outpost" if not city.is_empty() else "Cannot found a city here"
+			select_unit(null)
 		else:
 			_set_mode(action)
 	_refresh_panels()
@@ -236,6 +350,7 @@ func next_idle_unit(after: Division) -> Division:
 
 func _refresh_panels() -> void:
 	_economy.refresh_labor(_view.hex_map)
+	_fog.update(_view.hex_map, _view.roster)
 	var acts: Array[String] = []
 	if _view.selected and _view.selected.nation == PLAYER_NATION:
 		acts = _view.roster.valid_actions(_view.selected, _view.hex_map)
@@ -253,7 +368,7 @@ func _refresh_panels() -> void:
 ## selects: a unit (any nation; a second click on it shows the city under it),
 ## else the city there, else nothing. It never creates an order.
 func _on_hex_clicked(hex: Vector2i) -> void:
-	if hex == Vector2i(-1, -1) or _capture_popup.is_open():
+	if hex == Vector2i(-1, -1) or _capture_popup.is_open() or _pause_menu.is_open() or _game_over.is_open():
 		return
 	var roster := _view.roster
 	message.text = ""
@@ -269,12 +384,18 @@ func _on_hex_clicked(hex: Vector2i) -> void:
 		_refresh_panels()
 		return
 	var unit := roster.division_at(hex)
+	if unit and unit.nation != PLAYER_NATION and not _fog.can_target(PLAYER_NATION, hex):
+		unit = null  # an enemy in the fog cannot be selected
 	_city = {}
 	if unit and unit != selected:
 		select_unit(unit)
 	else:
 		select_unit(null)
 		_city = _view.hex_map.city_at(hex)
+		if not _city.is_empty() and _city.nation != PLAYER_NATION and not _fog.can_target(PLAYER_NATION, hex):
+			var seen: Dictionary = _fog.last_seen(PLAYER_NATION, hex).get("city", {})
+			message.text = "Last seen: %s city, %s" % [_view.factions.name_of(int(seen.nation)), seen.tier] if not seen.is_empty() else ""
+			_city = {}
 	_refresh_panels()
 
 
@@ -286,6 +407,28 @@ func _try_recruit() -> void:
 		print("Recruiting at city %d; arrives in %d turns" % [_city.id, int(_economy.config.training_turns)])
 	else:
 		message.text = "Cannot recruit: " + reason
+		print(message.text)
+
+
+## S key and the city panel's Scout button.
+func _try_scout() -> void:
+	var reason := _economy.scout_block_reason(_city, PLAYER_NATION, _view.roster)
+	if reason == "":
+		_economy.queue_scout(_city, PLAYER_NATION, _view.roster)
+		print("Scout queued at city %d" % _city.id)
+	else:
+		message.text = "Cannot queue a scout: " + reason
+		print(message.text)
+
+
+## P key and the city panel's Colony pod button.
+func _try_colony_pod() -> void:
+	var reason := _economy.colony_block_reason(_city, PLAYER_NATION)
+	if reason == "":
+		_economy.queue_colony_pod(_city, PLAYER_NATION)
+		print("Colony pod queued at city %d" % _city.id)
+	else:
+		message.text = "Cannot queue a colony pod: " + reason
 		print(message.text)
 
 

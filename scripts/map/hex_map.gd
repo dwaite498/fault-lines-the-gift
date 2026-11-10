@@ -49,6 +49,11 @@ var city_rules := {
 	"siege_growth": 0.0, "siege_pop_loss": 0.02, "siege_labor_mult": 0.5,
 	"display_round": 100,
 	"rebuild_turns": 26,
+	"colonization": {
+		"labor_turns": 15, "population_cost": 3000, "min_remaining_population": 5000,
+		"outpost_population": 3000, "outpost_infrastructure": 10, "min_city_distance": 3,
+		"ai_build_pods": true, "ai_max_pods": 1,
+	},
 	"capture": {
 		"order": ["annex", "occupy", "plunder", "reduce", "raze", "enslave"],
 		"annexed_recruit_lockout_turns": 10, "ai_default_option": "annex",
@@ -123,8 +128,9 @@ var terrain_types: Dictionary = {}
 static func from_config_file(map_path: String,
 		cities_path := "res://data/cities_config.json",
 		terrain_path := "res://data/terrain_config.json",
-		coastal: Array[int] = []) -> HexMap:
-	var map_cfg: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(map_path))
+		coastal: Array[int] = [], map_override := {}) -> HexMap:
+	var map_cfg: Dictionary = map_override if not map_override.is_empty() \
+			else JSON.parse_string(FileAccess.get_file_as_string(map_path))
 	var city_cfg: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(cities_path))
 	var hex_map := HexMap.new()
 	hex_map.coastal_nations = coastal
@@ -412,6 +418,34 @@ static func hex_distance(a: Vector2i, b: Vector2i) -> int:
 	var ac := _to_cube(a)
 	var bc := _to_cube(b)
 	return maxi(maxi(absi(ac.x - bc.x), absi(ac.y - bc.y)), absi(ac.z - bc.z))
+
+
+## The cells on the straight line from a to b, both ends included (cube lerp and round, with
+## a tiny fixed nudge so ties always break the same way).
+static func hex_line(a: Vector2i, b: Vector2i) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	var n := hex_distance(a, b)
+	var ac := _to_cube(a)
+	var bc := _to_cube(b)
+	for i in n + 1:
+		var t := float(i) / float(maxi(n, 1))
+		var fx := lerpf(ac.x, bc.x, t) + 1e-6
+		var fy := lerpf(ac.y, bc.y, t) + 2e-6
+		var fz := lerpf(ac.z, bc.z, t) - 3e-6
+		var rx := roundi(fx)
+		var ry := roundi(fy)
+		var rz := roundi(fz)
+		var dx := absf(rx - fx)
+		var dy := absf(ry - fy)
+		var dz := absf(rz - fz)
+		if dx > dy and dx > dz:
+			rx = -ry - rz
+		elif dy > dz:
+			ry = -rx - rz
+		else:
+			rz = -rx - ry
+		out.append(Vector2i(rx + int((rz - (rz & 1)) / 2.0), rz))
+	return out
 
 
 static func _to_cube(cell: Vector2i) -> Vector3i:
@@ -704,6 +738,52 @@ func _radius_for(population: int) -> int:
 	if population >= int(city_rules.grown_radius_population):
 		return int(city_rules.grown_claim_radius)
 	return int(city_rules.claim_radius)
+
+
+# --- Colonization (Task 40e) ---
+
+## Why a colony pod of `nation` cannot found a city on `cell`, or "" if it can: the hex must
+## be land the nation can settle (its own territory or unclaimed, not another nation's) and at
+## least colonization.min_city_distance hexes from every city.
+func found_block_reason(cell: Vector2i, nation: int) -> String:
+	if not cells.has(cell) or int(territory.get(cell, WATER)) == WATER or not terrain_of(cell).passable:
+		return "not land"
+	var owner := int(cells.get(cell, UNCLAIMED))
+	if owner != UNCLAIMED and owner != nation:
+		return "foreign territory"
+	var min_dist := int(city_rules.colonization.min_city_distance)
+	for c in cities:
+		if hex_distance(c.cell, cell) < min_dist:
+			return "too close to a city"
+	return ""
+
+
+## Every cell where `nation` could found a city (see found_block_reason), sorted.
+func colony_sites(nation: int) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	for cell in cells:
+		if found_block_reason(cell, nation) == "":
+			out.append(cell)
+	out.sort()
+	return out
+
+
+## Founds an Outpost for `nation` on `cell` (colonization.outpost_population people),
+## or returns {} if found_block_reason says no. Returns the new city.
+func found_city(nation: int, cell: Vector2i) -> Dictionary:
+	if found_block_reason(cell, nation) != "":
+		return {}
+	var rules: Dictionary = city_rules.colonization
+	var next_id := 0
+	for c in cities:
+		next_id = maxi(next_id, int(c.id) + 1)
+	var pop := int(rules.outpost_population)
+	var city := {"id": next_id, "nation": nation, "cell": cell, "population": pop,
+			"pool": mini(int(city_rules.colony_start_pool), pop), "radius": _radius_for(pop),
+			"infrastructure": int(rules.outpost_infrastructure)}
+	cities.append(city)
+	update_ownership()
+	return city
 
 
 ## Removes a city, then removes any nation left with no cities.

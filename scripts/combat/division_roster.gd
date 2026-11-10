@@ -17,6 +17,9 @@ var economy: NationEconomy = null
 var turn_log: Array[String] = []
 ## Nations treated as neutral: their hexes can be neither ordered into nor attacked.
 var neutral_nations: Array[int] = []
+## Fog of war (Fog), or null for none. A nation the fog filters (the player) cannot order an
+## attack on, or list as a target, a unit on a tile it cannot see.
+var fog: Fog = null
 ## Cities taken this turn that still await a capture choice: the result of
 ## HexMap.take_city, in capture order. Resolved by resolve_ai_captures and the popup.
 var pending_captures: Array[Dictionary] = []
@@ -47,6 +50,39 @@ func spawn_at_cities(hex_map: HexMap, template_name := "infantry") -> void:
 ## People per strength point of d's division type (divisions_config people_per_strength).
 func people_per_strength(d: Division) -> float:
 	return float(templates.get(d.unit_type, {}).get("people_per_strength", 10.0))
+
+
+## True if d cannot attack or capture a city: a colony pod or a template with "unarmed": true
+## (the scout).
+func is_unarmed(d: Division) -> bool:
+	return is_colonizer(d) or bool(templates.get(d.unit_type, {}).get("unarmed", false))
+
+
+## True for a colony pod (a template with "colonizer": true): unarmed, never attacks, never
+## captures, is not reinforced, cannot dig in, and founds a city with found_city.
+func is_colonizer(d: Division) -> bool:
+	return bool(templates.get(d.unit_type, {}).get("colonizer", false))
+
+
+## True if the fog hides the tile `hex` from `nation` (it cannot see or target what is there).
+func hides_from(nation: int, hex: Vector2i) -> bool:
+	return fog != null and fog.filters(nation) and not fog.can_target(nation, hex)
+
+
+## Founds an Outpost on the pod's hex for its nation (HexMap.found_city) and uses the pod up.
+## Returns the new city, or {} if d is not a pod or the hex is not a valid site.
+func found_city(d: Division, hex_map: HexMap) -> Dictionary:
+	if d == null or not divisions.has(d) or not is_colonizer(d):
+		return {}
+	var city := hex_map.found_city(d.nation, d.hex)
+	if city.is_empty():
+		return {}
+	clear_order(d)
+	divisions.erase(d)
+	if economy:
+		economy.ensure_labor(city)
+	print("Nation %d founded city %d at %s" % [d.nation, city.id, d.hex])
+	return city
 
 
 ## Upkeep per turn of d's division type, e.g. {"cash": 3} (divisions_config upkeep).
@@ -105,6 +141,8 @@ func division_at(hex: Vector2i) -> Division:
 func can_move(d: Division, hex: Vector2i, hex_map: HexMap) -> bool:
 	if d.moves_left <= 0 or not hex in hex_map.neighbors(d.hex) or division_at(hex) != null:
 		return false
+	if is_unarmed(d) and not hex_map.city_at(hex).is_empty() and hex_map.city_at(hex).nation != d.nation:
+		return false  # a pod or scout cannot capture a city
 	if not hex_map.can_step(d.hex, hex):
 		return false
 	return d.moves_left >= hex_map.step_cost(d.hex, hex) or not d.has_moved
@@ -169,7 +207,7 @@ func disband(nations: Array[int]) -> void:
 # --- Fortify ---
 
 func fortify(d: Division) -> bool:
-	if d.moves_left <= 0 or d.has_moved:
+	if is_colonizer(d) or d.moves_left <= 0 or d.has_moved:
 		return false
 	d.fortify_level = mini(d.fortify_level + 1, int(combat.max_fortify))
 	d.moves_left = 0
@@ -179,7 +217,7 @@ func fortify(d: Division) -> bool:
 # --- Attack ---
 
 func can_attack(attacker: Division, defender: Division, hex_map: HexMap) -> bool:
-	return (attacker.moves_left > 0 and not attacker.has_moved and defender != null
+	return (not is_unarmed(attacker) and attacker.moves_left > 0 and not attacker.has_moved and defender != null
 			and defender.nation != attacker.nation and not neutral_nations.has(defender.nation)
 			and defender.hex in hex_map.neighbors(attacker.hex))
 
@@ -297,6 +335,8 @@ func _after_combat(d: Division, hex_map: HexMap, captor: int) -> String:
 ## several turns (Task 25). Returns false (order unchanged) if dest is unreachable.
 func set_order(d: Division, dest: Vector2i, hex_map: HexMap) -> bool:
 	var target := division_at(dest)
+	if target and hides_from(d.nation, dest):
+		return false
 	if target and neutral_nations.has(target.nation):
 		return false
 	if target and can_attack(d, target, hex_map):
@@ -350,7 +390,7 @@ func action_targets(d: Division, action: String, hex_map: HexMap) -> Array[Vecto
 			if o == d:
 				continue
 			if action == "attack" and o.nation != d.nation and not neutral_nations.has(o.nation) \
-					and can_attack(d, o, hex_map):
+					and not hides_from(d.nation, o.hex) and can_attack(d, o, hex_map):
 				out.append(o.hex)
 			elif action == "follow" and o.nation == d.nation:
 				if (is_leaving(o) and not plan_path(d, o.hex, hex_map).is_empty()) \
@@ -366,8 +406,10 @@ func valid_actions(d: Division, hex_map: HexMap) -> Array[String]:
 	for a in ["move", "attack", "follow"]:
 		if not action_targets(d, a, hex_map).is_empty():
 			out.append(a)
-	if d.moves_left > 0 and not d.has_moved:
+	if d.moves_left > 0 and not d.has_moved and not is_colonizer(d):
 		out.append("dig_in")
+	if is_colonizer(d) and hex_map.found_block_reason(d.hex, d.nation) == "":
+		out.append("found")
 	if not d.order_path.is_empty():
 		out.append("cancel")
 	return out
@@ -715,8 +757,18 @@ func clash_hexes(nation: int, hex_map: HexMap = null) -> Array[Vector2i]:
 ## Reads only the board, never other divisions' orders, so call it before the
 ## player gives orders.
 func run_ai(player_nation: int, hex_map: HexMap) -> void:
+	if fog != null:
+		fog.update(hex_map, self)
 	for d in divisions.duplicate():
-		if d.nation == player_nation or not divisions.has(d) or d.moves_left <= 0:
+		if d.nation == player_nation or not divisions.has(d):
+			continue
+		if is_colonizer(d):
+			_ai_colonizer(d, hex_map)
+			continue
+		if d.unit_type == "scout" and fog != null and fog.enabled():
+			_ai_scout(d, hex_map)
+			continue
+		if d.moves_left <= 0:
 			continue
 		var enemies: Array[Division] = []
 		var free: Array[Vector2i] = []
@@ -732,6 +784,36 @@ func run_ai(player_nation: int, hex_map: HexMap) -> void:
 			set_order(d, free[rng.randi_range(0, free.size() - 1)], hex_map)
 		else:
 			fortify(d)
+
+
+## AI scout: heads for the nearest tile its nation has never explored that it can reach.
+## (The AI reads the fog's explored memory only to pick where to look; it is not blind.)
+func _ai_scout(d: Division, hex_map: HexMap) -> void:
+	if d.moves_left <= 0 or not d.order_path.is_empty():
+		return
+	var targets: Array[Vector2i] = []
+	for cell in hex_map.cells:
+		if fog.state(d.nation, cell) == Fog.UNEXPLORED and hex_map.terrain_of(cell).passable:
+			targets.append(cell)
+	targets.sort()
+	targets.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
+			return HexMap.hex_distance(d.hex, a) < HexMap.hex_distance(d.hex, b))
+	for cell in targets.slice(0, 40):
+		if set_order(d, cell, hex_map):
+			return
+
+
+## AI colony pod: founds a city if its hex is a valid site, otherwise heads for the nearest
+## valid site it can reach (ties go to the first in cell order).
+func _ai_colonizer(d: Division, hex_map: HexMap) -> void:
+	if found_city(d, hex_map).size() > 0 or d.moves_left <= 0 or not d.order_path.is_empty():
+		return
+	var sites := hex_map.colony_sites(d.nation)
+	sites.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
+			return HexMap.hex_distance(d.hex, a) < HexMap.hex_distance(d.hex, b))
+	for site in sites:
+		if set_order(d, site, hex_map):
+			return
 
 
 # --- Supply ---
