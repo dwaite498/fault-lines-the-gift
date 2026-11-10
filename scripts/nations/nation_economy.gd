@@ -24,6 +24,8 @@ var stocks: Dictionary = {}
 var pending: Dictionary = {}
 ## nation index -> true if that nation paid its upkeep on the last end_turn.
 var upkeep_paid: Dictionary = {}
+## nation index -> ids of divisions whose upkeep could not be paid on the last end_turn.
+var unpaid_divisions: Dictionary = {}
 ## POWs: captor nation -> {owner nation -> count (float)}. Kept after elimination.
 var pows: Dictionary = {}
 ## nation index -> people drawn from pools for reinforcement on the last end_turn.
@@ -40,6 +42,7 @@ func setup(hex_map: HexMap) -> void:
 	stocks.clear()
 	pending.clear()
 	upkeep_paid.clear()
+	unpaid_divisions.clear()
 	pows.clear()
 	reinforce_spent.clear()
 	refresh_labor(hex_map)
@@ -87,6 +90,8 @@ func ensure_labor(city: Dictionary) -> void:
 	if not city.has("labor"):
 		city.labor = default_labor(city)
 		return
+	if city.get("enslaved", false):
+		city.labor.training = 0
 	clamp_labor(city)
 
 
@@ -111,6 +116,8 @@ func clamp_labor(city: Dictionary) -> void:
 func set_labor(city: Dictionary, sink: String, points: int) -> int:
 	ensure_labor(city)
 	var room := int(city.labor[sink]) + unassigned_labor(city)
+	if sink == "training" and city.get("enslaved", false):
+		room = 0  # an enslaved city's labor cannot go to Training
 	city.labor[sink] = clampi(points, 0, room)
 	city.erase("labor_auto")
 	return int(city.labor[sink])
@@ -154,6 +161,8 @@ func infra_points(city: Dictionary) -> int:
 ## put the default split back when the queue clears. Any manual change drops the flag.
 func auto_training(city: Dictionary) -> void:
 	ensure_labor(city)
+	if city.get("enslaved", false):
+		return
 	if training_points(city) > 0:
 		return
 	var share := float(config.get("labor", {}).get("recruit_auto_training_share", 0.0))
@@ -225,37 +234,61 @@ func collect_income(hex_map: HexMap) -> void:
 			stocks[city.nation][r] += income[r]
 
 
-## Total upkeep a nation owes this turn: {"cash", "capacity"}.
+## Total upkeep a nation owes this turn, summed over its divisions' types, e.g. {"cash": 6}.
 func upkeep_due(nation: int, roster: DivisionRoster) -> Dictionary:
-	var count := 0
+	var due := {}
 	for d in roster.divisions:
 		if d.nation == nation:
-			count += 1
-	var due := {}
-	for r in config.upkeep_per_division:
-		due[r] = count * float(config.upkeep_per_division[r])
+			var each := roster.upkeep_of(d)
+			for r in each:
+				due[r] = float(due.get(r, 0.0)) + float(each[r])
 	return due
 
 
-## Each nation pays upkeep in full, or pays nothing and all its divisions lose
-## unpaid_upkeep_org_loss org (clamped at 0, no retreat).
+## Pays upkeep division by division (id order) from the nation's stocks. A division whose
+## upkeep the stock cannot cover is UNPAID: nothing is deducted for it (so cash is
+## clamped at 0 and never goes negative) and it loses unpaid_upkeep_org_loss org this turn
+## (clamped at 0, no retreat). Unpaid division ids are listed in unpaid_divisions and
+## logged; upkeep_paid is false for a nation with any unpaid division.
 func pay_upkeep(hex_map: HexMap, roster: DivisionRoster) -> void:
+	unpaid_divisions.clear()
+	var loss := float(config.unpaid_upkeep_org_loss)
+	var order := roster.divisions.duplicate()
+	order.sort_custom(func(a, b): return a.id < b.id)
 	for nation in hex_map.nations:
-		var due := upkeep_due(nation, roster)
 		var s: Dictionary = stocks[nation]
-		var can_pay := true
-		for r in due:
-			if s[r] < due[r]:
-				can_pay = false
-		upkeep_paid[nation] = can_pay
-		if can_pay:
-			for r in due:
-				s[r] -= due[r]
-		else:
-			var loss := float(config.unpaid_upkeep_org_loss)
-			for d in roster.divisions:
-				if d.nation == nation:
-					d.org = maxf(d.org - loss, 0.0)
+		var unpaid: Array[int] = []
+		for d in order:
+			if d.nation != nation:
+				continue
+			var cost := roster.upkeep_of(d)
+			var can_pay := true
+			for r in cost:
+				if float(s.get(r, 0.0)) < float(cost[r]):
+					can_pay = false
+			if can_pay:
+				for r in cost:
+					s[r] = float(s[r]) - float(cost[r])
+			else:
+				unpaid.append(d.id)
+				d.org = maxf(d.org - loss, 0.0)
+		upkeep_paid[nation] = unpaid.is_empty()
+		if not unpaid.is_empty():
+			unpaid_divisions[nation] = unpaid
+			print("Nation %d could not pay upkeep for divisions %s: they lose %d org" % [nation, unpaid, int(loss)])
+
+
+## Why training is blocked in the city ("besieged", "starving", "enslaved"), or "".
+## "starving" reads city.starving, a hook for the Food resource (nothing sets it yet);
+## "enslaved" reads city.enslaved (set by Enslave in Task 39).
+func training_blocked(city: Dictionary) -> String:
+	if city.get("besieged", false):
+		return "besieged"
+	if city.get("starving", false):
+		return "starving"
+	if city.get("enslaved", false):
+		return "enslaved"
+	return ""
 
 
 ## Why the city cannot recruit for nation, or "" if it can.
@@ -266,6 +299,9 @@ func recruit_block_reason(city: Dictionary, nation: int, roster: DivisionRoster)
 		return "already recruiting"
 	if roster.division_at(city.cell) != null:
 		return "city hex occupied"
+	var blocked := training_blocked(city)
+	if blocked != "":
+		return "a %s city cannot train" % blocked
 	var people_cost := int(city_rules.division_people_cost)
 	if int(city.get("pool", 0)) < people_cost:
 		return "recruit pool too small"
@@ -309,6 +345,9 @@ func spawn_pending(hex_map: HexMap, roster: DivisionRoster) -> void:
 			if not city.is_empty():
 				end_auto_training(city)
 			continue
+		# No training progress while besieged, starving or enslaved: the queue waits.
+		if training_blocked(city) != "":
+			continue
 		entry.turns_left = maxi(entry.turns_left - 1, 0)
 		entry.labor = mini(int(entry.get("labor", 0)) + training_points(city), training_labor_cost())
 		if entry.turns_left == 0 and entry.labor >= training_labor_cost() and roster.division_at(city.cell) == null:
@@ -323,6 +362,8 @@ func recruit_stalled(city: Dictionary) -> bool:
 	if not pending.has(city.id):
 		return false
 	var entry: Dictionary = pending[city.id]
+	if training_blocked(city) != "":
+		return false  # paused, not stalled
 	return training_points(city) <= 0 and int(entry.get("labor", 0)) < int(entry.get("cost", 0))
 
 
@@ -357,13 +398,38 @@ func division_count(nation: int, roster: DivisionRoster) -> int:
 	return count
 
 
+## Cash per turn a nation's cities make (the same city_income the economy collects).
+func cash_income(nation: int, hex_map: HexMap) -> float:
+	var total := 0.0
+	for city in hex_map.cities:
+		if city.nation == nation:
+			total += float(city_income(city).cash)
+	return total
+
+
+## Cash upkeep per turn of the nation's fielded divisions plus its queued recruits (each at
+## the recruit template's upkeep), plus `extra_recruits` more of them.
+func projected_cash_upkeep(nation: int, roster: DivisionRoster, extra_recruits := 0) -> float:
+	var total: float = float(upkeep_due(nation, roster).get("cash", 0.0))
+	var each := float(roster.templates.get(config.recruit_template, {}).get("upkeep", {}).get("cash", 0.0))
+	var queued := 0
+	for id in pending:
+		if pending[id].nation == nation:
+			queued += 1
+	return total + each * (queued + extra_recruits)
+
+
 ## Each AI city that can recruit does so with ai_recruit_chance, using roster.rng,
-## while the nation has fewer than ai_max_divisions (fielded plus in training).
+## while the nation has fewer than ai_max_divisions (fielded plus in training) and the
+## upkeep after the new division (fielded, queued and the new one) would not exceed
+## its per-turn cash income.
 func run_ai(player_nation: int, hex_map: HexMap, roster: DivisionRoster) -> void:
 	for city in hex_map.cities:
 		if city.nation == player_nation or recruit_block_reason(city, city.nation, roster) != "":
 			continue
 		if division_count(city.nation, roster) >= int(config.ai_max_divisions):
+			continue
+		if projected_cash_upkeep(city.nation, roster, 1) > cash_income(city.nation, hex_map):
 			continue
 		if roster.rng.randf() < float(config.ai_recruit_chance):
 			recruit(city, city.nation, roster)
@@ -407,11 +473,6 @@ func reinforce_mult(d: Division, hex_map: HexMap, fought: bool) -> float:
 	return mult
 
 
-## People per strength point (cities_config people_per_strength).
-func people_per_strength() -> float:
-	return float(city_rules.people_per_strength)
-
-
 ## Plans one reinforcement pass without changing anything. `pools` maps city id to the
 ## people available (a copy is used). Returns {"gains": {division id: strength},
 ## "draws": {city id: people}, "spent": {nation: people}}. reinforce() applies it and
@@ -420,7 +481,6 @@ func people_per_strength() -> float:
 func reinforce_plan(roster: DivisionRoster, hex_map: HexMap, pools: Dictionary,
 		only_nation := -1) -> Dictionary:
 	var cap := float(config.reinforce_cap_per_turn)
-	var rate := people_per_strength()
 	var left := pools.duplicate()
 	var plan := {"gains": {}, "draws": {}, "spent": {}}
 	var order := roster.divisions.duplicate()
@@ -428,6 +488,7 @@ func reinforce_plan(roster: DivisionRoster, hex_map: HexMap, pools: Dictionary,
 	for d in order:
 		if (only_nation >= 0 and d.nation != only_nation) or not d.supplied or d.strength >= d.max_strength:
 			continue
+		var rate := roster.people_per_strength(d)
 		var gain := minf(cap * reinforce_mult(d, hex_map, d.fought_this_turn), d.max_strength - d.strength)
 		if gain <= 0.0 or rate <= 0.0:
 			continue
@@ -465,7 +526,7 @@ func reinforce_plan(roster: DivisionRoster, hex_map: HexMap, pools: Dictionary,
 func current_pools(hex_map: HexMap) -> Dictionary:
 	var pools := {}
 	for c in hex_map.cities:
-		pools[c.id] = hex_map.pool_of(c)
+		pools[c.id] = 0 if c.get("enslaved", false) else hex_map.pool_of(c)
 	return pools
 
 
@@ -519,10 +580,11 @@ func pows_lost(owner: int) -> float:
 
 
 ## Returns captor's POWs from owner to owner's population and clears them. The people
-## (count x people_per_strength) go to the owner's capital: POWs do not record a home city.
+## (count x the recruit template's people_per_strength) go to the owner's capital: POWs do
+## not record a home city or a division type.
 ## Not called yet; peace and alliance switching will call it. Works for eliminated nations
 ## too (their people are lost). Returns the strength returned.
-func return_pows(captor: int, owner: int, hex_map: HexMap) -> float:
+func return_pows(captor: int, owner: int, hex_map: HexMap, roster: DivisionRoster) -> float:
 	if not pows.has(captor) or not pows[captor].has(owner):
 		return 0.0
 	var count: float = pows[captor][owner]
@@ -531,5 +593,5 @@ func return_pows(captor: int, owner: int, hex_map: HexMap) -> float:
 		pows.erase(captor)
 	var capital := hex_map.capital_of(owner)
 	if not capital.is_empty():
-		hex_map.return_people(owner, int(capital.id), capital.cell, int(floor(count * people_per_strength())))
+		hex_map.return_people(owner, int(capital.id), capital.cell, int(floor(count * float(roster.templates.get(config.recruit_template, {}).get("people_per_strength", 10.0)))))
 	return count

@@ -41,7 +41,7 @@ var city_rules := {
 	"terrain_growth_mult": {"plains": 1.0, "coast": 1.1, "forest": 0.9, "hills": 0.9,
 			"mountains": 0.7, "shallow_ocean": 1.0},
 	"fungus_adjacent_growth_mult": 0.95, "fungus_growth_min_mult": 0.7,
-	"division_people_cost": 1000, "people_per_strength": 10, "pool_fill_rate": 0.005,
+	"division_people_cost": 1000, "pool_fill_rate": 0.005,
 	"pool_cap": 0.15, "capital_start_pool": 1000, "colony_start_pool": 0,
 	"train_min_city_pop": 5000,
 	"siege_growth": 0.0, "siege_pop_loss": 0.02, "siege_labor_mult": 0.5,
@@ -621,7 +621,8 @@ func _advance_people(city: Dictionary) -> void:
 		var pop := int(city.population)
 		city.population = pop - int(floor(pop * float(city_rules.siege_pop_loss)))
 	city.population = grown_population(city)
-	city.pool = clampi(pool_of(city) + pool_fill(city), 0, pool_cap(city))
+	# An enslaved city's pool stays 0 permanently (POPULATION and Pillars rules).
+	city.pool = 0 if city.get("enslaved", false) else clampi(pool_of(city) + pool_fill(city), 0, pool_cap(city))
 
 
 ## A copy of the city as it will stand after this end turn's growth and pool fill.
@@ -686,6 +687,7 @@ func capture_city(cell: Vector2i, new_nation: int) -> Array[int]:
 			# The old owner's recruits, labor plan and infra build do not carry over.
 			city.pool = 0
 			city.besieged = false
+			city.erase("enslaved")
 			city.infra_progress = 0
 			city.erase("labor")
 			city.erase("labor_auto")

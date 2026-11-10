@@ -23,7 +23,7 @@ func toggle() -> void:
 
 func refresh(nation: int, roster: DivisionRoster, economy: NationEconomy, top: float,
 		hex_map: HexMap = null) -> void:
-	var lines: Array[String] = ["%s - Military (M to close)" % factions.name_of(nation), "Leader: %s" % factions.leader_of(nation)]
+	var lines: Array[String] = ["%s - Military (N to close)" % factions.name_of(nation), "Leader: %s" % factions.leader_of(nation)]
 	for d in roster.divisions:
 		if d.nation != nation:
 			continue
@@ -37,13 +37,21 @@ func refresh(nation: int, roster: DivisionRoster, economy: NationEconomy, top: f
 	lines.append("Recruit cost: cash %d, capacity %d, %d people from the city pool; %d turns training" % [
 			int(cost.get("cash", 0)), int(cost.get("capacity", 0)),
 			int(economy.city_rules.division_people_cost), int(economy.config.training_turns)])
+	if economy.unpaid_divisions.has(nation):
+		lines.append("UNPAID UPKEEP: divisions %s lost %d org (not enough cash)" % [
+				economy.unpaid_divisions[nation], int(economy.config.unpaid_upkeep_org_loss)])
 	var ids := economy.pending.keys()
 	ids.sort()
 	for id in ids:
 		if economy.pending[id].nation == nation:
-			var stalled := hex_map != null and economy.recruit_stalled(hex_map.city_by_id(id))
-			lines.append("city %d: %s%s" % [id, NationEconomy.queue_text(economy.pending[id]),
-					"  STALLED: assign Training labor" if stalled else ""])
+			var queue_city := hex_map.city_by_id(id) if hex_map != null else {}
+			var note := ""
+			if not queue_city.is_empty():
+				if economy.training_blocked(queue_city) != "":
+					note = "  PAUSED: city is " + economy.training_blocked(queue_city)
+				elif economy.recruit_stalled(queue_city):
+					note = "  STALLED: assign Training labor"
+			lines.append("city %d: %s%s" % [id, NationEconomy.queue_text(economy.pending[id]), note])
 	label.text = "\n".join(lines)
 	swatch.color = factions.color_of(nation)
 	panel.size = label.get_minimum_size() + Vector2(30, 12)

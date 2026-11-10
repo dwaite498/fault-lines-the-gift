@@ -5,6 +5,20 @@
 		"morale": 0.5,
 		"attack": 10,
 		"defense": 12,
-		"move": 2
+		"move": 2,
+		"people_per_strength": 10,
+		"upkeep": {"cash": 3}
+	},
+	"mechanized": {
+		"future": true,
+		"type": "mechanized",
+		"people_per_strength": 5,
+		"upkeep": {"cash": 6, "alloy": 1}
+	},
+	"robotic": {
+		"future": true,
+		"type": "robotic",
+		"people_per_strength": 2,
+		"upkeep": {"cash": 10, "alloy": 1, "fuel": 1}
 	}
 }

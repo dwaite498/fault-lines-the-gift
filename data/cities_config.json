@@ -15,7 +15,6 @@
 	"fungus_adjacent_growth_mult": 0.95,
 	"fungus_growth_min_mult": 0.7,
 	"division_people_cost": 1000,
-	"people_per_strength": 10,
 	"pool_fill_rate": 0.005,
 	"pool_cap": 0.15,
 	"capital_start_pool": 1000,
