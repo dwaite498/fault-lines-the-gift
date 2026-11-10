@@ -2,9 +2,14 @@
 	"cities_per_nation": 2,
 	"min_spacing": 3,
 	"claim_radius": 1,
-	"grown_claim_radius": 2,
-	"grown_radius_population": 20000,
-	"start_population": 10000,
+	"tiers": [
+		{"key": "outpost", "min_pop": 0, "sprite_scale": 0.6},
+		{"key": "base", "min_pop": 5000, "sprite_scale": 0.8},
+		{"key": "city", "min_pop": 15000, "claim_radius": 2, "sprite_scale": 1.0},
+		{"key": "metropolis", "min_pop": 30000, "claim_radius": 2, "sprite_scale": 1.2}
+	],
+	"colony_start_population": 3000,
+	"capital_start_population": 10000,
 	"start_infrastructure": 10,
 	"housing_per_infra": 3000,
 	"people_per_labor_point": 2000,

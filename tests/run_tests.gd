@@ -49,6 +49,7 @@ func _initialize() -> void:
 	test_faction_traits()
 	test_plunder_cooldown()
 	test_attitude()
+	test_city_tiers()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -425,7 +426,7 @@ func test_population() -> void:
 	var m := pop_map()
 	var eco := NationEconomy.new()
 	var capital := {"id": 0, "nation": 0, "population": 10000, "infrastructure": 10}
-	ok(m.city_rules.start_population == 10000, "a capital starts at 10,000 people (config start_population)")
+	ok(m.city_rules.capital_start_population == 10000 and m.city_rules.colony_start_population == 3000, "a capital starts at 10,000 people and a colony at 3,000 (config)")
 	# Housing cap = infrastructure x 3,000.
 	ok(m.housing_cap(capital) == 30000, "starting infra 10 gives a 30,000 housing cap")
 	ok(m.housing_cap({"infrastructure": 11.5}) == 34500 and m.housing_cap({"infrastructure": 0}) == 0, "housing cap scales with infra (11.5 -> 34,500, 0 -> 0)")
@@ -464,12 +465,12 @@ func test_population() -> void:
 	ok(not NationEconomy.RESOURCES.has("manpower") and not eco.city_income(capital).has("manpower") and not eco.config.has("manpower_per_person"), "manpower is gone as a nation resource (per-city pools replace it)")
 	# Old keys are gone from config.
 	ok(not m.city_rules.has("max_population") and not m.city_rules.has("growth_per_turn") and not eco.config.has("cash_per_pop"), "pre-rescale config keys are removed")
-	# Territory radius still grows at 20,000 people.
-	ok(m._radius_for(19999) == m.city_rules.claim_radius and m._radius_for(20000) == m.city_rules.grown_claim_radius, "claim radius grows at 20,000 people (was 20 pop)")
+	# Territory radius comes from the tier: radius 2 from City tier (15,000 people).
+	ok(m._radius_for(14999) == m.city_rules.claim_radius and m._radius_for(15000) == 2, "claim radius 2 starts at 15,000 people (City tier)")
 	# A generated map starts every city at the config population.
 	var gen := build(5)
-	var starts := gen.cities.all(func(c: Dictionary) -> bool: return int(c.population) == 10000)
-	ok(starts, "generated cities start at 10,000 people")
+	var starts := gen.cities.all(func(c: Dictionary) -> bool: return int(c.population) == (10000 if gen.capital_of(int(c.nation)).id == c.id else 3000))
+	ok(starts, "generated capitals start at 10,000 people and colonies at 3,000")
 
 
 func test_player_faction_warning() -> void:
@@ -531,7 +532,7 @@ func test_labor() -> void:
 	var gm := build(5)
 	var geco := NationEconomy.new()
 	geco.setup(gm)
-	ok(gm.cities.all(func(c: Dictionary) -> bool: return c.labor.growth == 2 and c.labor.training == 0), "every generated city (AI included) starts at the default split after setup")
+	ok(gm.cities.all(func(c: Dictionary) -> bool: return c.labor.growth == int(floor(gm.labor_points(c) * 0.5)) and c.labor.training == 0), "every generated city (AI included) starts at the default split after setup")
 	var fresh := gm.cities[0]
 	fresh.erase("labor")
 	fresh.population = 4000
@@ -1167,6 +1168,10 @@ func test_ai_upkeep_cap() -> void:
 	var nation: int = m.nations.filter(func(n: int) -> bool: return n != 0)[0]
 	for n in m.nations:
 		eco.stocks[n].capacity = 100.0
+	for c in m.cities:  # colonies start at 3,000 now; these numbers assume two 10,000 cities
+		c.population = 10000
+		c.erase("labor")
+		eco.ensure_labor(c)
 	var cap := m.capital_of(nation)
 	var income := eco.cash_income(nation, m)
 	var fielded: int = roster.divisions.filter(func(d: Division) -> bool: return d.nation == nation).size()
@@ -1256,6 +1261,7 @@ func test_capture_choices() -> void:
 	var s4 := cap_setup()
 	var c4: Dictionary = s4.city
 	var other4: Dictionary = s4.other
+	other4.population = 10000
 	var r4 := capture_with(s4, c4, 0, "reduce")
 	ok(c4.population == 5000 and is_equal_approx(float(c4.infrastructure), 5.0) and c4.recruit_lockout == 10, "Reduce: -50% people, -50% infra, annexed with the lockout")
 	ok(other4.population == 15000 and r4.refugees == 5000 and r4.lost_people == 0, "Reduce: the displaced 5,000 flee to the old owner's nearest city (+5,000 refugees)")
@@ -1264,6 +1270,7 @@ func test_capture_choices() -> void:
 	var s5 := cap_setup()
 	var c5: Dictionary = s5.city
 	var other5: Dictionary = s5.other
+	other5.population = 10000
 	var cell5: Vector2i = c5.cell
 	var r5 := capture_with(s5, c5, 0, "raze")
 	ok(s5.map.city_by_id(int(c5.id)).is_empty() and s5.map.city_at(cell5).is_empty() and s5.map.cells[cell5] != 1, "Raze: the city is removed and its hex no longer belongs to the old owner")
@@ -1863,6 +1870,7 @@ func test_colonizers() -> void:
 	var groster: DivisionRoster = g.roster
 	groster.divisions.clear()
 	geco.config.ai_recruit_chance = 0.0
+	groster.templates.scout.recruit.ai_count = 0  # the scout would take the capital's one queue first
 	geco.run_ai(0, gm, groster)
 	var queued := {}
 	for id in geco.pending:
@@ -1970,9 +1978,9 @@ func test_fog() -> void:
 	m.terrain[inf.hex] = "plains"
 	# Cities: sight 2, +1 at City tier (15,000).
 	m.cities.append({"id": 0, "nation": 0, "cell": Vector2i(9, 1), "population": 14999, "radius": 1})
-	ok(fog.sight_of_city(m.cities[0]) == 2 and fog.tier_of(14999) == "base", "a 14,999 city sees 2 (Base)")
+	ok(fog.sight_of_city(m.cities[0], m) == 2 and fog.tier_of(14999, m) == "base", "a 14,999 city sees 2 (Base)")
 	m.cities[0].population = 15000
-	ok(fog.sight_of_city(m.cities[0]) == 3 and fog.tier_of(15000) == "city" and fog.tier_of(4999) == "outpost" and fog.tier_of(30000) == "metropolis", "a 15,000 city (City tier) sees 3")
+	ok(fog.sight_of_city(m.cities[0], m) == 3 and fog.tier_of(15000, m) == "city" and fog.tier_of(4999, m) == "outpost" and fog.tier_of(30000, m) == "metropolis", "a 15,000 city (City tier) sees 3")
 	# Mountains block sight to the tiles behind them, but can be seen themselves.
 	var w2 := fog_world()
 	var m2: HexMap = w2.map
@@ -2551,3 +2559,69 @@ func test_attitude() -> void:
 	# Without attitude data the AI is unchanged.
 	var plain := pool_setup()
 	ok(not plain.map.attitude.enabled(), "a map without attitude data keeps the old AI")
+
+
+# --- Task 43: city tiers ---
+
+func test_city_tiers() -> void:
+	var m := build(5)
+	var rules: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://data/cities_config.json"))
+	ok(rules.tiers.size() == 4 and rules.colony_start_population == 3000 and rules.capital_start_population == 10000 and not rules.has("grown_radius_population") and not rules.has("start_population"), "cities_config.json: 4 tiers, colony 3,000, capital 10,000, no grown_radius_population or start_population")
+	# 1. Starting tiers.
+	var cap := m.capital_of(0)
+	var colony: Dictionary = nation_cities(m, 0)[1]
+	ok(cap.population == 10000 and m.tier(cap) == "base" and colony.population == 3000 and m.tier(colony) == "outpost", "a capital starts at 10,000 as a Base, a colony at 3,000 as an Outpost")
+	# 2. Thresholds.
+	ok(m.tier({"population": 4999}) == "outpost" and m.tier({"population": 5000}) == "base" and m.tier({"population": 14999}) == "base" and m.tier({"population": 15000}) == "city" and m.tier({"population": 30000}) == "metropolis", "tier thresholds: 4,999 Outpost, 5,000 Base, 15,000 City, 30,000 Metropolis")
+	ok(m._radius_for(14999) == 1 and m._radius_for(15000) == 2 and m._radius_for(40000) == 2 and m._radius_for(0) == int(m.city_rules.claim_radius), "claim radius: 1 by default, 2 from City tier")
+	ok(m.next_tier_population({"population": 14000}) == 15000 and m.next_tier_population({"population": 30000}) == -1, "next tier population (15,000 from a Base, none at the top)")
+	# A City starts claiming ring-2 tiles at the end of the turn it reaches 15,000.
+	cap.population = 14990
+	cap.infrastructure = 10
+	m.grow_cities()
+	ok(cap.population >= 15000 and cap.radius == 2 and m.tier(cap) == "city", "growing past 15,000 makes a City with claim radius 2 that turn")
+	ok(m.tier_changes.size() == 1 and m.tier_changes[0].grew and m.tier_change_text(m.tier_changes[0]) == "City %d grew to a City" % int(cap.id), "the tier change is logged: 'City N grew to a City'")
+	var ring2 := 0
+	for cell in m.cells:
+		if HexMap.hex_distance(cell, cap.cell) == 2 and m.cells[cell] == cap.nation:
+			ring2 += 1
+	ok(ring2 > 0 and cap.kept_ring2.size() == ring2, "a City owns ring-2 tiles (%d)" % ring2)
+	var before := m.cells.duplicate()
+	# 3. A City dropping to 14,000 shows as a Base and keeps its ring-2 tiles.
+	cap.population = 14000
+	m.grow_cities()
+	ok(m.tier(cap) == "base" and cap.radius == 1 and m.tier_changes.size() == 1 and not m.tier_changes[0].grew and m.tier_change_text(m.tier_changes[0]) == "City %d shrank to a Base" % int(cap.id), "dropping to 14,000: a Base again, logged as shrank")
+	ok(m.cells == before, "the shrunken city keeps every tile it held (ring 2 included)")
+	m.grow_cities()
+	ok(m.tier_changes.is_empty(), "no change, no log line")
+	# It stops claiming new ring-2 tiles: a tile it never held stays unclaimed.
+	var fresh := Vector2i(-1, -1)
+	for cell in m.cells:
+		if HexMap.hex_distance(cell, cap.cell) == 2 and m.cells[cell] == HexMap.UNCLAIMED and not cap.kept_ring2.has(cell):
+			fresh = cell
+	if fresh != Vector2i(-1, -1):
+		m.update_ownership()
+		ok(m.cells[fresh] == HexMap.UNCLAIMED, "an unclaimed ring-2 tile is not newly claimed below City tier")
+	# Tiles still flip on capture: the new owner gets them.
+	var new_owner: int = 1
+	cap.nation = new_owner
+	m.update_ownership()
+	ok(m.cells[cap.kept_ring2[0]] == new_owner, "kept ring-2 tiles flip with the city on capture")
+	# 4. Sprite keys and placeholder scale.
+	var has := func(keys: Array) -> Callable:
+		return func(k: String) -> bool: return keys.has(k)
+	ok(CityArt.candidate_keys("assembly", "city") == ["base_assembly_city", "base_generic_city", "base_generic_base"], "sprite keys: exact, generic tier, generic base")
+	ok(CityArt.resolve_key("assembly", "city", has.call(["base_assembly_city", "base_generic_city"])) == "base_assembly_city", "the exact faction key wins")
+	ok(CityArt.resolve_key("assembly", "city", has.call(["base_generic_city", "base_generic_base"])) == "base_generic_city", "falls back to the generic tier dome")
+	ok(CityArt.resolve_key("free_tide", "metropolis", has.call(["base_generic_base"])) == "base_generic_base", "falls back to the generic base dome")
+	ok(CityArt.resolve_key("assembly", "city", has.call([])) == "" and CityArt.resolve_key("assembly", "city") == "", "with no art at all it returns '' (the placeholder dome is drawn) and does not error")
+	ok(CityArt.tier_scale(m.city_rules.tiers, "outpost") == 0.6 and CityArt.tier_scale(m.city_rules.tiers, "base") == 0.8 and CityArt.tier_scale(m.city_rules.tiers, "city") == 1.0 and CityArt.tier_scale(m.city_rules.tiers, "metropolis") == 1.2, "placeholder scales: Outpost 0.6, Base 0.8, City 1.0, Metropolis 1.2")
+	var rows := FactionRoster.load_all()
+	m.load_faction_views(rows)
+	ok(rows.all(func(f: Dictionary) -> bool: return f.has("base_style")) and m.faction_art["free_tide"].sea and not m.faction_art["assembly"].sea and m.faction_art["assembly"].style == "assembly", "each faction has a base_style; sea factions are flagged for the platform dome")
+	ok(m.city_label(colony) == "City %d (Outpost)" % int(colony.id), "the city label shows the tier")
+	# 40f: fog reads the tiers from the map.
+	var fog := Fog.from_config(JSON.parse_string(FileAccess.get_file_as_string("res://data/map_config.json")))
+	var probe := {"population": 15000}
+	ok(fog.sight_of_city(probe, m) == int(fog.rules.sight.city) + int(fog.rules.city_sight_bonus) and fog.sight_of_city({"population": 14999}, m) == int(fog.rules.sight.city) and fog.tier_of(30000, m) == "metropolis", "city sight reads the City tier from HexMap (cities_config tiers)")
+	ok(not fog.rules.has("tier_thresholds"), "the duplicate tier_thresholds is gone from map_config.json")

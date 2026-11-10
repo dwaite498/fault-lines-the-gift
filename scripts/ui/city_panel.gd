@@ -95,6 +95,8 @@ func refresh(city: Dictionary) -> void:
 				people_text(hex_map.housing_cap(city))],
 		"Growth/turn: +%s" % people_text(hex_map.display_people(growth)),
 		"Claim radius: %d" % city.radius,
+		"Tier: %s%s" % [hex_map.tier(city).capitalize(), "" if hex_map.next_tier_population(city) < 0
+				else " (next tier: %s)" % people_text(hex_map.display_people(hex_map.next_tier_population(city)))],
 		"Infrastructure: %.1f" % float(city.infrastructure),
 	])
 	if city.has("rebuild_turns_left"):

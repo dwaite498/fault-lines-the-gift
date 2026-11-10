@@ -283,6 +283,14 @@ func _finish_turn() -> void:
 	var roster := _view.roster
 	roster.end_turn(_view.hex_map)
 	_view.hex_map.grow_cities(roster.unit_cells())
+	var tier_log: Array[String] = []
+	for change in _view.hex_map.tier_changes:
+		var line := _view.hex_map.tier_change_text(change)
+		print("turn_log: ", line)
+		if int(change.nation) == PLAYER_NATION:
+			tier_log.append(line)
+	if not tier_log.is_empty():
+		message.text = ". ".join(tier_log)
 	_economy.end_turn(_view.hex_map, roster)
 	turn += 1
 	_view.hex_map.current_turn = turn

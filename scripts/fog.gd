@@ -43,22 +43,18 @@ func filters(nation: int) -> bool:
 	return enabled() and (nation == observer or respects_fog)
 
 
-## City tier name for a population ("outpost", "base", "city", "metropolis").
-func tier_of(population: int) -> String:
-	var best := ""
-	var best_min := -1
-	for name in rules.tier_thresholds:
-		var need := int(rules.tier_thresholds[name])
-		if population >= need and need > best_min:
-			best = name
-			best_min = need
-	return best
+## City tier name for a population, from the map's tiers (HexMap.tier_for_population).
+func tier_of(population: int, hex_map: HexMap) -> String:
+	return str(hex_map.tier_for_population(population).key)
 
 
 ## Sight in hexes of a city: sight.city, +city_sight_bonus at city_bonus_tier or higher.
-func sight_of_city(city: Dictionary) -> int:
+func sight_of_city(city: Dictionary, hex_map: HexMap) -> int:
 	var sight := int(rules.sight.city)
-	var need := int(rules.tier_thresholds[rules.city_bonus_tier])
+	var need := 0
+	for t in hex_map.city_rules.tiers:
+		if str(t.key) == str(rules.city_bonus_tier):
+			need = int(t.min_pop)
 	if int(city.population) >= need:
 		sight += int(rules.city_sight_bonus)
 	return sight
@@ -124,7 +120,7 @@ func _snapshot(hex_map: HexMap, cell: Vector2i) -> Dictionary:
 	var city := hex_map.city_at(cell)
 	var snap := {"owner": int(hex_map.cells.get(cell, HexMap.UNCLAIMED)), "city": {}}
 	if not city.is_empty():
-		snap.city = {"id": int(city.id), "nation": int(city.nation), "tier": tier_of(int(city.population)),
+		snap.city = {"id": int(city.id), "nation": int(city.nation), "tier": tier_of(int(city.population), hex_map),
 				"population": int(city.population)}
 	return snap
 
@@ -145,7 +141,7 @@ func update(hex_map: HexMap, roster: DivisionRoster) -> void:
 		var vis := {}
 		for city in hex_map.cities:
 			if city.nation == nation:
-				_mark(hex_map, vis, city.cell, sight_of_city(city))
+				_mark(hex_map, vis, city.cell, sight_of_city(city, hex_map))
 		for d in roster.divisions:
 			if d.nation == nation:
 				_mark(hex_map, vis, d.hex, sight_of_unit(d, hex_map))
