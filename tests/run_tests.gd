@@ -53,6 +53,7 @@ func _initialize() -> void:
 	test_natives()
 	test_fungus_attrition()
 	test_pressure()
+	test_frontage()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -3041,3 +3042,58 @@ func test_pressure() -> void:
 	# The Task 42 AI keys are documented in the faction spec's config block.
 	var doc := FileAccess.get_file_as_string("res://docs/specs/FACTION_TRAITS.md")
 	ok(doc.contains("target_range") and doc.contains("local_radius") and doc.contains("empty_city_strength"), "ai.target_range, ai.local_radius and ai.empty_city_strength are documented")
+
+
+# --- Task 46: frontage cap ---
+
+func test_frontage() -> void:
+	ok(make_roster().combat.max_attackers_per_hex == 3, "max_attackers_per_hex is 3 in combat_config.json")
+	var m := make_map(7, 7)
+	var r := make_roster()
+	var center := Vector2i(3, 3)
+	var target := r.spawn_division(1, center, "infantry")
+	var ring: Array[Division] = []
+	for n in m.neighbors(center):
+		ring.append(r.spawn_division(0, n, "infantry"))
+	ok(ring.size() == 6, "six attackers surround the target")
+	# Manual orders: the first 3 are accepted, the 4th is refused, and the preview greys the hex.
+	var accepted := 0
+	for d in ring.slice(0, 3):
+		if r.set_order(d, center, m):
+			accepted += 1
+	ok(accepted == 3 and r.attackers_on(center) == 3, "3 attackers may order an attack on one hex")
+	ok(not r.can_attack(ring[3], target, m) and not r.set_order(ring[3], center, m) and ring[3].order_path.is_empty(), "a 4th attacker is refused (manual order)")
+	ok(not r.action_targets(ring[3], "attack", m).has(center) and r.frontage_blocked_targets(ring[3], m) == [center], "the attack preview excludes the full hex and lists it as blocked")
+	ok(r.action_targets(ring[0], "attack", m) == [center] and r.set_order(ring[0], center, m), "an attacker already in the 3 may re-issue its order")
+	# The AI never picks a full hex as a target.
+	r.run_ai(-1, m)
+	ok(not ring[3].order_attack and not ring[4].order_attack and not ring[5].order_attack, "the AI does not order a 4th attack on a full hex")
+	# Resolution: orders forced past the cap (e.g. set by hand) only let 3 attack; extras are dropped in id order.
+	for d in ring.slice(3):
+		d.order_path.assign([center])
+		d.order_attack = true
+	var hp_before := target.strength
+	r.execute_orders(m)
+	var fights := r.turn_log.filter(func(l: String) -> bool: return l.begins_with("Clash") or l.contains("attacks"))
+	ok(r.turn_log.filter(func(l: String) -> bool: return l.contains("frontage full")).size() == 3, "simultaneous resolution drops the 3 attackers over the cap")
+	ok(target.strength < hp_before or not r.divisions.has(target), "the 3 allowed attackers still fight")
+	# The scout's flag: ignores_frontage_cap neither counts nor is blocked.
+	var m2 := make_map(7, 7)
+	var r2 := make_roster()
+	var t2 := r2.spawn_division(1, center, "infantry")
+	var nb := m2.neighbors(center)
+	for i in 3:
+		r2.set_order(r2.spawn_division(0, nb[i], "infantry"), center, m2)
+	var extra := r2.spawn_division(0, nb[3], "infantry")
+	ok(not r2.set_order(extra, center, m2), "the 4th is blocked")
+	var tpl: Dictionary = r2.templates.infantry.duplicate()
+	tpl["ignores_frontage_cap"] = true
+	tpl["type"] = "raider"
+	r2.templates["raider"] = tpl
+	var raider := r2.spawn_division(0, nb[4], "raider")
+	ok(r2.ignores_frontage(raider) and r2.set_order(raider, center, m2), "a unit with ignores_frontage_cap is never blocked")
+	ok(r2.attackers_on(center) == 3, "and does not count against the cap")
+	ok(r2.templates.scout.ignores_frontage_cap and not r2.frontage_blocked(r2.spawn_division(0, nb[5], "scout"), center), "the scout template ignores the cap")
+	# An ordinary attack with room is unaffected, and a cap of 0 means no cap.
+	r2.combat["max_attackers_per_hex"] = 0
+	ok(r2.set_order(extra, center, m2), "cap 0 disables the limit")

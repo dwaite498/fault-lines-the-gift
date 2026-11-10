@@ -327,7 +327,44 @@ func fortify(d: Division) -> bool:
 
 # --- Attack ---
 
+## Frontage (Task 46): at most combat.max_attackers_per_hex attackers may have an attack order on
+## one hex (0 or missing = no cap). A template with "ignores_frontage_cap" neither counts nor is blocked.
+func ignores_frontage(d: Division) -> bool:
+	return bool(templates.get(d.unit_type, {}).get("ignores_frontage_cap", false))
+
+
+## Attack orders already on `hex`, not counting `except` or units that ignore the cap.
+func attackers_on(hex: Vector2i, except: Division = null) -> int:
+	var n := 0
+	for o in divisions:
+		if o != except and o.order_attack and not o.order_path.is_empty() and o.order_path[0] == hex \
+				and not ignores_frontage(o):
+			n += 1
+	return n
+
+
+## True if d may not join an attack on `hex`: the hex already has the maximum attackers.
+func frontage_blocked(d: Division, hex: Vector2i) -> bool:
+	var cap := int(combat.get("max_attackers_per_hex", 0))
+	return cap > 0 and not ignores_frontage(d) and attackers_on(hex, d) >= cap
+
+
+## Enemy hexes d could attack but for the frontage cap (shown greyed in the attack preview).
+func frontage_blocked_targets(d: Division, hex_map: HexMap) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	for o in divisions:
+		if o != d and o.nation != d.nation and not neutral_nations.has(o.nation) and not hides_from(d.nation, o.hex) \
+				and _can_attack_ignoring_frontage(d, o, hex_map) and frontage_blocked(d, o.hex):
+			out.append(o.hex)
+	out.sort()
+	return out
+
+
 func can_attack(attacker: Division, defender: Division, hex_map: HexMap) -> bool:
+	return _can_attack_ignoring_frontage(attacker, defender, hex_map) and not frontage_blocked(attacker, defender.hex)
+
+
+func _can_attack_ignoring_frontage(attacker: Division, defender: Division, hex_map: HexMap) -> bool:
 	return (not is_unarmed(attacker) and attacker.moves_left > 0 and not attacker.has_moved and defender != null
 			and defender.nation != attacker.nation and not neutral_nations.has(defender.nation)
 			and defender.hex in hex_map.neighbors(attacker.hex))
@@ -667,11 +704,19 @@ func execute_orders(hex_map: HexMap) -> void:
 	order.sort_custom(by_id)
 	var movers: Array = []
 	var attacks: Array = []  # [attacker, target]
+	var on_hex := {}  # frontage: attackers kept per target hex
+	var cap := int(combat.get("max_attackers_per_hex", 0))
 	for d in order:
 		if d.order_path.is_empty():
 			continue
 		if d.order_attack:
-			attacks.append([d, division_at(d.order_path[0])])
+			var hex: Vector2i = d.order_path[0]
+			if cap > 0 and not ignores_frontage(d):
+				if int(on_hex.get(hex, 0)) >= cap:
+					turn_log.append("Div %d (n%d) cannot join the attack on %s: frontage full" % [d.id, d.nation, hex])
+					continue
+				on_hex[hex] = int(on_hex.get(hex, 0)) + 1
+			attacks.append([d, division_at(hex)])
 		else:
 			d.fortify_level = 0
 			movers.append(d)
@@ -920,7 +965,8 @@ func run_ai(player_nation: int, hex_map: HexMap) -> void:
 		for n in hex_map.neighbors(d.hex):
 			var other := division_at(n)
 			if other and other.nation != d.nation:
-				enemies.append(other)
+				if not frontage_blocked(d, n):  # a full hex is not a target for the AI
+					enemies.append(other)
 			elif can_move(d, n, hex_map):
 				free.append(n)
 		if not enemies.is_empty():
