@@ -5,7 +5,9 @@
 		"hills": "#C8B88A",
 		"mountains": "#9C8F78",
 		"water": "#5E7A8C",
-		"coast": "#7E97A3"
+		"coast": "#7E97A3",
+		"crater": "#2A2626",
+		"scorched": "#5A524A"
 	},
 	"grid": {
 		"color": "#000000",
