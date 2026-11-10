@@ -40,6 +40,7 @@ func _initialize() -> void:
 	test_capture_flow()
 	test_capture_gating()
 	test_atrocity_views()
+	test_main_menu()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -1509,3 +1510,49 @@ func test_atrocity_views() -> void:
 	var custom := [{"id": "x", "views_as_atrocity": ["raze"], "atrocity_sensitivity": 2.0}, {"id": "y"}]
 	m.load_faction_views(custom)
 	ok(is_equal_approx(m.reputation_weight_to("x", raze), w * 2.0) and is_equal_approx(m.reputation_weight_to("y", raze), w), "atrocity_sensitivity is read from the faction entry when present")
+
+
+# --- Task 40b: main menu and game setup ---
+
+func test_main_menu() -> void:
+	ok(ProjectSettings.get_setting("application/run/main_scene") == "res://scenes/menu.tscn", "the main menu is the project's main scene")
+	var limits := GameSession.setup_limits()
+	ok(limits.min_ai == 1 and limits.max_ai == 3 and limits.default_ai == 3, "config: setup screen allows 1 to 3 AI nations (default 3)")
+	var menu := MainMenu.new()
+	ok(menu.menu_box.visible and not menu.setup_box.visible, "the menu opens on New Game, Load Game and Quit")
+	ok(menu.new_button.text == "New Game" and menu.load_button.text == "Load Game" and menu.quit_button.text == "Quit", "the menu has New Game, Load Game and Quit")
+	menu.new_button.pressed.emit()
+	ok(menu.setup_box.visible and not menu.menu_box.visible, "New Game opens the setup screen")
+	var playable := FactionRoster.load_all().filter(func(f: Dictionary) -> bool: return f.get("playable", true))
+	ok(menu.faction_picker.item_count == playable.size() and menu.faction_picker.get_item_text(0) == playable[0].name, "the faction picker lists the playable factions")
+	ok(menu.ai_spin.min_value == 1 and menu.ai_spin.max_value == 3 and menu.ai_spin.value == 3, "the AI nation spinner uses the config range")
+	var before := menu.seed_field.text
+	ok(before == "12345", "the seed field starts at the config seed")
+	menu.random_button.pressed.emit()
+	ok(menu.seed_field.text.is_valid_int() and menu.seed_field.text != "", "the Random button puts a seed in the field")
+	menu.seed_field.text = "777"
+	menu.faction_picker.select(2)
+	menu.ai_spin.value = 2
+	var got := []
+	menu.new_game.connect(func(st: Dictionary) -> void: got.append(st))
+	menu.start_button.pressed.emit()
+	ok(got.size() == 1 and got[0] == {"player_faction": playable[2].id, "seed": 777, "ai_count": 2}, "Start emits the chosen faction, seed and AI count")
+	menu.seed_field.text = "abc"
+	ok(menu.build_settings().seed > 0 and menu.seed_field.text.is_valid_int(), "a bad seed gets replaced by a random one")
+	var loads := [0]
+	menu.load_game.connect(func() -> void: loads[0] += 1)
+	menu.load_button.pressed.emit()
+	ok(loads[0] == 1, "Load Game emits load_game")
+	menu.back_button.pressed.emit()
+	ok(menu.menu_box.visible and not menu.setup_box.visible, "Back returns to the menu")
+	menu.free()
+	# The settings drive the game: seed, nation count and player faction.
+	var base: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://data/map_config.json"))
+	ok(GameSession.apply(base, {}) == base, "no settings leaves the config unchanged")
+	for ai in [1, 2, 3]:
+		for sd in [3, 11, 25]:
+			var cfg := GameSession.apply(base, {"player_faction": "covenant", "seed": sd, "ai_count": ai})
+			var roster := FactionRoster.from_config(cfg)
+			var m := HexMap.from_config_file("res://data/map_config.json", "res://data/cities_config.json",
+					"res://data/terrain_config.json", roster.sea_nations(), cfg)
+			ok(m.seed_value == sd and m.nations.size() == ai + 1 and roster.assigned.size() == ai + 1 and roster.assigned[0].id == "covenant", "seed %d with %d AI: %d nations, the player is the Covenant" % [sd, ai, ai + 1])

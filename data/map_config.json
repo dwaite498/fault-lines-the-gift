@@ -7,6 +7,7 @@
 	"faction_count": 4,
 	"faction_seed": -1,
 	"player_faction": "",
+	"setup": {"min_ai": 1, "max_ai": 3, "default_ai": 3},
 	"camera": {
 		"zoom_min": 0.5,
 		"zoom_max": 2.0,
