@@ -3,5 +3,8 @@
 	"height": 12,
 	"seed": 12345,
 	"land_ratio": 0.6,
-	"nation_count": 5
+	"nation_count": 4,
+	"faction_count": 4,
+	"faction_seed": -1,
+	"player_faction": ""
 }

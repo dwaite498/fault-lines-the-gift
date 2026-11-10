@@ -7,6 +7,8 @@ const ORIGIN := Vector2(50, 50)
 const PALETTE_PATH := "res://data/art_palette.json"
 ## Colors and line styles from data/art_palette.json (Art PR A).
 var palette: Dictionary = load_palette()
+## Faction per nation (name, color, leader); set by main.gd. All nation colors come from it.
+var factions := FactionRoster.new()
 ## Nations drawn as neutral (no tint, no border), e.g. hidden minor factions.
 var hidden_nations: Array[int] = []
 
@@ -89,11 +91,9 @@ func _k() -> float:
 	return HEX_SIZE * sqrt(3.0) / 64.0
 
 
-## Counter fill: player navy, other nations darkened, neutral/unknown grey.
+## Counter fill: the nation's faction color darkened; neutral/unknown grey.
 func counter_fill(nation: int) -> Color:
 	var c: Dictionary = palette.counter
-	if nation == player_nation:
-		return Color.html(c.player_fill)
 	if nation < 0 or hidden_nations.has(nation):
 		return Color.html(c.neutral_fill)
 	return _color_for(nation).darkened(float(c.darken))
@@ -270,25 +270,7 @@ func _corners(center: Vector2) -> PackedVector2Array:
 func _color_for(owner: int) -> Color:
 	if owner < 0:
 		return Color.html(palette.terrain.water if owner == HexMap.WATER else palette.terrain.plains)
-	return nation_color(palette, owner)
-
-
-## Map palette color for a nation (territory tint and border). Swatches use this too.
-static func nation_color(pal: Dictionary, nation: int) -> Color:
-	var nations: Array = pal.nations
-	return Color.html(nations[nation % nations.size()])
-
-
-## Nation name from the palette's nation_names, by index. Past the list a number keeps
-## names unique. (Task 32 replaces this with factions.json.)
-static func nation_name(pal: Dictionary, nation: int, _player: int) -> String:
-	if nation < 0:
-		return "Neutral"
-	var names: Array = pal.nation_names
-	var n: String = names[nation % names.size()]
-	if nation >= names.size():
-		n += " %d" % (nation / names.size() + 1)
-	return n
+	return factions.color_of(owner)
 
 
 ## 10px swatch in the nation's map color.

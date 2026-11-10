@@ -21,14 +21,7 @@
 		"gap": 4.0,
 		"alpha": 1.0
 	},
-	"nations": [
-		"#3FA7D6", "#D64545", "#E3C14B", "#5DBB63", "#9B6FD1",
-		"#E07B39", "#3CC4B0", "#D65FA0", "#C9C9C9", "#7A8FE0"
-	],
-	"nation_names": ["Assembly", "Directorate", "Syndicate", "Verdant Accord", "Covenant",
-		"Collective", "Lyceum", "Free Tide", "Deepwater Guild", "Drift"],
 	"counter": {
-		"player_fill": "#1E3550",
 		"neutral_fill": "#6F6F6A",
 		"darken": 0.3,
 		"frame": "#F2F0E8",

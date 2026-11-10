@@ -1,0 +1,14 @@
+{
+	"factions": [
+		{"id": "assembly", "name": "Assembly", "type": "land", "color": "#3FA7D6", "leader": "Speaker Mara Ellison", "blurb": "Democracy, consent, rights", "rivals": ["Directorate", "Collective"]},
+		{"id": "directorate", "name": "Directorate", "type": "land", "color": "#D64545", "leader": "Marshal Yuri Kessane", "blurb": "Order, discipline, security", "rivals": ["Assembly", "Free Tide"]},
+		{"id": "syndicate", "name": "Syndicate", "type": "land", "color": "#E3C14B", "leader": "Chairman Teodor Halvard", "blurb": "Markets and profit set people free", "rivals": ["Collective", "Verdant Accord"]},
+		{"id": "verdant_accord", "name": "Verdant Accord", "type": "land", "color": "#5DBB63", "leader": "Steward Ilse Varga", "blurb": "The planet is not ours to strip", "rivals": ["Deepwater Guild", "Syndicate"]},
+		{"id": "covenant", "name": "Covenant", "type": "land", "color": "#9B6FD1", "leader": "Shepherd Abigail Crane", "blurb": "Faith and a divine mission", "rivals": ["Lyceum", "Assembly"]},
+		{"id": "collective", "name": "Collective", "type": "land", "color": "#E07B39", "leader": "Comrade-Chair Lin Wei", "blurb": "All for the commune", "rivals": ["Syndicate", "Assembly"]},
+		{"id": "lyceum", "name": "Lyceum", "type": "land", "color": "#3CC4B0", "leader": "Provost Anand Rao", "blurb": "Knowledge above all", "rivals": ["Covenant"]},
+		{"id": "free_tide", "name": "Free Tide", "type": "sea", "color": "#D65FA0", "leader": "Captain Rook Salazar", "blurb": "Freedom through plunder", "rivals": ["Directorate", "Deepwater Guild"]},
+		{"id": "deepwater_guild", "name": "Deepwater Guild", "type": "sea", "color": "#C9C9C9", "leader": "Foreman Odile Brandt", "blurb": "Industry under the sea", "rivals": ["Verdant Accord", "Free Tide"]},
+		{"id": "drift", "name": "Drift", "type": "sea", "color": "#7A8FE0", "leader": "Navigator Kai Aleho", "blurb": "Keep moving, need no one", "rivals": []}
+	]
+}

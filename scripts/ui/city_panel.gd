@@ -12,7 +12,7 @@ var roster: DivisionRoster
 var player_nation := 0
 var button := Button.new()
 var swatch := MapView.make_swatch()
-var _pal: Dictionary = MapView.load_palette()
+var factions: FactionRoster
 ## Emitted when the Recruit button is clicked (same action as the R key).
 signal recruit_pressed
 
@@ -36,10 +36,10 @@ func refresh(city: Dictionary) -> void:
 	if city.is_empty():
 		label.text = ""
 		return
-	swatch.color = MapView.nation_color(_pal, int(city.nation))
+	swatch.color = factions.color_of(int(city.nation))
 	var growth := growth_per_turn if int(city.population) < max_population else 0
 	label.text = "\n".join([
-		"%s - City %d" % [MapView.nation_name(_pal, int(city.nation), player_nation), city.id],
+		"%s - City %d" % [factions.name_of(int(city.nation)), city.id],
 		"Population: %d / %d" % [city.population, max_population],
 		"Growth/turn: +%d" % growth,
 		"Claim radius: %d" % city.radius,

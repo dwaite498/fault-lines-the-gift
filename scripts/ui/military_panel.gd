@@ -6,7 +6,7 @@ extends CanvasLayer
 var panel := Panel.new()
 var label := Label.new()
 var swatch := MapView.make_swatch()
-var _pal: Dictionary = MapView.load_palette()
+var factions: FactionRoster
 var max_fortify := 3
 const SIDE_WIDTH := 240.0
 
@@ -22,14 +22,14 @@ func toggle() -> void:
 	panel.visible = not panel.visible
 
 func refresh(nation: int, roster: DivisionRoster, economy: NationEconomy, top: float) -> void:
-	var lines: Array[String] = ["%s - Military (M to close)" % MapView.nation_name(_pal, nation, nation)]
+	var lines: Array[String] = ["%s - Military (M to close)" % factions.name_of(nation), "Leader: %s" % factions.leader_of(nation)]
 	for d in roster.divisions:
 		if d.nation != nation:
 			continue
 		lines.append("#%d (%d,%d) str %.1f org %.1f mor %.2f %s fort %d/%d" % [
 				d.id, d.hex.x, d.hex.y, d.strength, d.org, d.morale,
 				"supplied" if d.supplied else "unsupplied", d.fortify_level, max_fortify])
-	if lines.size() == 1:
+	if lines.size() == 2:
 		lines.append("No divisions")
 	lines.append("Manpower spent on reinforcement last turn: %.1f" % float(economy.reinforce_spent.get(nation, 0.0)))
 	var cost: Dictionary = economy.config.recruit_cost
@@ -42,7 +42,7 @@ func refresh(nation: int, roster: DivisionRoster, economy: NationEconomy, top: f
 		if economy.pending[id].nation == nation:
 			lines.append("city %d: %s" % [id, NationEconomy.queue_text(economy.pending[id])])
 	label.text = "\n".join(lines)
-	swatch.color = MapView.nation_color(_pal, nation)
+	swatch.color = factions.color_of(nation)
 	panel.size = label.get_minimum_size() + Vector2(30, 12)
 	var viewport_width := get_viewport().get_visible_rect().size.x
 	panel.position = Vector2(viewport_width - SIDE_WIDTH - panel.size.x - 8, top)

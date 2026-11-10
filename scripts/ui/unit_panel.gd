@@ -15,6 +15,7 @@ var _box := VBoxContainer.new()
 var label := Label.new()
 var swatch := MapView.make_swatch()
 var player_nation := 0
+var factions: FactionRoster
 const WIDTH := 240.0
 ## ORG / STR bars (6px, counter colors) with % values.
 var bars := Control.new()
@@ -91,9 +92,9 @@ func refresh(d: Division, hex_map: HexMap, actions: Array[String] = [], mode := 
 		return
 	_shown = d
 	bars.queue_redraw()
-	label.text = "Div %d - %s, %s" % [d.id, d.unit_type.capitalize(), MapView.nation_name(_pal, d.nation, player_nation)]
+	label.text = "Div %d - %s, %s" % [d.id, d.unit_type.capitalize(), factions.name_of(d.nation)]
 	swatch.visible = true
-	swatch.color = MapView.nation_color(_pal, d.nation)
+	swatch.color = factions.color_of(d.nation)
 	var penalty := 1.0 - DivisionRoster.flank_mult_for(d.attacked_from.size(), flank_per_hex, flank_min_mult)
 	var dim: String = _pal.ui.dim
 	var lines: Array[String] = [
