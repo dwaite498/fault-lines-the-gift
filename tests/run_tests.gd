@@ -48,6 +48,7 @@ func _initialize() -> void:
 	test_scout()
 	test_faction_traits()
 	test_plunder_cooldown()
+	test_attitude()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -2446,3 +2447,107 @@ func test_plunder_cooldown() -> void:
 	var g2 := save_game_setup(3)
 	var turn2 := SaveGame.restore(st, g2.map, g2.roster, g2.eco)
 	ok(turn2 == 6 and g2.map.plunder_last_turn[0] == 5 and g2.map.current_turn == 6 and g2.map.cities[0].last_plundered_turn == 5, "the plunder cooldown and the current turn survive a save and load")
+
+
+# --- Task 42: affinity, attitude and AI target weighting ---
+
+## A flat 15x9 land map with four nations (0 Assembly, 1 Directorate, 2 Free Tide, 3 Syndicate),
+## one city each at `cells` (nation -> cell), attitude data loaded.
+func attitude_setup(cells: Dictionary) -> Dictionary:
+	var m := make_map(15, 9)
+	for k in m.cells:
+		m.cells[k] = 0
+	m.nations = [0, 1, 2, 3]
+	m.nation_factions = {0: "assembly", 1: "directorate", 2: "free_tide", 3: "syndicate"}
+	for key in city_rules():
+		m.city_rules[key] = city_rules()[key]
+	for nation in cells:
+		m.cities.append({"id": nation, "nation": nation, "cell": cells[nation], "population": 10000, "infrastructure": 10.0})
+	var rows := FactionRoster.load_all()
+	m.load_faction_views(rows)
+	m.load_attitude(rows, FactionRoster.load_global(), FactionRoster.load_ai())
+	var roster := make_roster()
+	roster.rng.seed = 1
+	return {"map": m, "roster": roster}
+
+
+func test_attitude() -> void:
+	var rows := FactionRoster.load_all()
+	ok(rows.all(func(f: Dictionary) -> bool: return f.has("axes") and f.axes.size() == 3), "every faction has order, faith and planet axes")
+	var s := attitude_setup({0: Vector2i(7, 4), 1: Vector2i(3, 4), 2: Vector2i(11, 4), 3: Vector2i(7, 8)})
+	var m: HexMap = s.map
+	ok(m.attitude_between(0, 1) == -7.0 and m.attitude_between(0, 2) == 0.0, "attitude(Assembly, Directorate) = -(4+0+1) - 2 = -7, attitude(Assembly, Free Tide) = 0")
+	ok(m.attitude_between(0, 3) == -4.0 and m.attitude_between(0, 0) == 0.0, "Assembly to Syndicate -4 (no rival), to itself 0")
+	ok(m.attitude_between(1, 0) == -7.0 and m.attitude_between(2, 1) == -7.0 and m.attitude_between(1, 2) == -7.0, "Directorate and Free Tide are mutual rivals (-(4+0+1) - 2)")
+	ok(m.attitude_between(3, 0) == -4.0 and m.attitude.base("lyceum", "covenant") == -(1 + 4 + 1) - 2.0 and m.attitude.base("covenant", "lyceum") == -8.0, "Lyceum and Covenant: the axis gap plus the rival penalty")
+	ok(m.attitude.base("drift", "assembly") == -(1 + 1 + 1) and m.attitude.base("assembly", "drift") == -3.0, "a faction with no rivals pays no rival penalty")
+	ok(m.attitude.base("covenant", "assembly") == -7.0 and m.attitude.base("assembly", "covenant") == -5.0, "attitude is not symmetric when only one faction lists the other as a rival (Covenant -7, Assembly -5)")
+	# The atrocity record lowers attitude, scaled by the observer's sensitivity.
+	var w: float = float(m.city_rules.capture.atrocity_weight)
+	ok(w == 3.0, "atrocity_weight is 3.0 in cities_config.json (the spec gives no other value)")
+	m.reputation.log_event("raze", 2, 1, 3, true)
+	ok(is_equal_approx(m.attitude_between(0, 2), 0.0 - w * 1.5), "Assembly (sensitivity 1.5) holds a raze against Free Tide: -4.5")
+	ok(is_equal_approx(m.attitude_between(1, 2), -7.0 - w * 0.5), "Directorate (0.5) holds the same raze less: -1.5 more")
+	m.reputation.log_event("plunder", 2, 1, 1, false)
+	ok(is_equal_approx(m.attitude_between(0, 2), -w * 1.5 - w * 1.5) and is_equal_approx(m.attitude_between(1, 2), -7.0 - w * 0.5 - 1.0), "plunder is an atrocity to Assembly (weight x 1.5) but only severity 1 to Directorate")
+	m.reputation.log_event("annex", 2, 1, 0, false)
+	ok(is_equal_approx(m.attitude_between(1, 2), -7.0 - w * 0.5 - 1.0), "a normal event of severity 0 changes nothing")
+	m.attitude.reputation_scale = 0.0
+	ok(is_equal_approx(m.attitude_between(0, 2), 0.0), "reputation_attitude_scale 0 ignores the record (config)")
+	# Axes are config: changing the JSON data changes the result.
+	m.attitude.axes["directorate"] = {"order": -2, "faith": 0, "planet": 0}
+	ok(m.attitude_between(0, 1) == -2.0, "changing an axis changes the attitude with no code edit")
+
+	# --- AI target weighting: lowest attitude first when strengths are equal ---
+	var t := attitude_setup({0: Vector2i(7, 4), 1: Vector2i(3, 4), 2: Vector2i(11, 4), 3: Vector2i(7, 8)})
+	var tm: HexMap = t.map
+	var roster: DivisionRoster = t.roster
+	var dist := [HexMap.hex_distance(Vector2i(7, 4), Vector2i(3, 4)), HexMap.hex_distance(Vector2i(7, 4), Vector2i(11, 4)), HexMap.hex_distance(Vector2i(7, 4), Vector2i(7, 8))]
+	ok(dist[0] == dist[1] and dist[1] == dist[2], "the three enemy cities are equally far (%s)" % [dist])
+	var me: Division = roster.spawn_division(0, Vector2i(7, 4))
+	for n in [1, 2, 3]:
+		roster.spawn_division(n, tm.cities[n].cell)
+	var targets := roster.ai_targets(me, tm)
+	var ids: Array = targets.map(func(c: Dictionary) -> int: return int(c.id))
+	ok(ids == [1, 3], "equal strengths: Directorate (-7) is the first target, then Syndicate (-4); Free Tide (0, score -2) is below min_attack_score")
+	ok(is_equal_approx(roster.ai_target_score(me, tm.cities[1], tm), 7.0 - 2.0), "score = 7 attitude - 4 hexes x 0.5 + 0 strength term")
+	roster.run_ai(-1, tm)
+	ok(not me.order_path.is_empty() and HexMap.hex_distance(me.order_path.back(), Vector2i(3, 4)) <= 1, "run_ai sends the Assembly division at the Directorate city (its garrison blocks the hex, so it closes in)")
+	# A strong garrison lowers a target's score: 3 defenders -> (1/3 - 1) x 10 = -6.67.
+	roster.spawn_division(1, Vector2i(3, 4)).hex = Vector2i(3, 4)
+	roster.spawn_division(1, Vector2i(3, 4)).hex = Vector2i(3, 4)
+	var strong := roster.ai_target_score(me, tm.cities[1], tm)
+	ok(is_equal_approx(strong, 5.0 + (1.0 / 3.0 - 1.0) * 10.0) and roster.ai_targets(me, tm)[0].id == 3, "a 3x stronger garrison drops Directorate below Syndicate")
+	# Out of range cities are ignored; unarmed units never target.
+	tm.attitude.rules["target_range"] = 3
+	ok(roster.ai_targets(me, tm).is_empty(), "no target beyond ai.target_range")
+	tm.attitude.rules["target_range"] = 12
+	var pod: Division = roster.spawn_division(0, Vector2i(7, 4), "scout")
+	ok(roster.ai_targets(pod, tm).is_empty(), "an unarmed scout has no attack targets")
+	# Adjacent enemies: the lowest-attitude one is attacked first.
+	var u := attitude_setup({0: Vector2i(7, 4), 1: Vector2i(1, 1), 2: Vector2i(13, 1), 3: Vector2i(13, 7)})
+	var ur: DivisionRoster = u.roster
+	var um: HexMap = u.map
+	var hero: Division = ur.spawn_division(0, Vector2i(7, 4))
+	var around: Array = um.neighbors(Vector2i(7, 4))
+	var d_enemy: Division = ur.spawn_division(1, around[0])
+	var f_enemy: Division = ur.spawn_division(2, around[1])
+	for i in 2:
+		hero.moves_left = hero.move
+		hero.order_path.clear()
+		ur.run_ai(-1, um)
+		ok(hero.order_path.size() >= 1 and hero.order_path.back() == d_enemy.hex, "adjacent Directorate (-7) is attacked before adjacent Free Tide (0), try %d" % i)
+	ok(f_enemy.nation == 2, "(the Free Tide enemy was the other choice)")
+	# A seeded 4-nation game with attitude loaded plays 12 turns of AI orders without trouble.
+	var g := save_game_setup(5)
+	var gm: HexMap = g.map
+	for i in gm.nations.size():
+		gm.nation_factions[i] = str(rows[i].id)
+	gm.load_attitude(rows, FactionRoster.load_global(), FactionRoster.load_ai())
+	g.eco.config.ai_recruit_chance = 1.0
+	for turn in 12:
+		save_play_turn(g)
+	ok(g.roster.divisions.size() > 0 and gm.cities.size() > 0, "a seeded game with attitude data plays 12 AI turns (%d divisions)" % g.roster.divisions.size())
+	# Without attitude data the AI is unchanged.
+	var plain := pool_setup()
+	ok(not plain.map.attitude.enabled(), "a map without attitude data keeps the old AI")
