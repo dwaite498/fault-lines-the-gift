@@ -1,0 +1,28 @@
+{
+	"native_nation": -2,
+	"units": {
+		"tendril_worm": {
+			"type": "tendril_worm", "native": true, "strength": 60, "organization": 40, "morale": 0.5,
+			"attack": 12, "defense": 8, "move": 1, "habitat": ["fungus"],
+			"ambush_attack_mult": 1.25, "city_org_only": true
+		},
+		"rust_strider": {
+			"type": "rust_strider", "native": true, "strength": 30, "organization": 30, "morale": 0.5,
+			"attack": 5, "defense": 5, "move": 2, "habitat": ["plains", "hills"],
+			"flee_org_share": 0.5, "raids": true
+		}
+	},
+	"spawner": {
+		"no_spawn_before_turn": 3,
+		"city_safe_radius": 3,
+		"city_safe_until_turn": 5,
+		"max_natives": 6,
+		"min_natives": 2,
+		"worm": {"chance": 0.02, "min_density": 3, "no_unit_radius": 2},
+		"strider": {"chance": 0.05, "min_city_distance": 4}
+	},
+	"raid": {"city_tiers": ["outpost", "base"], "pop_loss": 0.05, "min_population": 1000, "city_cooldown_turns": 5},
+	"fungus_attrition": {"org": 5, "strength": 2, "move_cost": 1, "min_strength": 1, "exempt_natives": true},
+	"fungus": {"patches": 4, "patch_radius": 2, "min_city_distance": 3, "max_density": 4},
+	"render": {"outline": "#FF00FF"}
+}

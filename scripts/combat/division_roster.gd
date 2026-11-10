@@ -22,6 +22,11 @@ var neutral_nations: Array[int] = []
 var fog: Fog = null
 ## Faction trait modifiers (HexMap.traits), or null for none. main.gd and tests set it.
 var traits: FactionTraits = null
+
+## The native nation (docs/specs/ALIENS.md): hostile to everyone, owns no city, no economy,
+## never surrenders. Native unit templates come from data/natives.json.
+const NATIVE_NATION := -2
+const NATIVES_PATH := "res://data/natives.json"
 ## Cities taken this turn that still await a capture choice: the result of
 ## HexMap.take_city, in capture order. Resolved by resolve_ai_captures and the popup.
 var pending_captures: Array[Dictionary] = []
@@ -30,7 +35,23 @@ var _pending_captor := {}
 
 
 static func load_templates(path := CONFIG_PATH) -> Dictionary:
-	return JSON.parse_string(FileAccess.get_file_as_string(path))
+	var out: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(path))
+	if path == CONFIG_PATH:  # native unit types ride along with the division types
+		out.merge(JSON.parse_string(FileAccess.get_file_as_string(NATIVES_PATH)).units)
+	return out
+
+
+## True for a native division (nation NATIVE_NATION).
+func is_native(d: Division) -> bool:
+	return d.nation == NATIVE_NATION
+
+
+## True if a native may stand on `hex`: its template's habitat ("fungus" or terrain names).
+func native_habitat_ok(d: Division, hex: Vector2i, hex_map: HexMap) -> bool:
+	for h in templates.get(d.unit_type, {}).get("habitat", []):
+		if (h == "fungus" and hex_map.is_fungus(hex)) or (h != "fungus" and hex_map.terrain_name(hex) == h):
+			return true
+	return false
 
 
 ## Puts one division of template_name on every city hex, owned by that city's nation.
@@ -170,6 +191,8 @@ func can_move(d: Division, hex: Vector2i, hex_map: HexMap) -> bool:
 		return false
 	if is_unarmed(d) and not hex_map.city_at(hex).is_empty() and hex_map.city_at(hex).nation != d.nation:
 		return false  # a pod or scout cannot capture a city
+	if is_native(d) and (not hex_map.city_at(hex).is_empty() or not native_habitat_ok(d, hex, hex_map)):
+		return false  # natives never enter a city and stay in their habitat
 	if not hex_map.can_step(d.hex, hex):
 		return false
 	return d.moves_left >= hex_map.step_cost(d.hex, hex, d.nation) or not d.has_moved
@@ -261,6 +284,24 @@ func disband(nations: Array[int]) -> void:
 
 
 # --- Fortify ---
+
+## Fungus attrition (natives.json fungus_attrition): a division ending the turn on a fungus tile loses
+## `org` org and `strength` strength, scaled by HexMap.fungus_scale (halved for Verdant, none for
+## natives). Strength never drops below `min_strength`, so attrition alone does not destroy a unit.
+## Scouts and colony pods are not exempt.
+func _fungus_attrition(hex_map: HexMap) -> void:
+	var rules: Dictionary = hex_map.natives_config.get("fungus_attrition", {})
+	if rules.is_empty() or hex_map.fungus_tiles.is_empty():
+		return
+	for d in divisions:
+		if not hex_map.fungus_tiles.has(d.hex):
+			continue
+		var scale := hex_map.fungus_scale(d.nation)
+		if scale <= 0.0:
+			continue
+		d.org = maxf(d.org - float(rules.org) * scale, 0.0)
+		d.strength = maxf(d.strength - float(rules.strength) * scale, minf(float(rules.min_strength), d.strength))
+
 
 ## Highest fortify level d can reach: combat.max_fortify plus the faction's max_fortify_mod.
 func max_fortify_for(d: Division) -> int:
@@ -358,7 +399,10 @@ func attack(attacker: Division, defender: Division, hex_map: HexMap) -> Dictiona
 	var org_div := 1.0
 	if traits != null and not own_city.is_empty() and own_city.nation == defender.nation:
 		org_div = float(traits.mod(defender.nation, "org_mult_defending_own_city", 1.0))
-	var taken_by_defender := _damage(defender, dmg_to_defender, org_div)
+	if hex_map.is_fungus(attacker.hex):  # Tendril Worm ambush: bonus when it attacks out of fungus
+		dmg_to_defender *= float(templates.get(attacker.unit_type, {}).get("ambush_attack_mult", 1.0))
+	var org_only: bool = templates.get(attacker.unit_type, {}).get("city_org_only", false) and not own_city.is_empty()
+	var taken_by_defender := _damage(defender, dmg_to_defender, org_div, org_only)
 	var taken_by_attacker := _damage(attacker, dmg_to_attacker)
 	attacker.moves_left = 0
 	attacker.fortify_level = 0
@@ -386,10 +430,10 @@ func _after_combat_or_defer(d: Division, hex_map: HexMap, captor: int) -> String
 ## org and strength. Returns the {"org", "strength"} amounts applied before clamping.
 ## org_div > 1 means the defender's organization counts for that much more (Covenant in its own
 ## city), so it loses org_dmg / org_div.
-func _damage(d: Division, raw: float, org_div := 1.0) -> Dictionary:
+func _damage(d: Division, raw: float, org_div := 1.0, org_only := false) -> Dictionary:
 	var scaled: float = raw * maxf(float(combat.morale_offset) - d.morale, 0.0)
-	var org_dmg: float = scaled * float(combat.org_damage_share) / maxf(org_div, 0.0001)
-	var str_dmg: float = scaled * (1.0 - float(combat.org_damage_share))
+	var org_dmg: float = scaled * (1.0 if org_only else float(combat.org_damage_share)) / maxf(org_div, 0.0001)
+	var str_dmg: float = 0.0 if org_only else scaled * (1.0 - float(combat.org_damage_share))
 	d.org = maxf(d.org - org_dmg, 0.0)
 	d.strength = maxf(d.strength - str_dmg, 0.0)
 	return {"org": org_dmg, "strength": str_dmg}
@@ -399,8 +443,8 @@ func _damage(d: Division, raw: float, org_div := 1.0) -> Dictionary:
 ## land hex. If boxed in, it surrenders and is removed.
 ## Returns "destroyed", "retreated", "surrendered", or "held".
 func _after_combat(d: Division, hex_map: HexMap, captor: int) -> String:
-	if d.strength <= 0.0:
-		divisions.erase(d)
+	if d.strength <= 0.0 or (is_native(d) and d.org <= 0.0):
+		divisions.erase(d)  # a native at 0 org is removed: it never retreats or surrenders
 		return "destroyed"
 	if d.org > 0.0:
 		return "held"
@@ -412,7 +456,7 @@ func _after_combat(d: Division, hex_map: HexMap, captor: int) -> String:
 			d.fortify_level = 0
 			return "retreated"
 	divisions.erase(d)
-	if economy:
+	if economy and captor != NATIVE_NATION:
 		economy.add_pows(captor, d.nation, d.strength)
 	return "surrendered"
 
@@ -850,6 +894,9 @@ func run_ai(player_nation: int, hex_map: HexMap) -> void:
 	for d in divisions.duplicate():
 		if d.nation == player_nation or not divisions.has(d):
 			continue
+		if is_native(d):
+			NativeAI.plan(d, self, hex_map)
+			continue
 		if is_colonizer(d):
 			_ai_colonizer(d, hex_map)
 			continue
@@ -993,6 +1040,8 @@ func _ai_colonizer(d: Division, hex_map: HexMap) -> void:
 ## True if a BFS over passable hexes not holding an enemy division reaches a city
 ## d's nation owns within supply_max_path steps (d's own hex is step 0).
 func is_in_supply(d: Division, hex_map: HexMap) -> bool:
+	if is_native(d):
+		return true  # natives have no cities or economy and are never out of supply
 	var max_steps := int(combat.supply_max_path)
 	if traits != null:
 		max_steps += int(traits.mod(d.nation, "supply_range_bonus", 0))
@@ -1034,6 +1083,7 @@ func update_supply(hex_map: HexMap) -> void:
 func end_turn(hex_map: HexMap = null) -> void:
 	if hex_map:
 		update_supply(hex_map)
+	_fungus_attrition(hex_map)
 	var rate: float = combat.org_recovery_per_morale
 	for d in divisions:
 		if not d.supplied:
