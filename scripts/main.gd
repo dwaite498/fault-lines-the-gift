@@ -21,6 +21,9 @@ var _nation_panel: NationPanel
 var _military_panel: MilitaryPanel
 var _capture_popup := CapturePopup.new()
 var _pause_menu := PauseMenu.new()
+var _game_over := GameOverScreen.new()
+## Share of nation-owned cities that wins by domination (map_config.json "victory").
+var _domination_share := Victory.DEFAULT_SHARE
 ## The applied map config the game started from (saved with the game).
 var _map_cfg := {}
 ## Set when this run was loaded from a save: skips the start-of-game AI orders.
@@ -105,6 +108,10 @@ func _ready() -> void:
 	_pause_menu.main_menu_pressed.connect(_on_main_menu_pressed)
 	_pause_menu.quit_pressed.connect(func() -> void: get_tree().quit())
 	add_child(_pause_menu)
+	_domination_share = float(map_cfg.get("victory", {}).get("domination_share", Victory.DEFAULT_SHARE))
+	_game_over.new_game_pressed.connect(_on_game_over_new_game)
+	_game_over.main_menu_pressed.connect(_on_main_menu_pressed)
+	add_child(_game_over)
 	if not saved.is_empty():
 		turn = SaveGame.restore(saved, _view.hex_map, _view.roster, _economy)
 		_loaded = true
@@ -124,6 +131,26 @@ func _capture_state() -> Dictionary:
 
 func _on_save_pressed() -> void:
 	_pause_menu.status.text = "Game saved" if SaveGame.write(SaveGame.SLOT_PATH, _capture_state()) else "Could not save"
+
+
+func _on_game_over_new_game() -> void:
+	GameSession.open_setup = true
+	get_tree().change_scene_to_file("res://scenes/menu.tscn")
+
+
+## Victory / defeat check, end of each turn. Shows the end screen and drops the autosave
+## (a finished game is not resumed). Returns true if the game is over.
+func _check_game_over() -> bool:
+	var result := Victory.check(_view.hex_map, PLAYER_NATION, _domination_share, _view.roster.neutral_nations)
+	if not result.over:
+		return false
+	var winner_name := ""
+	if int(result.winner) >= 0:
+		winner_name = str(_view.factions.assigned[int(result.winner)].get("name", ""))
+	_game_over.open(result, winner_name)
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(SaveGame.AUTOSAVE_PATH))
+	print("Game over: %s by %s (winner nation %d)" % [result.result, result.reason, result.winner])
+	return true
 
 
 func _on_main_menu_pressed() -> void:
@@ -149,10 +176,12 @@ func _unhandled_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
 	if not key or not key.pressed or key.echo:
 		return
+	if _game_over.is_open():
+		return  # only the end screen's buttons work
 	if key.keycode == KEY_ESCAPE and not _capture_popup.is_open():
 		_escape()
 		return
-	if _capture_popup.is_open() or _pause_menu.is_open():
+	if _capture_popup.is_open() or _pause_menu.is_open() or _game_over.is_open():
 		return  # the capture choice or the menu comes first
 	message.text = ""
 	var roster := _view.roster
@@ -227,6 +256,8 @@ func _finish_turn() -> void:
 	var stalled := _economy.stalled_cities(PLAYER_NATION, _view.hex_map)
 	if not stalled.is_empty():
 		message.text = "Recruit stalled in city %s: assign Training labor" % ", ".join(stalled.map(func(i: int) -> String: return str(i)))
+	if _check_game_over():
+		return
 	roster.run_ai(PLAYER_NATION, _view.hex_map)
 	SaveGame.write(SaveGame.AUTOSAVE_PATH, _capture_state())
 	print("Turn ended")
@@ -310,7 +341,7 @@ func _refresh_panels() -> void:
 ## selects: a unit (any nation; a second click on it shows the city under it),
 ## else the city there, else nothing. It never creates an order.
 func _on_hex_clicked(hex: Vector2i) -> void:
-	if hex == Vector2i(-1, -1) or _capture_popup.is_open() or _pause_menu.is_open():
+	if hex == Vector2i(-1, -1) or _capture_popup.is_open() or _pause_menu.is_open() or _game_over.is_open():
 		return
 	var roster := _view.roster
 	message.text = ""
