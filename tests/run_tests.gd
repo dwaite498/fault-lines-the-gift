@@ -38,6 +38,7 @@ func _initialize() -> void:
 	test_ai_upkeep_cap()
 	test_capture_choices()
 	test_capture_flow()
+	test_capture_gating()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -1336,3 +1337,136 @@ func test_capture_flow() -> void:
 	ok(annex_text.contains("25%") and annex_text.contains("30%") and annex_text.contains("10 turns"), "the popup text comes from the config numbers")
 	ok(CapturePopup.effect_text("raze", m.city_rules).contains("ATROCITY"), "Raze is marked an atrocity in the popup")
 	popup.free()
+
+
+# --- Task 40: capture gating and AI choice by personality ---
+
+## The CAPTURE.md gating table, written out independently of the config.
+const GATING := {
+	"assembly": ["annex", "occupy"],
+	"directorate": ["annex", "occupy", "reduce", "raze"],
+	"syndicate": ["annex", "occupy", "plunder"],
+	"verdant_accord": ["annex", "occupy", "reduce"],
+	"covenant": ["annex", "occupy", "reduce"],
+	"collective": ["annex", "occupy", "enslave", "raze"],
+	"lyceum": ["annex", "occupy"],
+	"free_tide": ["annex", "occupy", "plunder", "enslave"],
+	"deepwater_guild": ["annex", "occupy", "plunder", "enslave"],
+	"drift": ["annex", "plunder", "raze"],
+}
+
+
+## A map whose nation `n` plays faction `faction_id` (nation 0 captures nation 1's city).
+func gated_setup(faction_id: String, victim_faction := "assembly") -> Dictionary:
+	var s := cap_setup()
+	s.map.nation_factions = {0: faction_id, 1: victim_faction}
+	return s
+
+
+func test_capture_gating() -> void:
+	var rules: Dictionary = city_rules().capture
+	var ids: Array = FactionRoster.load_all().map(func(f: Dictionary) -> String: return f.id)
+	ok(rules.faction_options.keys().size() == 10 and ids.all(func(id: String) -> bool: return rules.faction_options.has(id)), "config: the gating table has a row for every faction id in factions.json")
+	for id in GATING:
+		ok(rules.faction_options[id] == GATING[id] and rules.faction_options[id].has("annex"), "config: %s may use %s (and always Annex)" % [id, GATING[id]])
+	var m := pop_map()
+	for id in GATING:
+		m.nation_factions = {0: id}
+		var allowed := m.allowed_capture_options(0)
+		var expect: Array = rules.order.filter(func(o: String) -> bool: return GATING[id].has(o))
+		ok(allowed == expect and allowed.size() == GATING[id].size(), "%s: allowed options come from the table, in menu order" % id)
+		for opt in rules.order:
+			ok((m.capture_block_reason(0, opt) == "") == GATING[id].has(opt), "%s: %s %s" % [id, opt, "allowed" if GATING[id].has(opt) else "gated with a reason"])
+	ok(m.capture_block_reason(0, "bogus") != "", "an unknown option is blocked")
+	m.nation_factions = {}
+	ok(m.allowed_capture_options(0).size() == 6 and m.capture_block_reason(0, "raze") == "", "a nation with no faction is ungated")
+	# A gated option falls back to Annex when applied.
+	var s := gated_setup("assembly")
+	var r := capture_with(s, s.city, 0, "raze")
+	ok(r.option == "annex" and not s.map.city_by_id(int(s.city.id)).is_empty() and s.city.population == 7500, "a gated Raze (Assembly) is applied as Annex")
+	var s2 := gated_setup("directorate")
+	ok(capture_with(s2, s2.city, 0, "raze").option == "raze", "an allowed Raze (Directorate) is applied")
+	# Harshest allowed option, by harshness_order.
+	var harsh := {"assembly": "occupy", "directorate": "raze", "syndicate": "plunder", "verdant_accord": "reduce",
+			"covenant": "reduce", "collective": "raze", "lyceum": "occupy", "free_tide": "enslave",
+			"deepwater_guild": "enslave", "drift": "raze"}
+	for id in harsh:
+		m.nation_factions = {0: id}
+		ok(m.harshest_capture_option(0) == harsh[id], "%s: harshest allowed option is %s" % [id, harsh[id]])
+	# AI choice: aggressive factions pick their harshest 50% of the time, others always Annex.
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7
+	for id in GATING:
+		m.nation_factions = {0: id}
+		var picks := {}
+		for i in 400:
+			var pick := m.ai_capture_option(0, rng)
+			picks[pick] = int(picks.get(pick, 0)) + 1
+			if m.capture_block_reason(0, pick) != "":
+				picks["illegal"] = 1
+		if ["directorate", "collective", "free_tide", "drift"].has(id):
+			var share := float(picks.get(harsh[id], 0)) / 400.0
+			ok(picks.size() == 2 and picks.has("annex") and share > 0.4 and share < 0.6, "%s (aggressive): Annex or %s, about half each (%.2f)" % [id, harsh[id], share])
+		else:
+			ok(picks == {"annex": 400}, "%s: always Annex" % id)
+	m.nation_factions = {0: "drift"}
+	m.city_rules.capture.aggressive_harsh_chance = 1.0
+	ok(m.ai_capture_option(0, rng) == "raze", "aggressive_harsh_chance is config (1.0: always the harshest)")
+	m.city_rules.capture.aggressive_harsh_chance = 0.0
+	ok(m.ai_capture_option(0, rng) == "annex", "aggressive_harsh_chance 0.0: always Annex")
+	m.city_rules.capture.aggressive_harsh_chance = 1.0
+	ok(m.ai_capture_option(0, null) == "annex", "no rng: Annex")
+	# ai_default_option is only the fallback for a nation with no faction.
+	m.city_rules.capture.ai_default_option = "reduce"
+	m.nation_factions = {}
+	ok(m.ai_capture_option(0, rng) == "reduce", "no faction: ai_default_option is the fallback")
+	m.nation_factions = {0: "assembly"}
+	ok(m.ai_capture_option(0, rng) == "annex", "a faction ignores ai_default_option")
+	m.nation_factions = {}
+	m.city_rules.capture.ai_default_option = "raze"
+	m.nation_factions = {0: "lyceum"}
+	m.city_rules.capture.faction_options.lyceum = ["annex"]
+	ok(m.ai_capture_option(0, rng) == "annex", "the AI never picks a gated option")
+	# End to end: an aggressive AI captor resolves through the roster with its personality.
+	var s3 := gated_setup("directorate")
+	s3.map.city_rules.capture.aggressive_harsh_chance = 1.0
+	s3.roster.pending_captures.append(s3.map.take_city(s3.city.cell, 0))
+	var cid := int(s3.city.id)
+	s3.roster.resolve_ai_captures(s3.map, 99)
+	ok(s3.map.city_by_id(cid).is_empty() and s3.map.reputation.events.back().type == "raze", "a Directorate AI razes a captured city")
+	var s4 := gated_setup("assembly")
+	s4.roster.pending_captures.append(s4.map.take_city(s4.city.cell, 0))
+	s4.roster.resolve_ai_captures(s4.map, 99)
+	ok(s4.city.recruit_lockout == 10 and s4.map.reputation.events.back().type == "annex", "an Assembly AI annexes")
+	# Faction roster mapping.
+	var fr := FactionRoster.from_config({"seed": 5, "faction_count": 4, "faction_seed": -1})
+	ok(fr.nation_ids().size() == 4 and fr.id_of(0) == fr.assigned[0].id and fr.id_of(9) == "", "FactionRoster maps nations to faction ids")
+	# Popup: gated options are disabled with a reason.
+	var popup := CapturePopup.new()
+	var blocked := {"raze": "Not available to the Assembly.", "enslave": "Not available to the Assembly."}
+	popup.open(s.city, "Nation 1", city_rules(), blocked)
+	var open_ids := popup.buttons.keys().filter(func(id: String) -> bool: return not popup.buttons[id].disabled)
+	ok(open_ids == ["annex", "occupy", "plunder", "reduce"], "the popup disables gated options")
+	ok(popup.buttons.raze.get_parent().get_child(1).text == "Not available to the Assembly.", "a gated option shows its reason instead of its effects")
+	ok(popup.buttons.annex.get_parent().get_child(1).text.contains("25%"), "an allowed option still shows its effects")
+	popup.free()
+	# City panel: occupied and enslaved cities show a pool held at 0, no fill rate.
+	var sp := pool_setup()
+	var pc := nation_cities(sp.map, 0)[0]
+	var panel := CityPanel.new()
+	panel.hex_map = sp.map
+	panel.economy = sp.eco
+	panel.roster = sp.roster
+	panel.player_nation = 0
+	panel.factions = fr
+	panel.refresh(pc)
+	ok(panel.label.text.contains("/turn, cap"), "a normal city shows its pool fill and cap")
+	pc.occupied = true
+	pc.occupy_turns_left = 3
+	panel.refresh(pc)
+	ok(panel.label.text.contains("Recruitable 0 (held at 0)") and not panel.label.text.contains("/turn, cap"), "an occupied city shows Recruitable 0 and no fill rate")
+	pc.erase("occupied")
+	pc.enslaved = true
+	panel.refresh(pc)
+	ok(panel.label.text.contains("Recruitable 0 (held at 0)") and not panel.label.text.contains("/turn, cap"), "an enslaved city shows Recruitable 0 and no fill rate")
+	panel.free()

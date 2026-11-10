@@ -86,8 +86,11 @@ func refresh(city: Dictionary) -> void:
 		var free := economy.unassigned_labor(city)
 		label.text += "\nLabor %d (%d free)" % [economy.labor_points(city), free]
 		var income := economy.city_income(city)
-		label.text += "\nRecruitable %s (+%s/turn, cap %s)" % [people_text(hex_map.pool_of(city)),
-				people_text(hex_map.pool_fill(city)), people_text(hex_map.pool_cap(city))]
+		if city.get("occupied", false) or city.get("enslaved", false):
+			label.text += "\nRecruitable 0 (held at 0)"  # the pool is kept empty, so no fill or cap
+		else:
+			label.text += "\nRecruitable %s (+%s/turn, cap %s)" % [people_text(hex_map.pool_of(city)),
+					people_text(hex_map.pool_fill(city)), people_text(hex_map.pool_cap(city))]
 		if city.get("besieged", false):
 			label.text += "\nBESIEGED: no growth, -%d%% pop/turn, labor halved" % roundi(float(hex_map.city_rules.siege_pop_loss) * 100.0)
 		if city.get("occupied", false):

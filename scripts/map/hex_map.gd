@@ -52,6 +52,20 @@ var city_rules := {
 	"capture": {
 		"order": ["annex", "occupy", "plunder", "reduce", "raze", "enslave"],
 		"annexed_recruit_lockout_turns": 10, "ai_default_option": "annex",
+		"aggressive_factions": ["directorate", "collective", "free_tide", "drift"], "aggressive_harsh_chance": 0.5,
+		"harshness_order": ["annex", "occupy", "plunder", "reduce", "enslave", "raze"],
+		"faction_options": {
+			"assembly": ["annex", "occupy"],
+			"directorate": ["annex", "occupy", "reduce", "raze"],
+			"syndicate": ["annex", "occupy", "plunder"],
+			"verdant_accord": ["annex", "occupy", "reduce"],
+			"covenant": ["annex", "occupy", "reduce"],
+			"collective": ["annex", "occupy", "enslave", "raze"],
+			"lyceum": ["annex", "occupy"],
+			"free_tide": ["annex", "occupy", "plunder", "enslave"],
+			"deepwater_guild": ["annex", "occupy", "plunder", "enslave"],
+			"drift": ["annex", "plunder", "raze"],
+		},
 		"options": {
 			"annex": {"pop_loss": 0.25, "infra_loss": 0.3, "severity": 0, "atrocity": false},
 			"occupy": {"pop_loss": 0.1, "infra_loss": 0.0, "severity": 0, "atrocity": false,
@@ -65,6 +79,9 @@ var city_rules := {
 		},
 	},
 }
+## Nation index -> faction id (from factions.json), set by main. Capture gating and the
+## AI's choice read it; a nation with no entry is ungated and the AI uses ai_default_option.
+var nation_factions := {}
 ## Every capture choice logs a reputation_event here (a stub; nothing reads it yet).
 var reputation := ReputationLog.new()
 ## The result of the latest apply_capture, see apply_capture.
@@ -715,9 +732,49 @@ func capture_choices() -> Array[Dictionary]:
 	return out
 
 
-## The option the AI picks until personalities decide (Task 40).
-func ai_capture_option() -> String:
-	return String(city_rules.capture.ai_default_option)
+## The capture options `nation` may use, in menu order: its faction's row of
+## capture.faction_options. A nation with no faction (or none in the table) may use all.
+func allowed_capture_options(nation: int) -> Array[String]:
+	var out: Array[String] = []
+	var row: Array = city_rules.capture.faction_options.get(nation_factions.get(nation, ""), [])
+	for id in city_rules.capture.order:
+		if row.is_empty() or row.has(id):
+			out.append(String(id))
+	return out
+
+
+## "" if `nation` may use the capture option, else a short reason.
+func capture_block_reason(nation: int, option: String) -> String:
+	if not city_rules.capture.options.has(option):
+		return "unknown option"
+	if not allowed_capture_options(nation).has(option):
+		return "not allowed for this faction"
+	return ""
+
+
+## The harshest option `nation` may use, by capture.harshness_order.
+func harshest_capture_option(nation: int) -> String:
+	var allowed := allowed_capture_options(nation)
+	var best := "annex"
+	for id in city_rules.capture.harshness_order:
+		if allowed.has(id):
+			best = String(id)
+	return best
+
+
+## The option the AI picks (CAPTURE.md): an aggressive faction takes its harshest allowed
+## option with probability aggressive_harsh_chance (drawn from rng) and Annex otherwise;
+## every other faction always picks Annex. A nation with no faction uses
+## capture.ai_default_option. The result is always an allowed option (else Annex).
+func ai_capture_option(nation := -1, rng: RandomNumberGenerator = null) -> String:
+	var faction: String = nation_factions.get(nation, "")
+	var pick := String(city_rules.capture.ai_default_option)
+	if faction != "":
+		pick = "annex"
+		if city_rules.capture.aggressive_factions.has(faction) and rng != null \
+				and rng.randf() < float(city_rules.capture.aggressive_harsh_chance):
+			pick = harshest_capture_option(nation)
+	return pick if capture_block_reason(nation, pick) == "" else "annex"
 
 
 ## True if the city is occupied and its occupy timer has run out (it may be annexed).
@@ -755,8 +812,8 @@ func apply_capture(city_id: int, option: String) -> Dictionary:
 	var city := city_by_id(city_id)
 	if city.is_empty() or not city.get("capture_pending", false):
 		return {}
-	if not city_rules.capture.options.has(option):
-		option = "annex"
+	if capture_block_reason(int(city.nation), option) != "":
+		option = "annex"  # unknown or gated for the captor's faction
 	var opt: Dictionary = city_rules.capture.options[option]
 	var victim := int(city.capture_victim)
 	var captor := int(city.nation)

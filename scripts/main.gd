@@ -36,6 +36,7 @@ func _ready() -> void:
 	_view.factions = factions
 	_view.hex_map = HexMap.from_config_file(MAP_CONFIG_PATH, "res://data/cities_config.json",
 			"res://data/terrain_config.json", factions.sea_nations())
+	_view.hex_map.nation_factions = factions.nation_ids()
 	_view.roster = DivisionRoster.new()
 	_view.roster.spawn_at_cities(_view.hex_map)
 	_view.hidden_nations = _view.roster.neutral_nations
@@ -137,7 +138,11 @@ func _resolve_captures() -> void:
 		return
 	var info: Dictionary = roster.pending_captures[0]
 	var victim := _view.hex_map.city_by_id(int(info.city_id))
-	_capture_popup.open(victim, _view.factions.name_of(int(info.victim)), _view.hex_map.city_rules)
+	var blocked := {}
+	for id in _view.hex_map.city_rules.capture.order:
+		if _view.hex_map.capture_block_reason(PLAYER_NATION, id) != "":
+			blocked[id] = "Not available to the %s." % _view.factions.name_of(PLAYER_NATION)
+	_capture_popup.open(victim, _view.factions.name_of(int(info.victim)), _view.hex_map.city_rules, blocked)
 	_refresh_panels()
 
 
