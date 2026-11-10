@@ -97,7 +97,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		_economy.run_ai(PLAYER_NATION, _view.hex_map, roster)
 		roster.execute_orders(_view.hex_map)
 		roster.end_turn(_view.hex_map)
-		_view.hex_map.grow_cities()
+		_view.hex_map.grow_cities(roster.unit_cells())
 		_economy.end_turn(_view.hex_map, roster)
 		turn += 1
 		roster.run_ai(PLAYER_NATION, _view.hex_map)

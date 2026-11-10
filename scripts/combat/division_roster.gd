@@ -26,6 +26,7 @@ static func load_templates(path := CONFIG_PATH) -> Dictionary:
 
 
 ## Puts one division of template_name on every city hex, owned by that city's nation.
+## Each one's home city is its nation's capital.
 func spawn_at_cities(hex_map: HexMap, template_name := "infantry") -> void:
 	if templates.is_empty():
 		templates = load_templates()
@@ -34,18 +35,42 @@ func spawn_at_cities(hex_map: HexMap, template_name := "infantry") -> void:
 	rng.seed = hex_map.seed_value
 	divisions.clear()
 	for city in hex_map.cities:
-		divisions.append(Division.from_template(divisions.size(), city.nation,
-				city.cell, templates[template_name]))
+		var d := Division.from_template(divisions.size(), city.nation,
+				city.cell, templates[template_name])
+		d.home_city_id = int(hex_map.capital_of(city.nation).get("id", city.id))
+		divisions.append(d)
 
 
-## Adds one new division of template_name on hex with a fresh id.
-func spawn_division(nation: int, hex: Vector2i, template_name := "infantry") -> Division:
+## Adds one new division of template_name on hex with a fresh id. home_city_id is the
+## city that trained it (-1 if unknown).
+func spawn_division(nation: int, hex: Vector2i, template_name := "infantry",
+		home_city_id := -1) -> Division:
 	var next_id := 0
 	for d in divisions:
 		next_id = maxi(next_id, d.id + 1)
 	var d := Division.from_template(next_id, nation, hex, templates[template_name])
+	d.home_city_id = home_city_id
 	divisions.append(d)
 	return d
+
+
+## cell -> nation of the division standing there (for HexMap.update_sieges).
+func unit_cells() -> Dictionary:
+	var out := {}
+	for d in divisions:
+		out[d.hex] = d.nation
+	return out
+
+
+## Removes d and returns its survivors (strength x people_per_strength, rounded down) to
+## its home city's population, or to the nearest owned city if the home city was lost
+## (capital on ties). Returns the people returned. Destroyed or surrendered divisions
+## do not come through here, so they return no one.
+func demobilize(d: Division, hex_map: HexMap) -> int:
+	var people := int(floor(d.strength * float(hex_map.city_rules.people_per_strength)))
+	divisions.erase(d)
+	hex_map.return_people(d.nation, d.home_city_id, d.hex, people)
+	return people
 
 
 func division_at(hex: Vector2i) -> Division:

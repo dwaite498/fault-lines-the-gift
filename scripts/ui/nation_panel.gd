@@ -16,7 +16,7 @@ func _init() -> void:
 	add_child(panel)
 
 static func projected_income(nation: int, hex_map: HexMap, economy: NationEconomy) -> Dictionary:
-	var income := {"cash": 0.0, "influence": 0.0, "operations": 0.0, "manpower": 0.0, "capacity": 0.0}
+	var income := {"cash": 0.0, "influence": 0.0, "operations": 0.0, "capacity": 0.0}
 	if not hex_map.nations.has(nation):
 		return income
 	income.influence = float(economy.config.influence_per_turn)
@@ -41,6 +41,7 @@ func refresh(nation: int, turn: int, hex_map: HexMap, economy: NationEconomy) ->
 	for r in NationEconomy.RESOURCES:
 		lines.append("%s: %.1f (+%.1f/turn)" % [r.capitalize(), float(stock.get(r, 0.0)), income[r]])
 	var labor := economy.labor_totals(nation, hex_map)
+	lines.append("Recruitable: %s people" % CityPanel.people_text(economy.recruitable_total(nation, hex_map)))
 	lines.append("Labor: %d (%d free)" % [labor.total, labor.free])
 	lines.append("  Training %d, Infrastructure %d, Growth %d" % [labor.training, labor.infrastructure, labor.growth])
 	lines.append("POWs held: %d" % roundi(economy.pows_held(nation)))

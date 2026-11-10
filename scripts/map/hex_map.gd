@@ -25,8 +25,9 @@ var height := 0
 var cells: Dictionary = {}
 ## Generated nation areas (same keys and values as cells). Cities are placed inside these.
 var territory: Dictionary = {}
-## Each city is {"id", "nation", "cell": Vector2i, "population" (people), "infrastructure",
-## "radius"}, kept in ascending id order. radius is that city's claim radius.
+## Each city is {"id", "nation", "cell": Vector2i, "population" (people), "pool" (recruitable
+## people, part of population), "infrastructure", "radius"}, kept in ascending id order.
+## radius is that city's claim radius. "besieged" is set each end turn (see update_sieges).
 ## A recently captured city also has "rebuild_target" and "rebuild_turns_left".
 var cities: Array[Dictionary] = []
 ## Nations that still have at least one city.
@@ -35,10 +36,24 @@ var nations: Array[int] = []
 var city_rules := {
 	"claim_radius": 1, "grown_claim_radius": 2, "grown_radius_population": 20000,
 	"start_population": 10000, "start_infrastructure": 10,
-	"housing_per_infra": 3000, "growth_base_rate": 0.01, "growth_rate_per_labor_point": 0.005,
+	"housing_per_infra": 3000, "people_per_labor_point": 2000,
+	"base_growth": 0.005, "growth_labor_max_bonus": 0.01, "min_growth": 0.001,
+	"terrain_growth_mult": {"plains": 1.0, "coast": 1.1, "forest": 0.9, "hills": 0.9,
+			"mountains": 0.7, "shallow_ocean": 1.0},
+	"fungus_adjacent_growth_mult": 0.95, "fungus_growth_min_mult": 0.7,
+	"division_people_cost": 1000, "people_per_strength": 10, "pool_fill_rate": 0.005,
+	"pool_cap": 0.15, "capital_start_pool": 1000, "colony_start_pool": 0,
+	"train_min_city_pop": 5000,
+	"siege_growth": 0.0, "siege_pop_loss": 0.02, "siege_labor_mult": 0.5,
 	"display_round": 100,
 	"capture_pop_loss": 0.25, "capture_infra_loss": 0.3, "rebuild_turns": 26,
 }
+## Additive growth-rate modifier per nation (a trait hook for Task 41; empty today).
+## Added to base_growth before the terrain multiplier, e.g. -0.003 for a penalized faction.
+var growth_mods: Dictionary = {}
+## Vector2i cell -> true for fungus tiles (hook; the map has no fungus yet). A terrain
+## named "fungus" also counts.
+var fungus_tiles: Dictionary = {}
 ## Nations whose first cities should sit on the coast (sea factions until the naval
 ## slice). Set before generate(). A hex counts as coastal if it touches water; if a
 ## nation has no such hex, a map-edge hex is next best.
@@ -378,13 +393,15 @@ func update_ownership() -> void:
 		cells[cell] = owner
 
 
-## Adds growth to every city's population (see grown_population) and
-## sets each radius from its population. Reruns ownership if a radius changed.
-## Returns true if ownership was rerun. Called once per end turn.
-func grow_cities() -> bool:
+## Advances every city one turn (see _advance_people: siege loss, growth, pool fill),
+## steps capture rebuilds, and sets each radius from its population. Sieges are
+## updated first from unit_cells. Reruns ownership if a radius changed. Returns true if
+## ownership was rerun. Called once per end turn.
+func grow_cities(unit_cells := {}) -> bool:
+	update_sieges(unit_cells)
 	var changed := false
 	for city in cities:
-		city.population = grown_population(city)
+		_advance_people(city)
 		_rebuild_step(city)
 		var radius := _radius_for(int(city.population))
 		if radius != int(city.radius):
@@ -400,19 +417,75 @@ func housing_cap(city: Dictionary) -> int:
 	return int(floor(float(city.infrastructure) * float(city_rules.housing_per_infra)))
 
 
-## Growth rate per turn: growth_base_rate plus growth_rate_per_labor_point for every
-## labor point assigned to Growth (city.labor.growth; 0 until labor assignment exists).
-func growth_rate(city: Dictionary) -> float:
-	var points := int(city.get("labor", {}).get("growth", 0))
-	return float(city_rules.growth_base_rate) + points * float(city_rules.growth_rate_per_labor_point)
+## Labor points of a city: population / people_per_labor_point rounded down, times
+## siege_labor_mult while the city is besieged.
+static func labor_points_for(city: Dictionary, rules: Dictionary) -> int:
+	var points := float(city.population) / float(rules.people_per_labor_point)
+	if city.get("besieged", false):
+		points *= float(rules.siege_labor_mult)
+	return int(floor(points))
+
+
+func labor_points(city: Dictionary) -> int:
+	return labor_points_for(city, city_rules)
+
+
+## Key into terrain_growth_mult for the city's own tile: "coast" for plains that touch
+## water, "shallow_ocean" for a city on water, otherwise the terrain name.
+func growth_terrain_key(city: Dictionary) -> String:
+	if not city.has("cell"):
+		return "plains"
+	var kind := terrain_name(city.cell)
+	if kind == "water":
+		return "shallow_ocean"
+	if kind == "plains":
+		for n in neighbors(city.cell):
+			if cells.get(n, WATER) == WATER:
+				return "coast"
+	return kind
+
+
+## Fungus tiles touching the city (fungus_tiles hook or a "fungus" terrain).
+func fungus_adjacent(city: Dictionary) -> int:
+	var count := 0
+	if not city.has("cell"):
+		return 0
+	for n in neighbors(city.cell):
+		if fungus_tiles.has(n) or terrain_name(n) == "fungus":
+			count += 1
+	return count
+
+
+## Food multiplier: terrain_growth_mult for the city's tile times
+## fungus_adjacent_growth_mult per adjacent fungus tile (never below fungus_growth_min_mult).
+func terrain_growth_mult(city: Dictionary) -> float:
+	var mult := float(city_rules.terrain_growth_mult.get(growth_terrain_key(city), 1.0))
+	var fungus := pow(float(city_rules.fungus_adjacent_growth_mult), fungus_adjacent(city))
+	return mult * maxf(fungus, float(city_rules.fungus_growth_min_mult))
+
+
+## Growth rate per turn: (base_growth + nation mod + growth_labor_max_bonus x the share of
+## labor on Growth) x terrain_growth_mult, never below min_growth. A besieged city has
+## siege_growth (0). share_override (0..1) replaces the city's actual Growth share.
+func growth_rate(city: Dictionary, share_override := -1.0) -> float:
+	if city.get("besieged", false):
+		return float(city_rules.siege_growth)
+	var share := share_override
+	if share < 0.0:
+		var total := labor_points(city)
+		share = float(int(city.get("labor", {}).get("growth", 0))) / float(total) if total > 0 else 0.0
+	var base := float(city_rules.base_growth) + float(growth_mods.get(int(city.nation), 0.0))
+	var rate := (base + float(city_rules.growth_labor_max_bonus) * clampf(share, 0.0, 1.0)) \
+			* terrain_growth_mult(city)
+	return maxf(rate, float(city_rules.min_growth))
 
 
 ## People gained next turn (rounded down): population x growth_rate, never past housing,
 ## and 0 for a city already at or over housing (it does not shrink).
-func growth_amount(city: Dictionary) -> int:
+func growth_amount(city: Dictionary, share_override := -1.0) -> int:
 	var pop := int(city.population)
 	var room := maxi(housing_cap(city) - pop, 0)
-	return mini(int(floor(pop * growth_rate(city))), room)
+	return mini(int(floor(pop * growth_rate(city, share_override))), room)
 
 
 ## The city's population after one turn of growth.
@@ -424,6 +497,138 @@ func grown_population(city: Dictionary) -> int:
 func display_people(people: int) -> int:
 	var step := maxi(int(city_rules.display_round), 1)
 	return int(round(float(people) / step)) * step
+
+
+# --- Recruitable pool ---
+
+## The pool never holds more than pool_cap of the population (rounded down).
+func pool_cap(city: Dictionary) -> int:
+	return int(floor(float(city.population) * float(city_rules.pool_cap)))
+
+
+## People added to the pool each turn: pool_fill_rate of the population, rounded down.
+func pool_fill(city: Dictionary) -> int:
+	return int(floor(float(city.population) * float(city_rules.pool_fill_rate)))
+
+
+## Recruitable people now (cities built by hand may have no "pool" key).
+func pool_of(city: Dictionary) -> int:
+	return int(city.get("pool", 0))
+
+
+## The lowest-id city of a nation (no capital flag exists yet), or {} if none.
+func capital_of(nation: int) -> Dictionary:
+	for city in cities:
+		if city.nation == nation:
+			return city
+	return {}
+
+
+func city_by_id(city_id: int) -> Dictionary:
+	for city in cities:
+		if city.id == city_id:
+			return city
+	return {}
+
+
+## The city of `nation` closest to `from`; ties go to the capital, then the lowest id.
+## {} if the nation has no city.
+func nearest_owned_city(nation: int, from: Vector2i) -> Dictionary:
+	var best := {}
+	var best_dist := 1 << 30
+	for city in cities:
+		if city.nation != nation:
+			continue
+		var dist := hex_distance(from, city.cell)
+		if dist < best_dist:
+			best = city
+			best_dist = dist
+	return best
+
+
+## Cities of `nation` ordered by distance from `from` (ties: lowest id, so the capital first).
+func owned_cities_by_distance(nation: int, from: Vector2i) -> Array[Dictionary]:
+	var list: Array[Dictionary] = []
+	for city in cities:
+		if city.nation == nation:
+			list.append(city)
+	list.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		var da := hex_distance(from, a.cell)
+		var db := hex_distance(from, b.cell)
+		return da < db or (da == db and a.id < b.id))
+	return list
+
+
+## Adds `people` to a nation's city population (not its pool): the home city if it is
+## still the nation's, else the nearest owned city to `from` (capital on ties). Returns the
+## city id that received them, or -1 if the nation has no city (the people are lost).
+func return_people(nation: int, home_city_id: int, from: Vector2i, people: int) -> int:
+	if people <= 0:
+		return -1
+	var city := city_by_id(home_city_id)
+	if city.is_empty() or city.nation != nation:
+		var anchor: Vector2i = city.cell if not city.is_empty() else from
+		city = nearest_owned_city(nation, anchor)
+	if city.is_empty():
+		return -1
+	city.population = int(city.population) + people
+	return int(city.id)
+
+
+## Removes `people` from a city's pool and population (a division drawn from it).
+func draw_people(city: Dictionary, people: int) -> void:
+	people = mini(people, pool_of(city))
+	city.pool = pool_of(city) - people
+	city.population = maxi(int(city.population) - people, 0)
+
+
+# --- Siege ---
+
+## True if the city has land neighbors and every one is enemy-held: an enemy division
+## stands there, or (with no friendly division) an enemy nation owns it. unit_cells maps
+## cell -> nation of the division on it (see DivisionRoster.unit_cells).
+## Supply cut-off (POPULATION.md's other siege trigger) is not modelled: supply is
+## per division, not per city.
+func is_besieged(city: Dictionary, unit_cells := {}) -> bool:
+	var land := 0
+	for n in neighbors(city.cell):
+		if cells.get(n, WATER) == WATER:
+			continue
+		land += 1
+		var unit: int = unit_cells.get(n, -1)
+		var enemy: bool
+		if unit >= 0:
+			enemy = unit != city.nation
+		else:
+			var owner: int = cells.get(n, UNCLAIMED)
+			enemy = owner >= 0 and owner != city.nation
+		if not enemy:
+			return false
+	return land > 0
+
+
+## Sets city.besieged on every city.
+func update_sieges(unit_cells := {}) -> void:
+	for city in cities:
+		city.besieged = is_besieged(city, unit_cells)
+
+
+## One end turn of a city's people: a besieged city loses siege_pop_loss of its people,
+## then growth, then the pool fills by pool_fill_rate and is trimmed to pool_cap.
+## Mutates `city`; advance_preview runs it on a copy.
+func _advance_people(city: Dictionary) -> void:
+	if city.get("besieged", false):
+		var pop := int(city.population)
+		city.population = pop - int(floor(pop * float(city_rules.siege_pop_loss)))
+	city.population = grown_population(city)
+	city.pool = clampi(pool_of(city) + pool_fill(city), 0, pool_cap(city))
+
+
+## A copy of the city as it will stand after this end turn's growth and pool fill.
+func advance_preview(city: Dictionary) -> Dictionary:
+	var c := city.duplicate()
+	_advance_people(c)
+	return c
 
 
 ## Regains (target - current) / turns_left infra. Lands exactly on the target
@@ -464,7 +669,8 @@ func remove_city(city_id: int) -> Array[int]:
 ## Hands the city on cell to new_nation, reruns ownership, and removes any
 ## nation left with no cities. Returns the eliminated nation indexes.
 ## The city loses capture_pop_loss of its pop (rounded down) and
-## capture_infra_loss of its infra, then rebuilds over rebuild_turns turns.
+## capture_infra_loss of its infra, then rebuilds over rebuild_turns turns. Its recruit
+## pool is emptied and its labor assignment resets to the new owner's default.
 ## Re-capture during a rebuild keeps the original target and restarts the timer.
 func capture_city(cell: Vector2i, new_nation: int) -> Array[int]:
 	for city in cities:
@@ -477,6 +683,12 @@ func capture_city(cell: Vector2i, new_nation: int) -> Array[int]:
 			city.population = pop - int(floor(pop * float(city_rules.capture_pop_loss)))
 			city.infrastructure = float(city.infrastructure) * (1.0 - float(city_rules.capture_infra_loss))
 			city.radius = _radius_for(int(city.population))
+			# The old owner's recruits, labor plan and infra build do not carry over.
+			city.pool = 0
+			city.besieged = false
+			city.infra_progress = 0
+			city.erase("labor")
+			city.erase("labor_auto")
 	var eliminated := eliminate_nations_without_cities()
 	update_ownership()
 	return eliminated
@@ -531,8 +743,11 @@ func _place_cities(rng: RandomNumberGenerator, per_nation: int, min_spacing: int
 				push_warning("Nation %d: no hex meets city spacing" % nation)
 				spot = land_by_nation[nation][0]
 			var pop := int(city_rules.start_population)
+			# A nation's first city is its capital; later ones are colonies.
+			var first := not cities.any(func(c: Dictionary) -> bool: return c.nation == nation)
+			var pool := int(city_rules.capital_start_pool if first else city_rules.colony_start_pool)
 			cities.append({"id": cities.size(), "nation": nation, "cell": spot,
-					"population": pop, "radius": _radius_for(pop),
+					"population": pop, "pool": mini(pool, pop), "radius": _radius_for(pop),
 					"infrastructure": int(city_rules.start_infrastructure)})
 	return true
 

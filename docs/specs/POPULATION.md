@@ -49,3 +49,12 @@ Tech, happiness and unrest effects, trade, specialists, and food as a separate r
 2. Labor pool and assignment, the city panel UI, and nation panel totals.
 3. Labor sinks: a training queue fed by labor, and infrastructure building.
 4. Per-city recruitable pool, replacing the nation-wide manpower pool (economy panel and AI recruit checks); the home_city_id flag and survivor returns; reinforcement draw; the training floor; siege effects; and AI default assignment.
+
+## Task 38 build notes (recruit pool, home city, siege)
+`POPULATION_TUNING.md` overrides the numbers above (growth 0.5% + up to 1.0% by Growth share, division 1,000 people, 10 people per strength, pool fill 0.5%, cap 15%, capital starts with a 1,000 pool). Current behavior:
+- The nation-wide manpower stock is gone. A recruit draws `division_people_cost` people from the training city's pool when it is queued (the people leave pool and population, and are not refunded if the recruit is lost). A city needs a full pool and must keep `train_min_city_pop` people.
+- Starting divisions have the nation's capital (lowest city id) as `home_city_id`; a recruit has its training city. `DivisionRoster.demobilize` removes a division and returns strength x `people_per_strength` to its home city's population, or to the nearest owned city (capital on ties) if the home city is not the nation's any more. The flag is never rewritten.
+- Reinforcement draws from the home city's pool, then the nearest owned cities (empty pools skipped). POWs returned go to the owner's capital (they do not record a home city).
+- Siege: every land neighbor is enemy-held (an enemy division, or enemy-owned land with no friendly division there). The supply-cut-off trigger is not modelled. Growth 0, -2% people per turn, labor halved. The pool still fills but is trimmed to the cap.
+- Capture: pool 0, labor and infra progress reset, queued recruit lost, plus the existing -25% people and -30% infra.
+- Trait growth mods and fungus tiles are hooks only (`HexMap.growth_mods`, `HexMap.fungus_tiles`).

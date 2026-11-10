@@ -7,7 +7,7 @@ This is a homage to Sid Meier's Alpha Centauri: rival ideological factions settl
 - 1 colony pod. It founds the capital on its turn-1 tile or within 2 hexes [DEFAULT].
 - 2 full-strength divisions. Land factions get 2 infantry; sea factions get 1 Naval and 1 Marine division [DEFAULT].
 - 1 extra colony pod, ready after 3 turns of training [DEFAULT].
-- A small cash and manpower stockpile, enough for 1 more division [DEFAULT].
+- A small stockpile, enough for 1 more division [DEFAULT]. In the build this is the capital's starting recruit pool of 1,000 people (docs/specs/POPULATION_TUNING.md).
 - Land starts are at least 6 hexes apart on land. Sea starts are on shallow ocean near the coast [DEFAULT].
 
 ## Factions per game
@@ -40,6 +40,33 @@ Working-draft names, original and not SMAC copies. Colors are the Art Director v
 
 ## Archived (docs/archive/, design kept, code removed)
 The Gift lore and impact; the doom enemy, hidden attention counter, drift, and hints; the arrival countdown and readiness score; the Concord/Accord/Ascendants factions and faction meters, plus the splinter-below-25 rule; soul-cost fixes; the space-race pivot.
+
+## Pillars
+Approved Nov 9, 2026 (summary of the design pillars; items marked FIX are cheap config or rule changes, the rest are notes for later).
+
+1. **Forces shift from people to machines.** As tech advances, divisions move from Infantry to Mechanized to Robotic. Each step needs fewer people per strength point and costs more upkeep.
+   - FIX: `people_per_strength` and upkeep live on each division type in `data/divisions_config.json` (Infantry: 10 people per strength, 3 cash). Later types are just new entries.
+   - Future values [DEFAULT]: Mechanized 5 people per strength, 6 cash, 1 Alloy support. Robotic 2 people per strength, 10 cash, 1 Alloy, 1 Fuel. Alloy caps how many mechanized and robotic divisions you can support, and Fuel supplies Robotic and Naval, so resource option C waits for tech and option B stays the MVP.
+   - A tech system (about 12 techs across 3 eras that unlock division types, fungus yields and buildings) is future and out of scope.
+2. **Wave tactics are never viable.** A division costs 1,000 people, the recruit pool fills 0.5% of population a turn and caps at 15%, casualties are permanent, only survivors go home, and upkeep is 3 cash per division. Loopholes closed:
+   - A new division always starts at full strength and pays the full 1,000 people. There are no splits [DEFAULT].
+   - Attacks on one hex are capped at `max_attackers_per_hex` = 3 (frontage) [DEFAULT]. Task 46.
+   - An annexed city's pool starts at 0 and it cannot recruit for `captured_recruit_lockout_turns` = 10; an occupied city's pool stays 0. Task 39.
+   - An enslaved city's pool is 0 permanently, its labor cannot go to Training, and reinforcement skips pools at 0.
+   - Covenant's cap bonus becomes `recruit_cap_pct_bonus` +3% (a cap of 18%). Task 41.
+   - Collective's pool fill x1.25 stays (its identity).
+   - No Training during a siege or while food_ratio is below 1 (starving).
+   - Disbanding to farm the pool does not work, since survivors go to population, not the pool.
+   - The AI uses the same pool and floor rules.
+3. **The planet is dangerous.** The early game must not feel empty, and fungus must be a risk.
+   - FIX: `min_natives_wary` = 2 (the spawner tops the native count up to 2 even at zero pressure).
+   - FIX: ending a turn on fungus costs a non-native unit -5 org and -2 strength (`fungus_attrition`); Verdant takes half [DEFAULT]. Fungus also costs +1 move.
+   - FIX: Rust Striders raid an adjacent city with no defender (Outpost or Base): the city loses 5% of its population and 1 infra, then the strider flees.
+   - FIX: the Hostile threshold drops from 30 to 25; Swarm stays at 60.
+   - Keep the early safety rules: no spawns before turn 3, none within 3 hexes of a city before turn 5.
+   - Later, with tech: a way to make fungus tiles worth something.
+
+Where each lands in the build: pool, home city, reinforcement and the training floor are Task 38; the Pillars recruiting rules and per-type upkeep are Task 38b; annex lockout and enslave are Tasks 39-40; Covenant is Task 41; natives and fungus are Task 44; the Hostile threshold is Task 45; frontage is Task 46.
 
 ## Out of scope
 Native life and aliens, faction bonuses, tech tree changes, new diplomacy, maps bigger than small, 10-faction games, extra naval types, terraforming, councils and votes. Intelligence Capacity stays queued as-is.
