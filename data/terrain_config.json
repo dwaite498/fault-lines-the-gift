@@ -10,6 +10,12 @@
 		"min": -3,
 		"max": 4,
 		"shallows": 0,
+		"climb_cost": 1,
+		"cliff_diff": 2,
+		"smooth_max_step": 1,
+		"ridge_terrain": ["mountains"],
+		"foothill_terrain": "hills",
+		"ridge_edge_chance": 0.25,
 		"by_terrain": {"water": -1, "plains": 1, "forest": 1, "hills": 2, "mountains": 3, "crater": 0, "scorched": 1}
 	},
 	"land_weights": {"plains": 50, "forest": 25, "hills": 15, "mountains": 10}
