@@ -35,7 +35,7 @@ Open questions are marked **TBD**.
 - Damage taken is scaled by morale, * (1.5 - morale), then split 75% to organization and 25% to strength.
 - A division at 0 organization retreats 1 hex to a free friendly or neutral hex.
 - A boxed-in division at 0 organization surrenders; its remaining strength becomes POWs held by the captor (see POWs).
-- Manpower is spent when a division is created and drawn over time to replace losses and attrition.
+- People are drawn from a city's recruit pool when a division is created, and from the home city's pool (then the nearest owned cities') to replace losses and attrition.
 - Divisions on home territory and not in combat take no attrition.
 - Strength loss is permanent (reinforcement is planned). A division at 0 strength is destroyed.
 - Divisions have 2 move points per turn (confirmed as intended by David).
@@ -83,7 +83,7 @@ Status tags: **[Built]** is in the game now. **[Partial]** is partly built. **[P
 - **Cash.**
 - **Influence.**
 - **Operations.**
-- **Manpower** comes from population and caps recruiting and reinforcement.
+- **Recruit pools** are per city, not a nation stock: each city's pool fills from its population and caps recruiting and reinforcement there.
 - **Capacity** builds divisions and infrastructure, and later launch and orbital work.
 - **Research** is funded with cash. Parked.
 
