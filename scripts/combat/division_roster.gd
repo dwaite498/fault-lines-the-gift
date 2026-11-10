@@ -379,6 +379,17 @@ func frontage_blocked_targets(d: Division, hex_map: HexMap) -> Array[Vector2i]:
 	return out
 
 
+## Why Attack is shown disabled instead of hidden: every attackable enemy hex is full. "" otherwise.
+func attack_disabled_reason(d: Division, hex_map: HexMap) -> String:
+	if not action_targets(d, "attack", hex_map).is_empty():
+		return ""
+	var blocked := frontage_blocked_targets(d, hex_map)
+	if blocked.is_empty():
+		return ""
+	var cap := int(combat.get("max_attackers_per_hex", 0))
+	return "Frontage full (%d/%d)" % [mini(attackers_on(blocked[0], d), cap), cap]
+
+
 func can_attack(attacker: Division, defender: Division, hex_map: HexMap) -> bool:
 	return _can_attack_ignoring_frontage(attacker, defender, hex_map) and not frontage_blocked(attacker, defender.hex)
 
