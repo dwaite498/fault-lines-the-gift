@@ -37,6 +37,7 @@ func _ready() -> void:
 	_view.hex_map = HexMap.from_config_file(MAP_CONFIG_PATH, "res://data/cities_config.json",
 			"res://data/terrain_config.json", factions.sea_nations())
 	_view.hex_map.nation_factions = factions.nation_ids()
+	_view.hex_map.load_faction_views(factions.all)
 	_view.roster = DivisionRoster.new()
 	_view.roster.spawn_at_cities(_view.hex_map)
 	_view.hidden_nations = _view.roster.neutral_nations

@@ -39,6 +39,7 @@ func _initialize() -> void:
 	test_capture_choices()
 	test_capture_flow()
 	test_capture_gating()
+	test_atrocity_views()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -1470,3 +1471,41 @@ func test_capture_gating() -> void:
 	panel.refresh(pc)
 	ok(panel.label.text.contains("Recruitable 0 (held at 0)") and not panel.label.text.contains("/turn, cap"), "an enslaved city shows Recruitable 0 and no fill rate")
 	panel.free()
+
+
+# --- Task 40: atrocity is judged per observing faction ---
+
+func test_atrocity_views() -> void:
+	var factions := FactionRoster.load_all()
+	var views := {"assembly": ["raze", "enslave", "plunder"], "verdant_accord": ["raze", "enslave", "plunder"],
+			"covenant": ["raze", "enslave"], "lyceum": ["raze", "enslave"], "drift": ["raze", "enslave"],
+			"directorate": ["raze"], "syndicate": ["raze"], "collective": ["raze"],
+			"free_tide": ["raze"], "deepwater_guild": ["raze"]}
+	for f in factions:
+		ok(f.views_as_atrocity == views[f.id], "factions.json: %s views %s as atrocities" % [f.id, views[f.id]])
+	var m := pop_map()
+	m.load_faction_views(factions)
+	var raze := {"type": "raze", "severity": 3, "atrocity": true}
+	var enslave := {"type": "enslave", "severity": 3, "atrocity": false}
+	var plunder := {"type": "plunder", "severity": 1, "atrocity": false}
+	var annex := {"type": "annex", "severity": 0, "atrocity": false}
+	ok(factions.all(func(f: Dictionary) -> bool: return m.is_atrocity_to(f.id, raze)), "Raze is an atrocity to every faction")
+	ok(m.is_atrocity_to("assembly", plunder) and m.is_atrocity_to("verdant_accord", plunder), "Assembly (and Verdant Accord) see Plunder as an atrocity")
+	ok(not m.is_atrocity_to("directorate", enslave) and not m.is_atrocity_to("collective", enslave), "Directorate (and Collective) do not see Enslave as an atrocity")
+	ok(m.is_atrocity_to("assembly", enslave) and m.is_atrocity_to("drift", enslave), "a faction whose list includes Enslave sees it as one")
+	ok(not m.is_atrocity_to("assembly", annex) and not m.is_atrocity_to("syndicate", plunder), "Annex is never one, and Syndicate does not see Plunder as one")
+	ok(m.is_atrocity_to("nobody", raze) and not m.is_atrocity_to("nobody", enslave), "an unknown faction uses the default list (Raze only)")
+	# The event keeps its own flag and severity: Enslave stays severity 3, atrocity false.
+	var s := cap_setup()
+	var r := capture_with(s, s.city, 0, "enslave")
+	var ev: Dictionary = s.map.reputation.events.back()
+	ok(ev.type == "enslave" and ev.severity == 3 and ev.atrocity == false and r.severity == 3, "the Enslave event keeps severity 3 and atrocity false")
+	# Observer-relative weight: atrocity_weight x sensitivity for an atrocity, else base severity.
+	var w: float = float(m.city_rules.capture.atrocity_weight)
+	ok(is_equal_approx(m.reputation_weight_to("assembly", plunder), w) and is_equal_approx(m.reputation_weight_to("syndicate", plunder), 1.0), "weight: Plunder is an atrocity weight to Assembly and its base severity (1) to Syndicate")
+	ok(is_equal_approx(m.reputation_weight_to("directorate", enslave), 3.0) and is_equal_approx(m.reputation_weight_to("directorate", annex), 0.0), "weight: a normal event counts its base severity")
+	m.faction_sensitivity["drift"] = 0.5
+	ok(is_equal_approx(m.reputation_weight_to("drift", raze), w * 0.5) and is_equal_approx(m.reputation_weight_to("assembly", raze), w), "weight: scaled by the faction's atrocity sensitivity (default 1.0)")
+	var custom := [{"id": "x", "views_as_atrocity": ["raze"], "atrocity_sensitivity": 2.0}, {"id": "y"}]
+	m.load_faction_views(custom)
+	ok(is_equal_approx(m.reputation_weight_to("x", raze), w * 2.0) and is_equal_approx(m.reputation_weight_to("y", raze), w), "atrocity_sensitivity is read from the faction entry when present")

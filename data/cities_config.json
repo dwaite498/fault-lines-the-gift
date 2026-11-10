@@ -31,6 +31,8 @@
 		"ai_default_option": "annex",
 		"aggressive_factions": ["directorate", "collective", "free_tide", "drift"],
 		"aggressive_harsh_chance": 0.5,
+		"default_views_as_atrocity": ["raze"],
+		"atrocity_weight": 3.0,
 		"harshness_order": ["annex", "occupy", "plunder", "reduce", "enslave", "raze"],
 		"faction_options": {
 			"assembly": ["annex", "occupy"],

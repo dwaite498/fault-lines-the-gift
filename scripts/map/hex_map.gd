@@ -53,6 +53,7 @@ var city_rules := {
 		"order": ["annex", "occupy", "plunder", "reduce", "raze", "enslave"],
 		"annexed_recruit_lockout_turns": 10, "ai_default_option": "annex",
 		"aggressive_factions": ["directorate", "collective", "free_tide", "drift"], "aggressive_harsh_chance": 0.5,
+		"default_views_as_atrocity": ["raze"], "atrocity_weight": 3.0,
 		"harshness_order": ["annex", "occupy", "plunder", "reduce", "enslave", "raze"],
 		"faction_options": {
 			"assembly": ["annex", "occupy"],
@@ -82,6 +83,10 @@ var city_rules := {
 ## Nation index -> faction id (from factions.json), set by main. Capture gating and the
 ## AI's choice read it; a nation with no entry is ungated and the AI uses ai_default_option.
 var nation_factions := {}
+## Faction id -> its views_as_atrocity list and atrocity_sensitivity (from factions.json),
+## see load_faction_views. Atrocity is judged per observing faction.
+var faction_views := {}
+var faction_sensitivity := {}
 ## Every capture choice logs a reputation_event here (a stub; nothing reads it yet).
 var reputation := ReputationLog.new()
 ## The result of the latest apply_capture, see apply_capture.
@@ -760,6 +765,35 @@ func harshest_capture_option(nation: int) -> String:
 		if allowed.has(id):
 			best = String(id)
 	return best
+
+
+## Reads each faction's `views_as_atrocity` (capture event types it condemns) and optional
+## `atrocity_sensitivity` (default 1.0) from the factions.json entries.
+func load_faction_views(factions: Array) -> void:
+	faction_views.clear()
+	faction_sensitivity.clear()
+	for f in factions:
+		faction_views[str(f.id)] = f.get("views_as_atrocity", city_rules.capture.default_views_as_atrocity)
+		faction_sensitivity[str(f.id)] = float(f.get("atrocity_sensitivity", 1.0))
+
+
+## True if the observing faction treats this reputation_event as an atrocity: its type is
+## on the observer's views_as_atrocity list (Raze is always on it). The event's own
+## `atrocity` flag and severity are unchanged. An unknown faction uses
+## capture.default_views_as_atrocity.
+func is_atrocity_to(observer_faction: String, event: Dictionary) -> bool:
+	if event.type == "raze":
+		return true
+	return faction_views.get(observer_faction, city_rules.capture.default_views_as_atrocity).has(event.type)
+
+
+## How heavily the observing faction weighs a reputation_event: an atrocity to it counts
+## capture.atrocity_weight x the faction's atrocity sensitivity, any other event counts its
+## base severity. Task 42's attitude will consume this; nothing does yet.
+func reputation_weight_to(observer_faction: String, event: Dictionary) -> float:
+	if is_atrocity_to(observer_faction, event):
+		return float(city_rules.capture.atrocity_weight) * float(faction_sensitivity.get(observer_faction, 1.0))
+	return float(event.severity)
 
 
 ## The option the AI picks (CAPTURE.md): an aggressive faction takes its harshest allowed
