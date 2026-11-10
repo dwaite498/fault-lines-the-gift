@@ -45,6 +45,7 @@ func _initialize() -> void:
 	test_victory()
 	test_colonizers()
 	test_fog()
+	test_scout()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -974,6 +975,7 @@ func test_siege_capture_ai() -> void:
 	roster.divisions.clear()
 	eco2.config.ai_recruit_chance = 1.0
 	eco2.city_rules.colonization.ai_build_pods = false  # these checks are about division recruiting
+	roster.templates.scout.recruit.ai_count = 0
 	for c in m2.cities:
 		c.pool = 0
 	for nation in m2.nations:
@@ -1105,6 +1107,7 @@ func test_pillars_rules() -> void:
 		var a := pool_setup()
 		a.roster.divisions.clear()
 		a.eco.city_rules.colonization.ai_build_pods = false
+		a.roster.templates.scout.recruit.ai_count = 0
 		a.eco.config.ai_recruit_chance = 1.0
 		for nation in a.map.nations:
 			a.eco.stocks[nation].capacity = 100.0
@@ -1146,7 +1149,7 @@ func test_pillars_rules() -> void:
 	dv.strength = 60.0
 	ok(dm.roster.demobilize(dv, dm.map) == 300, "survivors return at the division type's people_per_strength (60 x 5 = 300)")
 	# QA nit: the main.gd header names the real keys.
-	var header := FileAccess.get_file_as_string("res://scripts/main.gd").substr(0, 900)
+	var header := FileAccess.get_file_as_string("res://scripts/main.gd").substr(0, 1500)
 	ok(header.contains("N toggles the military panel") and header.contains("K removes the newest city") and not header.contains("D removes"), "main.gd header comment names N and K (not M and D)")
 
 
@@ -1157,6 +1160,7 @@ func test_ai_upkeep_cap() -> void:
 	var roster: DivisionRoster = a.roster
 	eco.config.ai_recruit_chance = 1.0
 	eco.city_rules.colonization.ai_build_pods = false  # these checks are about division recruiting
+	roster.templates.scout.recruit.ai_count = 0
 	var nation: int = m.nations.filter(func(n: int) -> bool: return n != 0)[0]
 	for n in m.nations:
 		eco.stocks[n].capacity = 100.0
@@ -1864,12 +1868,14 @@ func test_colonizers() -> void:
 	ok(not queued.is_empty() and queued.values().all(func(n: int) -> bool: return n == 1) and not queued.has(0), "each AI nation with a valid site queues one pod; the player's nations do not")
 	var no_site := pool_setup()
 	no_site.map.city_rules.colonization.min_city_distance = 99
+	no_site.roster.templates.scout.recruit.ai_count = 0
 	no_site.roster.divisions.clear()
 	no_site.eco.config.ai_recruit_chance = 0.0
 	no_site.eco.run_ai(0, no_site.map, no_site.roster)
 	ok(no_site.eco.pending.is_empty(), "the AI queues no pod when there is no valid site")
 	var small := pool_setup()
 	small.roster.divisions.clear()
+	small.roster.templates.scout.recruit.ai_count = 0
 	small.eco.config.ai_recruit_chance = 0.0
 	for c in small.map.cities:
 		c.population = 7000
@@ -1877,6 +1883,7 @@ func test_colonizers() -> void:
 	ok(small.eco.pending.is_empty(), "the AI queues no pod when its cities cannot spare the people")
 	var off := pool_setup()
 	off.map.city_rules.colonization.ai_build_pods = false
+	off.roster.templates.scout.recruit.ai_count = 0
 	off.roster.divisions.clear()
 	off.eco.config.ai_recruit_chance = 0.0
 	off.eco.run_ai(0, off.map, off.roster)
@@ -2055,3 +2062,106 @@ func test_fog() -> void:
 		g.fog.update(g.map, g.roster)
 	var per := (Time.get_ticks_usec() - t0) / 10000.0
 	ok(per < 50.0, "a fog update on the test map takes %.1f ms (under 50)" % per)
+
+
+# --- Task 40g: scout ---
+
+func test_scout() -> void:
+	var s := pool_setup()
+	var m: HexMap = s.map
+	var eco: NationEconomy = s.eco
+	var roster: DivisionRoster = s.roster
+	roster.divisions.clear()
+	var t: Dictionary = roster.templates.scout
+	ok(t.recruit.people == 200 and t.recruit.labor_turns == 5 and t.upkeep.cash == 1 and t.move == 3 and t.attack == 0 and t.defense == 1, "scout config: 200 people, 5 labor-turns, upkeep 1, move 3, attack 0, defense 1")
+	ok(t.unarmed and t.ignores_frontage_cap and not t.get("fungus_immune", false) and Fog.load_config().rules.sight.scout == 3, "scout: unarmed, ignores the frontage cap, no fungus exemption, sight 3")
+	ok(not roster.templates.infantry.get("ignores_frontage_cap", false), "infantry does not ignore the frontage cap")
+	# Queue: people from the pool and population, no capacity.
+	var city: Dictionary = nation_cities(m, 0)[0]
+	var pool0 := int(city.pool)
+	var cap0 := float(eco.stocks[0].capacity)
+	eco.stocks[0].capacity = 0.0
+	ok(eco.scout_block_reason(city, 0, roster) == "" and eco.queue_scout(city, 0, roster), "a city with a full pool queues a scout (no capacity needed)")
+	ok(city.pool == pool0 - 200 and city.population == 9800 and float(eco.stocks[0].capacity) == 0.0, "200 people leave the pool and the population")
+	var entry: Dictionary = eco.pending[city.id]
+	ok(entry.kind == "scout" and entry.cost == 5 and NationEconomy.queue_text(entry).begins_with("Scout 0/5 labor"), "a 5 labor-turn scout entry")
+	ok(eco.scout_block_reason(city, 0, roster) == "already recruiting", "one queue per city")
+	# 1 Training point a turn needs 5 turns.
+	city.labor.training = 1
+	for i in 4:
+		eco.spawn_pending(m, roster)
+	ok(roster.divisions.is_empty(), "after 4 turns of 1 labor the scout is not ready")
+	eco.spawn_pending(m, roster)
+	ok(roster.divisions.size() == 1 and roster.divisions[0].unit_type == "scout", "after 5 labor-turns the scout appears on the city hex")
+	var scout: Division = roster.divisions[0]
+	ok(scout.move == 3 and scout.strength == 20.0 and scout.attack == 0.0 and scout.defense == 1.0 and roster.upkeep_of(scout).cash == 1, "the scout: move 3, strength 20 (200 people), attack 0, defense 1, upkeep 1")
+	ok(eco.upkeep_due(0, roster) == {"cash": 1.0}, "its upkeep is 1 cash")
+	# Pool and size floors.
+	var c2: Dictionary = nation_cities(m, 1)[0]
+	c2.pool = 199
+	ok(eco.scout_block_reason(c2, 1, roster) == "recruit pool too small", "a pool under 200 blocks")
+	c2.pool = 1000
+	c2.population = 5199
+	ok(eco.scout_block_reason(c2, 1, roster) == "city too small to train", "5,199 people would leave under 5,000: blocked")
+	c2.population = 5200
+	ok(eco.scout_block_reason(c2, 1, roster) == "", "5,200 people keep exactly 5,000: allowed")
+	ok(eco.scout_block_reason(c2, 0, roster) == "not your city", "not another nation's city")
+	# Unarmed: no attack, no capture.
+	var foe := roster.spawn_division(1, m.neighbors(scout.hex)[0], "infantry", int(c2.id))
+	ok(not roster.can_attack(scout, foe, m) and not roster.valid_actions(scout, m).has("attack") and roster.action_targets(scout, "attack", m).is_empty(), "a scout cannot attack")
+	ok(roster.can_attack(foe, scout, m), "a scout can be attacked")
+	roster.divisions.erase(foe)
+	var enemy_city: Dictionary = nation_cities(m, 1)[0]
+	scout.hex = m.neighbors(enemy_city.cell)[0]
+	scout.moves_left = 3
+	ok(not roster.can_move(scout, enemy_city.cell, m), "a scout cannot step onto an enemy city (no capture)")
+	# Move 3 against infantry's 2.
+	var flat := make_map(12, 7)
+	var froster := make_roster()
+	var fs := froster.spawn_division(0, Vector2i(2, 3), "scout")
+	var fi := froster.spawn_division(0, Vector2i(2, 5), "infantry")
+	var far3 := Vector2i(5, 3)
+	var far3i := Vector2i(5, 5)
+	ok(HexMap.hex_distance(fs.hex, far3) == 3 and froster.set_order(fs, far3, flat) and froster.turns_to_arrive(fs, flat) == 1, "the scout covers 3 plains hexes in one turn")
+	ok(froster.set_order(fi, far3i, flat) and froster.turns_to_arrive(fi, flat) == 2, "infantry needs 2 turns for the same distance")
+	# Sight 3 through the fog.
+	var fog := Fog.load_config()
+	froster.fog = fog
+	flat.nations.assign([0])
+	fog.update(flat, froster)
+	var seen := 0
+	for cell in flat.cells:
+		if HexMap.hex_distance(fs.hex, cell) <= 3 and fog.state(0, cell) == Fog.VISIBLE:
+			seen += 1
+	ok(seen >= 30, "the scout sees 3 hexes out (%d tiles around it visible)" % seen)
+	# Reinforcement still works like any division (200 people at 10 per strength point).
+	ok(roster.people_per_strength(scout) == 10.0, "scout strength is worth 10 people a point")
+	# The AI builds one early.
+	var g := pool_setup()
+	g.roster.divisions.clear()
+	g.eco.config.ai_recruit_chance = 0.0
+	g.eco.city_rules.colonization.ai_build_pods = false
+	g.eco.run_ai(0, g.map, g.roster)
+	var queued := {}
+	for id in g.eco.pending:
+		if g.eco.pending[id].kind == "scout":
+			queued[g.eco.pending[id].nation] = int(queued.get(g.eco.pending[id].nation, 0)) + 1
+	ok(queued.size() == g.map.nations.size() - 1 and not queued.has(0) and queued.values().all(func(n: int) -> bool: return n == 1), "each AI nation queues exactly 1 scout on turn 1; the player's nation does not")
+	g.eco.run_ai(0, g.map, g.roster)
+	ok(queued.values().all(func(n: int) -> bool: return n == 1) and g.eco.pending.size() == queued.size(), "the AI does not queue a second scout")
+	# The AI uses it to explore.
+	var game := save_game_setup(5)
+	var initial := {}
+	for n in game.map.nations:
+		initial[n] = game.fog.explored[n].size()
+	for i in 25:
+		save_play_turn(game)
+	var grew := 0
+	var scouts := 0
+	for n in game.map.nations:
+		if game.fog.explored[n].size() > int(initial[n]) * 2:
+			grew += 1
+	for d in game.roster.divisions:
+		if d.unit_type == "scout":
+			scouts += 1
+	ok(scouts >= 1 and grew == game.map.nations.size(), "25 turns of AI play: scouts exist (%d) and every nation more than doubled its explored map (%s)" % [scouts, game.map.nations.map(func(n: int) -> String: return "%d->%d" % [initial[n], game.fog.explored[n].size()])])

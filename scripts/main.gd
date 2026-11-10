@@ -3,7 +3,7 @@ extends Node2D
 ## Controls: click your division to select it, then click a reachable hex to order
 ## a move or an adjacent enemy to order an attack (right-click without dragging, or Esc, clears the
 ## order). Camera: arrow keys pan, middle/right-drag pans, wheel zooms at the cursor. F fortifies. Esc opens the menu (Save Game, Main Menu, Quit) when there is nothing to cancel. Space ends the turn and executes all orders (AI orders are
-## issued at the start of each turn, before yours). With your city panel open, R recruits infantry and P queues a colony pod (B on a selected pod founds an Outpost). N toggles the military panel. Capturing a city opens a popup to choose Annex, Occupy, Plunder, Reduce, Raze or Enslave; an occupied city shows an Annex button once its timer is up. Debug: K removes the newest city.
+## issued at the start of each turn, before yours). With your city panel open, R recruits infantry, S queues a scout, P queues a colony pod (B on a selected pod founds an Outpost). N toggles the military panel. Capturing a city opens a popup to choose Annex, Occupy, Plunder, Reduce, Raze or Enslave; an occupied city shows an Annex button once its timer is up. Debug: K removes the newest city.
 
 const GAME_TITLE := "Fault Lines: Planetfall"
 const MAP_CONFIG_PATH := "res://data/map_config.json"
@@ -84,6 +84,11 @@ func _ready() -> void:
 	_city_panel.roster = _view.roster
 	_city_panel.player_nation = PLAYER_NATION
 	_city_panel.recruit_pressed.connect(_on_recruit_pressed)
+	_city_panel.scout_pressed.connect(func() -> void:
+			message.text = ""
+			if not _city.is_empty() and _city.nation == PLAYER_NATION:
+				_try_scout()
+			_refresh_panels())
 	_city_panel.pod_pressed.connect(func() -> void:
 			message.text = ""
 			if not _city.is_empty() and _city.nation == PLAYER_NATION:
@@ -212,6 +217,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		_try_recruit()
 	elif key.keycode == KEY_P and not _city.is_empty() and _city.nation == PLAYER_NATION:
 		_try_colony_pod()
+	elif key.keycode == KEY_S and not _city.is_empty() and _city.nation == PLAYER_NATION:
+		_try_scout()
 	elif key.keycode == KEY_N:
 		_military_panel.toggle()
 	elif key.keycode == KEY_K and OS.is_debug_build():
@@ -400,6 +407,17 @@ func _try_recruit() -> void:
 		print("Recruiting at city %d; arrives in %d turns" % [_city.id, int(_economy.config.training_turns)])
 	else:
 		message.text = "Cannot recruit: " + reason
+		print(message.text)
+
+
+## S key and the city panel's Scout button.
+func _try_scout() -> void:
+	var reason := _economy.scout_block_reason(_city, PLAYER_NATION, _view.roster)
+	if reason == "":
+		_economy.queue_scout(_city, PLAYER_NATION, _view.roster)
+		print("Scout queued at city %d" % _city.id)
+	else:
+		message.text = "Cannot queue a scout: " + reason
 		print(message.text)
 
 
