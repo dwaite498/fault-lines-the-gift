@@ -38,6 +38,10 @@ var city_rules := {
 	"growth_per_turn": 1, "max_population": 30,
 	"capture_pop_loss": 0.25, "capture_infra_loss": 0.3, "rebuild_turns": 26,
 }
+## Nations whose first cities should sit on the coast (sea factions until the naval
+## slice). Set before generate(). A hex counts as coastal if it touches water; if a
+## nation has no such hex, a map-edge hex is next best.
+var coastal_nations: Array[int] = []
 ## The seed passed to generate(); other systems derive their RNG from it.
 var seed_value := 0
 ## Vector2i cell -> terrain name ("plains", "forest", ...). See generate_terrain().
@@ -50,10 +54,12 @@ var terrain_types: Dictionary = {}
 ## and the cities config (cities_per_nation, claim_radius, min_spacing).
 static func from_config_file(map_path: String,
 		cities_path := "res://data/cities_config.json",
-		terrain_path := "res://data/terrain_config.json") -> HexMap:
+		terrain_path := "res://data/terrain_config.json",
+		coastal: Array[int] = []) -> HexMap:
 	var map_cfg: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(map_path))
 	var city_cfg: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(cities_path))
 	var hex_map := HexMap.new()
+	hex_map.coastal_nations = coastal
 	for key in hex_map.city_rules:
 		if city_cfg.has(key):
 			hex_map.city_rules[key] = city_cfg[key]
@@ -281,6 +287,9 @@ func _place_cities(rng: RandomNumberGenerator, per_nation: int, min_spacing: int
 	nation_ids.sort()
 	for nation in nation_ids:
 		_shuffle(land_by_nation[nation], rng)
+		if coastal_nations.has(nation):
+			land_by_nation[nation].sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
+					return _coast_rank(a) < _coast_rank(b))
 	for pass_index in per_nation:
 		for nation in nation_ids:
 			var spot: Variant = _first_spaced_cell(land_by_nation[nation], min_spacing)
@@ -297,6 +306,15 @@ func _place_cities(rng: RandomNumberGenerator, per_nation: int, min_spacing: int
 					"population": pop, "radius": _radius_for(pop),
 					"infrastructure": int(city_rules.start_infrastructure)})
 	return true
+
+
+## 0 touches water, 1 on the map edge, 2 inland. Used to start sea factions on the coast.
+func _coast_rank(cell: Vector2i) -> int:
+	var ns := neighbors(cell)
+	for n in ns:
+		if territory[n] == WATER:
+			return 0
+	return 1 if ns.size() < 6 else 2
 
 
 func _first_spaced_cell(candidates: Array, min_spacing: int) -> Variant:

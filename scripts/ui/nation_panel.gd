@@ -6,7 +6,7 @@ const SIDE_WIDTH := 240.0
 var panel := Panel.new()
 var label := Label.new()
 var swatch := MapView.make_swatch()
-var _pal: Dictionary = MapView.load_palette()
+var factions: FactionRoster
 
 func _init() -> void:
 	label.position = Vector2(22, 6)
@@ -32,7 +32,8 @@ func refresh(nation: int, turn: int, hex_map: HexMap, economy: NationEconomy) ->
 	var city_count := hex_map.cities.filter(func(c): return c.nation == nation).size()
 	var tile_count := hex_map.cells.values().count(nation)
 	var lines: Array[String] = [
-		"%s - Turn %d" % [MapView.nation_name(_pal, nation, nation), turn],
+		"%s - Turn %d" % [factions.name_of(nation), turn],
+		"Leader: %s" % factions.leader_of(nation),
 		"Cities: %d   Tiles: %d" % [city_count, tile_count],
 	]
 	var income := projected_income(nation, hex_map, economy)
@@ -46,6 +47,6 @@ func refresh(nation: int, turn: int, hex_map: HexMap, economy: NationEconomy) ->
 	else:
 		lines.append("Closest to falling: %d %s left" % [city_count, "city" if city_count == 1 else "cities"])
 	label.text = "\n".join(lines)
-	swatch.color = MapView.nation_color(_pal, nation)
+	swatch.color = factions.color_of(nation)
 	panel.size = label.get_minimum_size() + Vector2(30, 12)
 	panel.position = Vector2(get_viewport().get_visible_rect().size.x - SIDE_WIDTH - panel.size.x - 8, 40)

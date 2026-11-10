@@ -29,7 +29,11 @@ var _mode := ""
 func _ready() -> void:
 	get_window().title = GAME_TITLE
 	_view = MapView.new()
-	_view.hex_map = HexMap.from_config_file(MAP_CONFIG_PATH)
+	var map_cfg: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(MAP_CONFIG_PATH))
+	var factions := FactionRoster.from_config(map_cfg)
+	_view.factions = factions
+	_view.hex_map = HexMap.from_config_file(MAP_CONFIG_PATH, "res://data/cities_config.json",
+			"res://data/terrain_config.json", factions.sea_nations())
 	_view.roster = DivisionRoster.new()
 	_view.roster.spawn_at_cities(_view.hex_map)
 	_view.hidden_nations = _view.roster.neutral_nations
@@ -51,12 +55,16 @@ func _ready() -> void:
 	_city_panel.recruit_pressed.connect(_on_recruit_pressed)
 	_panel.roster = _view.roster
 	_panel.player_nation = PLAYER_NATION
+	_panel.factions = factions
+	_city_panel.factions = factions
 	_panel.economy = _economy
 	_panel.action_pressed.connect(do_action)
 	add_child(_city_panel)
 	_nation_panel = NationPanel.new()
+	_nation_panel.factions = factions
 	add_child(_nation_panel)
 	_military_panel = MilitaryPanel.new()
+	_military_panel.factions = factions
 	_military_panel.max_fortify = _panel.max_fortify
 	add_child(_military_panel)
 	add_child(_top_bar)
@@ -174,7 +182,7 @@ func _refresh_panels() -> void:
 		acts = _view.roster.valid_actions(_view.selected, _view.hex_map)
 	_panel.refresh(_view.selected, _view.hex_map, acts, _mode)
 	_city_panel.refresh(_city)
-	_top_bar.refresh(MapView.nation_name(_view.palette, PLAYER_NATION, PLAYER_NATION), turn)
+	_top_bar.refresh(_view.factions.name_of(PLAYER_NATION), turn)
 	_nation_panel.refresh(PLAYER_NATION, turn, _view.hex_map, _economy)
 	var np := _nation_panel.panel
 	_military_panel.refresh(PLAYER_NATION, _view.roster, _economy, np.position.y + np.size.y + 8)
