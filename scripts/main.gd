@@ -334,8 +334,11 @@ func select_unit(d: Division) -> void:
 func _set_mode(mode: String) -> void:
 	_mode = mode
 	_view.highlights.clear()
+	_view.blocked_highlights.clear()
 	if mode != "" and _view.selected:
 		_view.highlights = _view.roster.action_targets(_view.selected, mode, _view.hex_map)
+		if mode == "attack":
+			_view.blocked_highlights = _view.roster.frontage_blocked_targets(_view.selected, _view.hex_map)
 
 
 ## Button or hotkey for one of the selected unit's actions. Move/Attack/Follow

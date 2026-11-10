@@ -30,6 +30,8 @@ var roster: DivisionRoster
 var selected: Division
 ## Valid target hexes for the active action mode, outlined.
 var highlights: Array[Vector2i] = []
+## Attack targets blocked by the frontage cap (Task 46), drawn greyed and not clickable.
+var blocked_highlights: Array[Vector2i] = []
 var player_nation := 0
 const ORDER_COLOR := Color(1, 1, 1, 0.9)
 const ATTACK_COLOR := Color(0.9, 0.1, 0.1, 0.95)
@@ -133,6 +135,10 @@ func _draw() -> void:
 		var hc := _corners(hex_to_pixel(cell))
 		hc.append(hc[0])
 		draw_polyline(hc, Color(1, 1, 1, 0.9), 3.0)
+	for cell in blocked_highlights:
+		var bc := _corners(hex_to_pixel(cell))
+		bc.append(bc[0])
+		draw_polyline(bc, Color(0.55, 0.55, 0.55, 0.9), 3.0)
 	if roster:
 		_draw_orders()
 
