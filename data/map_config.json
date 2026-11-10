@@ -6,5 +6,14 @@
 	"nation_count": 4,
 	"faction_count": 4,
 	"faction_seed": -1,
-	"player_faction": ""
+	"player_faction": "",
+	"camera": {
+		"zoom_min": 0.5,
+		"zoom_max": 2.0,
+		"zoom_step": 0.25,
+		"pan_speed": 700,
+		"edge_scroll_enabled": false,
+		"edge_scroll_margin": 12,
+		"drag_threshold": 6
+	}
 }
