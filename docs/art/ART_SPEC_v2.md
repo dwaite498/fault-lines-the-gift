@@ -55,9 +55,9 @@ Replaces Art Spec v1 (Cold War paper map). Archive v1 as docs/art/ART_SPEC_v1.md
 - Top bar is 32px with the year or turn centered. The right panel is 240px, anchored right (fixing the v1 nit). Icons are line art in teal.
 
 ## Godot implementation notes (for sizing)
-1. **Hex to screen:** `p = hex_to_pixel_flat(cell); screen = Vector2(p.x, p.y * 0.5) - Vector2(0, elev * 12)`. Keep the game logic in axial or offset coordinates and change only the view.
+1. **Hex to screen:** `p = hex_to_pixel_flat(cell); screen = Vector2(p.x, p.y * 0.5) - Vector2(0, elev * 10)`. Keep the game logic in axial or offset coordinates and change only the view.
 2. **Draw order:** go row by row from back to front (by screen y, then x). For each row, draw the skirts, then the tops, then the decor, then that row's bases and units. Because units are interleaved with tiles, a taller tile in front correctly hides a unit behind it. Alternatively, put tiles and units as nodes in one y_sort_enabled Node2D. Draw arrows, selection, and the UI last.
-3. **Click picking:** undo the y-scale and test candidate tiles from highest elevation and front-most first, using a point-in-polygon check on each tile's raised top face, because a tall tile can cover the one behind it. Fall back to the flat inverse.
+3. **Click picking:** undo the y-scale and go row by row from front to back, and in each row test the raised top faces first and then that row's skirts (point-in-polygon), because a tall tile can cover the one behind it. This matches the draw order.
 4. **Data:** add a per-tile `elevation` to the map data, and add `iso: {tile_w: 96, tile_h: 48, step: 10, min_elev: -3, max_elev: 4, skirt_dark: [0.35, 0.20]}`, `factions[10]`, `ui{}`, and the new terrain keys to art_palette.json.
 5. **Rough size:** 3 to 4 PRs: (a) projection, elevation, skirts, and picking; (b) palette, terrain looks, and coast; (c) bases and unit standees on iso; (d) the datalink UI theme.
 
