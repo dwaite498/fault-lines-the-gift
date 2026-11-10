@@ -40,6 +40,8 @@ var attacked_from: Array[Vector2i] = []
 var order_path: Array[Vector2i] = []
 ## True if the order is an attack on the division at order_path's only hex.
 var order_attack := false
+## A Crag Harrier's nest tile (it stays within its template nest_radius of it); (-1, -1) = none.
+var nest := Vector2i(-1, -1)
 
 
 static func from_template(new_id: int, owner_nation: int, start_hex: Vector2i,

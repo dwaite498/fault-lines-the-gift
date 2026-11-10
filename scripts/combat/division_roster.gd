@@ -22,6 +22,11 @@ var neutral_nations: Array[int] = []
 var fog: Fog = null
 ## Faction trait modifiers (HexMap.traits), or null for none. main.gd and tests set it.
 var traits: FactionTraits = null
+
+## The native nation (docs/specs/ALIENS.md): hostile to everyone, owns no city, no economy,
+## never surrenders. Native unit templates come from data/natives.json.
+const NATIVE_NATION := -2
+const NATIVES_PATH := "res://data/natives.json"
 ## Cities taken this turn that still await a capture choice: the result of
 ## HexMap.take_city, in capture order. Resolved by resolve_ai_captures and the popup.
 var pending_captures: Array[Dictionary] = []
@@ -30,7 +35,26 @@ var _pending_captor := {}
 
 
 static func load_templates(path := CONFIG_PATH) -> Dictionary:
-	return JSON.parse_string(FileAccess.get_file_as_string(path))
+	var out: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(path))
+	if path == CONFIG_PATH:  # native unit types ride along with the division types
+		out.merge(JSON.parse_string(FileAccess.get_file_as_string(NATIVES_PATH)).units)
+	return out
+
+
+## True for a native division (nation NATIVE_NATION).
+func is_native(d: Division) -> bool:
+	return d.nation == NATIVE_NATION
+
+
+## True if a native may stand on `hex`: its template's habitat ("fungus" or terrain names).
+func native_habitat_ok(d: Division, hex: Vector2i, hex_map: HexMap) -> bool:
+	var tpl: Dictionary = templates.get(d.unit_type, {})
+	if tpl.has("nest_radius") and d.nest != Vector2i(-1, -1) and HexMap.hex_distance(hex, d.nest) > int(tpl.nest_radius):
+		return false  # a Crag Harrier stays within nest_radius of its nest
+	for h in tpl.get("habitat", []):
+		if (h == "fungus" and hex_map.is_fungus(hex)) or (h != "fungus" and hex_map.terrain_name(hex) == h):
+			return true
+	return false
 
 
 ## Puts one division of template_name on every city hex, owned by that city's nation.
@@ -170,16 +194,34 @@ func can_move(d: Division, hex: Vector2i, hex_map: HexMap) -> bool:
 		return false
 	if is_unarmed(d) and not hex_map.city_at(hex).is_empty() and hex_map.city_at(hex).nation != d.nation:
 		return false  # a pod or scout cannot capture a city
+	if is_native(d) and (not hex_map.city_at(hex).is_empty() or not native_habitat_ok(d, hex, hex_map)):
+		return false  # natives never enter a city and stay in their habitat
 	if not hex_map.can_step(d.hex, hex):
 		return false
-	return d.moves_left >= hex_map.step_cost(d.hex, hex, d.nation) or not d.has_moved
+	return d.moves_left >= step_cost_for(d, d.hex, hex, hex_map) or not d.has_moved
+
+
+## Move cost for d to step from -> to: the map's step cost, except a template with
+## "ignores_terrain_cost" (Crag Harrier) always pays 1; and a non-native leaving a hex next to a native
+## with "zoc_leave_extra" (the Harrier's pass hold) pays that much more.
+func step_cost_for(d: Division, from: Vector2i, to: Vector2i, hex_map: HexMap) -> int:
+	if templates.get(d.unit_type, {}).get("ignores_terrain_cost", false):
+		return 1
+	var cost := hex_map.step_cost(from, to, d.nation)
+	if not is_native(d):
+		for o in divisions:
+			var extra := int(templates.get(o.unit_type, {}).get("zoc_leave_extra", 0))
+			if extra > 0 and is_native(o) and HexMap.hex_distance(from, o.hex) == 1:
+				cost += extra
+				break
+	return cost
 
 
 ## Moves d one hex; moving onto an enemy city captures it.
 func try_move(d: Division, hex: Vector2i, hex_map: HexMap) -> bool:
 	if not can_move(d, hex, hex_map):
 		return false
-	var cost := hex_map.step_cost(d.hex, hex, d.nation)
+	var cost := step_cost_for(d, d.hex, hex, hex_map)
 	d.hex = hex
 	d.moves_left = maxi(d.moves_left - cost, 0)
 	d.has_moved = true
@@ -262,6 +304,24 @@ func disband(nations: Array[int]) -> void:
 
 # --- Fortify ---
 
+## Fungus attrition (natives.json fungus_attrition): a division ending the turn on a fungus tile loses
+## `org` org and `strength` strength, scaled by HexMap.fungus_scale (halved for Verdant, none for
+## natives). Strength never drops below `min_strength`, so attrition alone does not destroy a unit.
+## Scouts and colony pods are not exempt.
+func _fungus_attrition(hex_map: HexMap) -> void:
+	var rules: Dictionary = hex_map.natives_config.get("fungus_attrition", {})
+	if rules.is_empty() or hex_map.fungus_tiles.is_empty():
+		return
+	for d in divisions:
+		if not hex_map.fungus_tiles.has(d.hex):
+			continue
+		var scale := hex_map.fungus_scale(d.nation)
+		if scale <= 0.0:
+			continue
+		d.org = maxf(d.org - float(rules.org) * scale, 0.0)
+		d.strength = maxf(d.strength - float(rules.strength) * scale, minf(float(rules.min_strength), d.strength))
+
+
 ## Highest fortify level d can reach: combat.max_fortify plus the faction's max_fortify_mod.
 func max_fortify_for(d: Division) -> int:
 	var mod := int(traits.mod(d.nation, "max_fortify_mod", 0)) if traits != null else 0
@@ -286,7 +346,44 @@ func fortify(d: Division) -> bool:
 
 # --- Attack ---
 
+## Frontage (Task 46): at most combat.max_attackers_per_hex attackers may have an attack order on
+## one hex (0 or missing = no cap). A template with "ignores_frontage_cap" neither counts nor is blocked.
+func ignores_frontage(d: Division) -> bool:
+	return bool(templates.get(d.unit_type, {}).get("ignores_frontage_cap", false))
+
+
+## Attack orders already on `hex`, not counting `except` or units that ignore the cap.
+func attackers_on(hex: Vector2i, except: Division = null) -> int:
+	var n := 0
+	for o in divisions:
+		if o != except and o.order_attack and not o.order_path.is_empty() and o.order_path[0] == hex \
+				and not ignores_frontage(o):
+			n += 1
+	return n
+
+
+## True if d may not join an attack on `hex`: the hex already has the maximum attackers.
+func frontage_blocked(d: Division, hex: Vector2i) -> bool:
+	var cap := int(combat.get("max_attackers_per_hex", 0))
+	return cap > 0 and not ignores_frontage(d) and attackers_on(hex, d) >= cap
+
+
+## Enemy hexes d could attack but for the frontage cap (shown greyed in the attack preview).
+func frontage_blocked_targets(d: Division, hex_map: HexMap) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	for o in divisions:
+		if o != d and o.nation != d.nation and not neutral_nations.has(o.nation) and not hides_from(d.nation, o.hex) \
+				and _can_attack_ignoring_frontage(d, o, hex_map) and frontage_blocked(d, o.hex):
+			out.append(o.hex)
+	out.sort()
+	return out
+
+
 func can_attack(attacker: Division, defender: Division, hex_map: HexMap) -> bool:
+	return _can_attack_ignoring_frontage(attacker, defender, hex_map) and not frontage_blocked(attacker, defender.hex)
+
+
+func _can_attack_ignoring_frontage(attacker: Division, defender: Division, hex_map: HexMap) -> bool:
 	return (not is_unarmed(attacker) and attacker.moves_left > 0 and not attacker.has_moved and defender != null
 			and defender.nation != attacker.nation and not neutral_nations.has(defender.nation)
 			and defender.hex in hex_map.neighbors(attacker.hex))
@@ -358,12 +455,19 @@ func attack(attacker: Division, defender: Division, hex_map: HexMap) -> Dictiona
 	var org_div := 1.0
 	if traits != null and not own_city.is_empty() and own_city.nation == defender.nation:
 		org_div = float(traits.mod(defender.nation, "org_mult_defending_own_city", 1.0))
-	var taken_by_defender := _damage(defender, dmg_to_defender, org_div)
+	if hex_map.is_fungus(attacker.hex):  # Tendril Worm ambush: bonus when it attacks out of fungus
+		dmg_to_defender *= float(templates.get(attacker.unit_type, {}).get("ambush_attack_mult", 1.0))
+	# Crag Harrier dive: bonus against a defender that moved this turn (fortified or stationary units are safe).
+	if defender.has_moved and defender.fortify_level == 0:
+		dmg_to_defender *= float(templates.get(attacker.unit_type, {}).get("dive_attack_mult", 1.0))
+	var org_only: bool = templates.get(attacker.unit_type, {}).get("city_org_only", false) and not own_city.is_empty()
+	var taken_by_defender := _damage(defender, dmg_to_defender, org_div, org_only)
 	var taken_by_attacker := _damage(attacker, dmg_to_attacker)
 	attacker.moves_left = 0
 	attacker.fortify_level = 0
 	attacker.in_combat = true
 	defender.in_combat = true
+	_battle_pressure(attacker, defender, hex_map)
 	return {
 		"defender_defense": def_defense, "flank_mult": flank_mult(defender), "uphill_mult": uphill, "attacker_defense": atk_defense,
 		"damage_to_defender": dmg_to_defender, "damage_to_attacker": dmg_to_attacker,
@@ -372,6 +476,14 @@ func attack(attacker: Division, defender: Division, hex_map: HexMap) -> Dictiona
 		"attacker_outcome": _after_combat_or_defer(attacker, hex_map, defender.nation),
 		"defender_outcome": _after_combat_or_defer(defender, hex_map, attacker.nation),
 	}
+
+
+## Pressure: a battle on a fungus tile, or any battle involving natives, is a pressure event of
+## the attacker's faction (the defender's if a native attacks).
+func _battle_pressure(attacker: Division, defender: Division, hex_map: HexMap) -> void:
+	if not (is_native(attacker) or is_native(defender) or hex_map.is_fungus(attacker.hex) or hex_map.is_fungus(defender.hex)):
+		return
+	hex_map.pressure_event(defender.nation if is_native(attacker) else attacker.nation, "battle")
 
 
 ## While execute_orders runs, retreat/surrender waits until everything resolved.
@@ -386,10 +498,10 @@ func _after_combat_or_defer(d: Division, hex_map: HexMap, captor: int) -> String
 ## org and strength. Returns the {"org", "strength"} amounts applied before clamping.
 ## org_div > 1 means the defender's organization counts for that much more (Covenant in its own
 ## city), so it loses org_dmg / org_div.
-func _damage(d: Division, raw: float, org_div := 1.0) -> Dictionary:
+func _damage(d: Division, raw: float, org_div := 1.0, org_only := false) -> Dictionary:
 	var scaled: float = raw * maxf(float(combat.morale_offset) - d.morale, 0.0)
-	var org_dmg: float = scaled * float(combat.org_damage_share) / maxf(org_div, 0.0001)
-	var str_dmg: float = scaled * (1.0 - float(combat.org_damage_share))
+	var org_dmg: float = scaled * (1.0 if org_only else float(combat.org_damage_share)) / maxf(org_div, 0.0001)
+	var str_dmg: float = 0.0 if org_only else scaled * (1.0 - float(combat.org_damage_share))
 	d.org = maxf(d.org - org_dmg, 0.0)
 	d.strength = maxf(d.strength - str_dmg, 0.0)
 	return {"org": org_dmg, "strength": str_dmg}
@@ -399,8 +511,8 @@ func _damage(d: Division, raw: float, org_div := 1.0) -> Dictionary:
 ## land hex. If boxed in, it surrenders and is removed.
 ## Returns "destroyed", "retreated", "surrendered", or "held".
 func _after_combat(d: Division, hex_map: HexMap, captor: int) -> String:
-	if d.strength <= 0.0:
-		divisions.erase(d)
+	if d.strength <= 0.0 or (is_native(d) and d.org <= 0.0):
+		divisions.erase(d)  # a native at 0 org is removed: it never retreats or surrenders
 		return "destroyed"
 	if d.org > 0.0:
 		return "held"
@@ -412,7 +524,7 @@ func _after_combat(d: Division, hex_map: HexMap, captor: int) -> String:
 			d.fortify_level = 0
 			return "retreated"
 	divisions.erase(d)
-	if economy:
+	if economy and captor != NATIVE_NATION:
 		economy.add_pows(captor, d.nation, d.strength)
 	return "surrendered"
 
@@ -564,7 +676,7 @@ func turn_split(d: Division, path: Array[Vector2i], hex_map: HexMap) -> Array[in
 	var steps := 0
 	var i := 0
 	while i < path.size():
-		var cost := hex_map.step_cost(path[i - 1] if i > 0 else d.hex, path[i], d.nation)
+		var cost := step_cost_for(d, path[i - 1] if i > 0 else d.hex, path[i], hex_map)
 		if moves <= 0 or (moves < cost and moved):
 			out.append(steps)
 			steps = 0
@@ -614,11 +726,19 @@ func execute_orders(hex_map: HexMap) -> void:
 	order.sort_custom(by_id)
 	var movers: Array = []
 	var attacks: Array = []  # [attacker, target]
+	var on_hex := {}  # frontage: attackers kept per target hex
+	var cap := int(combat.get("max_attackers_per_hex", 0))
 	for d in order:
 		if d.order_path.is_empty():
 			continue
 		if d.order_attack:
-			attacks.append([d, division_at(d.order_path[0])])
+			var hex: Vector2i = d.order_path[0]
+			if cap > 0 and not ignores_frontage(d):
+				if int(on_hex.get(hex, 0)) >= cap:
+					turn_log.append("Div %d (n%d) cannot join the attack on %s: frontage full" % [d.id, d.nation, hex])
+					continue
+				on_hex[hex] = int(on_hex.get(hex, 0)) + 1
+			attacks.append([d, division_at(hex)])
 		else:
 			d.fortify_level = 0
 			movers.append(d)
@@ -816,6 +936,7 @@ func _meeting(a: Division, b: Division, terrain_a: Vector2i, terrain_b: Vector2i
 	var head_on := where.begins_with("head-on")
 	var result := ("tie, both hold" if head_on else "tie, both bounce") if res == 0 else (
 			"div %d wins the clash, both hold" if head_on else "div %d wins") % (a.id if res == 1 else b.id)
+	_battle_pressure(a, b, hex_map)
 	turn_log.append("Clash %s: div %d (n%d) vs div %d (n%d): %s" % [where, a.id, a.nation, b.id, b.nation, result])
 	return res
 
@@ -850,6 +971,9 @@ func run_ai(player_nation: int, hex_map: HexMap) -> void:
 	for d in divisions.duplicate():
 		if d.nation == player_nation or not divisions.has(d):
 			continue
+		if is_native(d):
+			NativeAI.plan(d, self, hex_map)
+			continue
 		if is_colonizer(d):
 			_ai_colonizer(d, hex_map)
 			continue
@@ -863,7 +987,8 @@ func run_ai(player_nation: int, hex_map: HexMap) -> void:
 		for n in hex_map.neighbors(d.hex):
 			var other := division_at(n)
 			if other and other.nation != d.nation:
-				enemies.append(other)
+				if not frontage_blocked(d, n):  # a full hex is not a target for the AI
+					enemies.append(other)
 			elif can_move(d, n, hex_map):
 				free.append(n)
 		if not enemies.is_empty():
@@ -993,6 +1118,8 @@ func _ai_colonizer(d: Division, hex_map: HexMap) -> void:
 ## True if a BFS over passable hexes not holding an enemy division reaches a city
 ## d's nation owns within supply_max_path steps (d's own hex is step 0).
 func is_in_supply(d: Division, hex_map: HexMap) -> bool:
+	if is_native(d):
+		return true  # natives have no cities or economy and are never out of supply
 	var max_steps := int(combat.supply_max_path)
 	if traits != null:
 		max_steps += int(traits.mod(d.nation, "supply_range_bonus", 0))
@@ -1034,6 +1161,7 @@ func update_supply(hex_map: HexMap) -> void:
 func end_turn(hex_map: HexMap = null) -> void:
 	if hex_map:
 		update_supply(hex_map)
+	_fungus_attrition(hex_map)
 	var rate: float = combat.org_recovery_per_morale
 	for d in divisions:
 		if not d.supplied:

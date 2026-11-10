@@ -30,6 +30,8 @@ var roster: DivisionRoster
 var selected: Division
 ## Valid target hexes for the active action mode, outlined.
 var highlights: Array[Vector2i] = []
+## Attack targets blocked by the frontage cap (Task 46), drawn greyed and not clickable.
+var blocked_highlights: Array[Vector2i] = []
 var player_nation := 0
 const ORDER_COLOR := Color(1, 1, 1, 0.9)
 const ATTACK_COLOR := Color(0.9, 0.1, 0.1, 0.95)
@@ -111,6 +113,8 @@ func _draw() -> void:
 			var owner := owner_of(cell)
 			if owner >= 0:
 				draw_colored_polygon(corners, Color(_color_for(owner), float(palette.tint_alpha)))
+			if hex_map.fungus_tiles.has(cell):  # fungus: a purple tint, deeper with density
+				draw_colored_polygon(corners, Color(0.55, 0.15, 0.6, 0.12 * float(hex_map.fungus_tiles[cell])))
 			if fstate == Fog.EXPLORED:
 				draw_colored_polygon(corners, EXPLORED_DIM)
 			corners.append(corners[0])
@@ -131,6 +135,10 @@ func _draw() -> void:
 		var hc := _corners(hex_to_pixel(cell))
 		hc.append(hc[0])
 		draw_polyline(hc, Color(1, 1, 1, 0.9), 3.0)
+	for cell in blocked_highlights:
+		var bc := _corners(hex_to_pixel(cell))
+		bc.append(bc[0])
+		draw_polyline(bc, Color(0.55, 0.55, 0.55, 0.9), 3.0)
 	if roster:
 		_draw_orders()
 
@@ -219,7 +227,49 @@ func spent_alpha() -> float:
 	return float(palette.counter.get("spent_alpha", 1.0))
 
 
+## A native creature (no standee plate): a placeholder silhouette with the magenta outline.
+## worm: a wavy body; strider: an oval body on four legs.
+func _draw_native(d: Division) -> void:
+	var k := _k()
+	var c: Dictionary = palette.counter
+	var outline := Color.html(str(hex_map.natives_config.get("render", {}).get("outline", "#FF00FF")))
+	var center := hex_to_pixel(d.hex) + Vector2(0, -2 * k)
+	var body := Color.html(c.neutral_fill).lightened(0.2)
+	if d.unit_type == "tendril_worm":
+		var pts := PackedVector2Array()
+		for i in 9:
+			pts.append(center + Vector2((i - 4) * 4.0 * k, sin(i * 1.2) * 4.0 * k))
+		draw_polyline(pts, outline, 7.0 * k)
+		draw_polyline(pts, body, 3.5 * k)
+	else:
+		var ring := PackedVector2Array()
+		for i in 25:
+			var a := TAU * i / 24.0
+			ring.append(center + Vector2(cos(a) * 13 * k, sin(a) * 7 * k))
+		draw_colored_polygon(ring, outline)
+		for sx in [-9, -3, 3, 9]:
+			draw_line(center + Vector2(sx * k, 5 * k), center + Vector2(sx * k * 1.2, 12 * k), outline, 3.0 * k)
+		var inner := PackedVector2Array()
+		for i in 25:
+			var a := TAU * i / 24.0
+			inner.append(center + Vector2(cos(a) * 11 * k, sin(a) * 5 * k))
+		draw_colored_polygon(inner, body)
+	var fr := bar_fractions(d)
+	var bar := Vector2(30 * k, 3 * k)
+	var y := center.y + 14 * k
+	for i in 2:
+		var track := Rect2(Vector2(center.x - bar.x / 2, y), bar)
+		draw_rect(track, Color.html(c.track))
+		draw_rect(Rect2(track.position, Vector2(bar.x * fr[i], bar.y)), Color.html(c.org if i == 0 else c.str))
+		y += bar.y + 1 * k
+	if d == selected:
+		draw_circle(center, 16 * k, Color.html(c.selected), false, 2.0)
+
+
 func _draw_counter(d: Division) -> void:
+	if d.nation == DivisionRoster.NATIVE_NATION:
+		_draw_native(d)
+		return
 	var k := _k()
 	var c: Dictionary = palette.counter
 	var light := Color.html(c.frame)

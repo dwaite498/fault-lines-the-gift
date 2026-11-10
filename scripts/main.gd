@@ -60,9 +60,12 @@ func _ready() -> void:
 	_view.hex_map.load_faction_views(factions.all)
 	_view.hex_map.load_faction_traits(factions.all, FactionRoster.load_global())
 	_view.hex_map.load_attitude(factions.all, FactionRoster.load_global(), FactionRoster.load_ai())
+	_view.hex_map.load_natives_config(NativeSpawner.load_config())
 	_view.roster = DivisionRoster.new()
 	_view.roster.traits = _view.hex_map.traits
 	_view.roster.spawn_at_cities(_view.hex_map)
+	if saved.is_empty():
+		_view.hex_map.place_fungus(_view.roster.rng)  # a loaded game brings its own fungus
 	_view.hidden_nations = _view.roster.neutral_nations
 	_fog = Fog.from_config(map_cfg, PLAYER_NATION)
 	_view.roster.fog = _fog
@@ -137,6 +140,7 @@ func _ready() -> void:
 	if not saved.is_empty():
 		turn = SaveGame.restore(saved, _view.hex_map, _view.roster, _economy)
 		_fog.restore(saved.extras.get("fog", {}))
+		_view.hex_map.pressure.restore(saved.extras.get("pressure", {}))
 		_loaded = true
 		print("Loaded the saved game at turn %d" % turn)
 	else:
@@ -152,7 +156,7 @@ func _capture_state() -> Dictionary:
 	var ids: Array = []
 	for i in _view.factions.assigned.size():
 		ids.append(_view.factions.id_of(i))
-	return SaveGame.capture(_view.hex_map, _view.roster, _economy, turn, _map_cfg, ids, {"fog": _fog.capture()})
+	return SaveGame.capture(_view.hex_map, _view.roster, _economy, turn, _map_cfg, ids, {"fog": _fog.capture(), "pressure": _view.hex_map.pressure.capture()})
 
 
 func _on_save_pressed() -> void:
@@ -295,6 +299,11 @@ func _finish_turn() -> void:
 	_economy.end_turn(_view.hex_map, roster)
 	turn += 1
 	_view.hex_map.current_turn = turn
+	var world_events := _view.hex_map.pressure.end_turn(_view.hex_map, turn)
+	if not world_events.is_empty():
+		message.text = ". ".join(world_events)
+	NativeSpawner.run(_view.hex_map, roster, turn)
+	NativeAI.raid_step(_view.hex_map, roster, turn)
 	var stalled := _economy.stalled_cities(PLAYER_NATION, _view.hex_map)
 	if not stalled.is_empty():
 		message.text = "Recruit stalled in city %s: assign Training labor" % ", ".join(stalled.map(func(i: int) -> String: return str(i)))
@@ -326,8 +335,11 @@ func select_unit(d: Division) -> void:
 func _set_mode(mode: String) -> void:
 	_mode = mode
 	_view.highlights.clear()
+	_view.blocked_highlights.clear()
 	if mode != "" and _view.selected:
 		_view.highlights = _view.roster.action_targets(_view.selected, mode, _view.hex_map)
+		if mode == "attack":
+			_view.blocked_highlights = _view.roster.frontage_blocked_targets(_view.selected, _view.hex_map)
 
 
 ## Button or hotkey for one of the selected unit's actions. Move/Attack/Follow
