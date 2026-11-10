@@ -62,7 +62,7 @@ Natives use the normal combat resolution. They don't fortify and can't capture c
 | Level | Name | Threshold | Effect (multipliers stack on the base config) |
 |---|---|---|---|
 | 1 | Wary | 0 | Base spawn chances and stats. |
-| 2 | Hostile | 30 | Spawn chances x2, native str/atk x1.25, `max_natives` +4. |
+| 2 | Hostile | 25 (PM ruling; was 30) | Spawn chances x2, native str/atk x1.25, `max_natives` +4. |
 | 3 | Swarm | 60 | Spawn chances x3 (stacked on Hostile, so x6 total), native str/atk x1.5 (x1.875 total), `max_natives` +8. Worms may spawn on density-2 fungus. |
 - Decay: if pressure is below the current level's threshold, it drops by 0.5 per turn. Swarm never decays. Once pressure reaches 60, the level stays at 3 for the rest of the game.
 - Levels go up immediately when a threshold is crossed. They go down only through decay, and only from Hostile to Wary.
@@ -82,7 +82,7 @@ Spore Drifter, Mycel Hive, Trench Leviathan, and Reef Skimmer; fungus growth and
 3. A native with an enemy adjacent attacks it. Otherwise it moves within its habitat.
 4. Natives never capture or claim a city.
 5. Building one infrastructure as Verdant adds 0.25 pressure, and as Syndicate adds 0.625.
-6. Pressure 30 gives Hostile with doubled spawn chance, and pressure 60 gives Swarm, which stays even if pressure is later forced to 0.
+6. Pressure 25 gives Hostile with doubled spawn chance, and pressure 60 gives Swarm, which stays even if pressure is later forced to 0.
 7. In a test where only faction X razes cities, at least 60% of 100 seeded spawns land near X's territory.
 8. Every number is in data/natives.json.
 
