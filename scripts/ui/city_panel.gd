@@ -17,10 +17,13 @@ var factions: FactionRoster
 signal recruit_pressed
 ## Emitted when the Colony pod button is clicked (same action as the P key).
 signal pod_pressed
+## Emitted when the Scout button is clicked (same action as the S key).
+signal scout_pressed
 ## Emitted when the Annex button (an occupied city whose timer ran out) is clicked.
 signal annex_pressed
 var annex_button := Button.new()
 var pod_button := Button.new()
+var scout_button := Button.new()
 ## Emitted by a labor row's -/+ button: the sink name and +1 or -1.
 signal labor_pressed(sink: String, delta: int)
 ## sink -> {"label": Label, "minus": Button, "plus": Button}
@@ -37,6 +40,9 @@ func _init() -> void:
 	panel.add_child(button)
 	button.focus_mode = Control.FOCUS_NONE
 	button.pressed.connect(func(): recruit_pressed.emit())
+	panel.add_child(scout_button)
+	scout_button.focus_mode = Control.FOCUS_NONE
+	scout_button.pressed.connect(func(): scout_pressed.emit())
 	panel.add_child(pod_button)
 	pod_button.focus_mode = Control.FOCUS_NONE
 	pod_button.pressed.connect(func(): pod_pressed.emit())
@@ -141,6 +147,7 @@ func refresh(city: Dictionary) -> void:
 		row.plus.disabled = economy.unassigned_labor(city) <= 0 or (sink == "training" and city.get("enslaved", false))
 		psize = Vector2(maxf(psize.x, 226.0), psize.y + ROW_HEIGHT)
 	pod_button.visible = button.visible
+	scout_button.visible = button.visible
 	annex_button.visible = button.visible and hex_map.can_annex_occupied(city)
 	if annex_button.visible:
 		annex_button.position = Vector2(8, psize.y)
@@ -153,6 +160,12 @@ func refresh(city: Dictionary) -> void:
 		button.position = Vector2(8, psize.y)
 		button.size = button.get_minimum_size()
 		psize = Vector2(maxf(psize.x, button.size.x + 16), psize.y + button.size.y + 8)
+		var scout_reason := economy.scout_block_reason(city, player_nation, roster)
+		scout_button.disabled = scout_reason != ""
+		scout_button.text = "Scout (S)" if scout_reason == "" else "Scout: " + scout_reason
+		scout_button.position = Vector2(8, psize.y)
+		scout_button.size = scout_button.get_minimum_size()
+		psize = Vector2(maxf(psize.x, scout_button.size.x + 16), psize.y + scout_button.size.y + 8)
 		var pod_reason := economy.colony_block_reason(city, player_nation)
 		pod_button.disabled = pod_reason != ""
 		pod_button.text = "Colony pod (P)" if pod_reason == "" else "Colony pod: " + pod_reason
