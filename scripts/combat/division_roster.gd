@@ -408,6 +408,7 @@ func attack(attacker: Division, defender: Division, hex_map: HexMap) -> Dictiona
 	attacker.fortify_level = 0
 	attacker.in_combat = true
 	defender.in_combat = true
+	_battle_pressure(attacker, defender, hex_map)
 	return {
 		"defender_defense": def_defense, "flank_mult": flank_mult(defender), "uphill_mult": uphill, "attacker_defense": atk_defense,
 		"damage_to_defender": dmg_to_defender, "damage_to_attacker": dmg_to_attacker,
@@ -416,6 +417,14 @@ func attack(attacker: Division, defender: Division, hex_map: HexMap) -> Dictiona
 		"attacker_outcome": _after_combat_or_defer(attacker, hex_map, defender.nation),
 		"defender_outcome": _after_combat_or_defer(defender, hex_map, attacker.nation),
 	}
+
+
+## Pressure: a battle on a fungus tile, or any battle involving natives, is a pressure event of
+## the attacker's faction (the defender's if a native attacks).
+func _battle_pressure(attacker: Division, defender: Division, hex_map: HexMap) -> void:
+	if not (is_native(attacker) or is_native(defender) or hex_map.is_fungus(attacker.hex) or hex_map.is_fungus(defender.hex)):
+		return
+	hex_map.pressure_event(defender.nation if is_native(attacker) else attacker.nation, "battle")
 
 
 ## While execute_orders runs, retreat/surrender waits until everything resolved.
@@ -860,6 +869,7 @@ func _meeting(a: Division, b: Division, terrain_a: Vector2i, terrain_b: Vector2i
 	var head_on := where.begins_with("head-on")
 	var result := ("tie, both hold" if head_on else "tie, both bounce") if res == 0 else (
 			"div %d wins the clash, both hold" if head_on else "div %d wins") % (a.id if res == 1 else b.id)
+	_battle_pressure(a, b, hex_map)
 	turn_log.append("Clash %s: div %d (n%d) vs div %d (n%d): %s" % [where, a.id, a.nation, b.id, b.nation, result])
 	return res
 

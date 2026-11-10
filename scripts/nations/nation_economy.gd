@@ -207,6 +207,7 @@ func apply_infrastructure(hex_map: HexMap) -> void:
 		while progress >= per_level:
 			progress -= per_level
 			city.infrastructure = float(city.infrastructure) + 1.0
+			hex_map.pressure_event(int(city.nation), "infra")
 		city.infra_progress = progress
 
 
