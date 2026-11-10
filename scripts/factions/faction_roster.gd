@@ -27,6 +27,11 @@ static func load_global(path := FACTIONS_PATH) -> Dictionary:
 	return JSON.parse_string(FileAccess.get_file_as_string(path)).get("global", {})
 
 
+## The `ai` block of factions.json (target weighting numbers).
+static func load_ai(path := FACTIONS_PATH) -> Dictionary:
+	return JSON.parse_string(FileAccess.get_file_as_string(path)).get("ai", {})
+
+
 ## Picks `count` factions with at least one sea faction, deterministic for a seed.
 ## player_id (optional) forces the player's faction; it becomes nation 0.
 ## faction_seed < 0 uses the map seed.

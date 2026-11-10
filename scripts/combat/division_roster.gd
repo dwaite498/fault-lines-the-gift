@@ -867,11 +867,95 @@ func run_ai(player_nation: int, hex_map: HexMap) -> void:
 			elif can_move(d, n, hex_map):
 				free.append(n)
 		if not enemies.is_empty():
-			set_order(d, enemies[rng.randi_range(0, enemies.size() - 1)].hex, hex_map)
+			var pick := _lowest_attitude(d, enemies, hex_map)
+			set_order(d, pick[rng.randi_range(0, pick.size() - 1)].hex, hex_map)
+		elif _ai_target_city(d, hex_map):
+			continue
 		elif not free.is_empty() and rng.randf() < 0.7:
 			set_order(d, free[rng.randi_range(0, free.size() - 1)], hex_map)
 		else:
 			fortify(d)
+
+
+## The enemies among `enemies` that d's nation likes least (all of them without attitude data).
+func _lowest_attitude(d: Division, enemies: Array[Division], hex_map: HexMap) -> Array[Division]:
+	if not hex_map.attitude.enabled():
+		return enemies
+	var best := INF
+	var out: Array[Division] = []
+	for e in enemies:
+		var a := hex_map.attitude_between(d.nation, e.nation)
+		if a < best - 1e-9:
+			best = a
+			out.clear()
+		if is_equal_approx(a, best):
+			out.append(e)
+	return out
+
+
+## Target weighting (FACTION_TRAITS.md, AI target weighting): for an enemy city within
+## ai.target_range, score = -attitude x attitude_weight - hex distance x distance_weight +
+## (my local strength / their local strength - 1) x 10 x strength_ratio_weight. Local strength
+## is the strength of a nation's divisions within ai.local_radius of the division / the city
+## (an empty city counts ai.empty_city_strength). Neutral nations are not targets.
+func ai_target_score(d: Division, city: Dictionary, hex_map: HexMap) -> float:
+	var rules: Dictionary = hex_map.attitude.rules
+	var mine := _local_strength(d.nation, d.hex, int(rules.get("local_radius", 2)))
+	var theirs := maxf(_local_strength(int(city.nation), city.cell, int(rules.get("local_radius", 2))),
+			float(rules.get("empty_city_strength", 1.0)))
+	return -hex_map.attitude_between(d.nation, int(city.nation)) * float(rules.get("attitude_weight", 1.0)) \
+			- float(HexMap.hex_distance(d.hex, city.cell)) * float(rules.get("distance_weight", 0.0)) \
+			+ (mine / theirs - 1.0) * 10.0 * float(rules.get("strength_ratio_weight", 1.0))
+
+
+func _local_strength(nation: int, center: Vector2i, radius: int) -> float:
+	var total := 0.0
+	for o in divisions:
+		if o.nation == nation and HexMap.hex_distance(o.hex, center) <= radius:
+			total += o.strength
+	return total
+
+
+## The enemy cities in range ordered by AI score (best first), only those above
+## ai.min_attack_score. Empty without attitude data.
+func ai_targets(d: Division, hex_map: HexMap) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	if not hex_map.attitude.enabled() or is_unarmed(d):
+		return out
+	var rules: Dictionary = hex_map.attitude.rules
+	var scores := {}
+	for city in hex_map.cities:
+		if city.nation == d.nation or neutral_nations.has(city.nation):
+			continue
+		if HexMap.hex_distance(d.hex, city.cell) > int(rules.get("target_range", 0)):
+			continue
+		var score := ai_target_score(d, city, hex_map)
+		if score > float(rules.get("min_attack_score", 0.0)):
+			scores[int(city.id)] = score
+			out.append(city)
+	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+			if scores[int(a.id)] != scores[int(b.id)]:
+				return scores[int(a.id)] > scores[int(b.id)]
+			return int(a.id) < int(b.id))
+	return out
+
+
+## Orders d toward the best-scoring reachable enemy city; false if there is none.
+func _ai_target_city(d: Division, hex_map: HexMap) -> bool:
+	for city in ai_targets(d, hex_map):
+		if set_order(d, city.cell, hex_map):
+			return true
+		# A garrisoned city cannot be entered: close in on the nearest free hex beside it.
+		var beside: Array[Vector2i] = []
+		for n in hex_map.neighbors(city.cell):
+			if division_at(n) == null:
+				beside.append(n)
+		beside.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
+				return HexMap.hex_distance(d.hex, a) < HexMap.hex_distance(d.hex, b))
+		for n in beside:
+			if set_order(d, n, hex_map):
+				return true
+	return false
 
 
 ## AI scout: heads for the nearest tile its nation has never explored that it can reach.

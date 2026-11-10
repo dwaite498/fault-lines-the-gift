@@ -59,6 +59,7 @@ func _ready() -> void:
 	_view.hex_map.nation_factions = factions.nation_ids()
 	_view.hex_map.load_faction_views(factions.all)
 	_view.hex_map.load_faction_traits(factions.all, FactionRoster.load_global())
+	_view.hex_map.load_attitude(factions.all, FactionRoster.load_global(), FactionRoster.load_ai())
 	_view.roster = DivisionRoster.new()
 	_view.roster.traits = _view.hex_map.traits
 	_view.roster.spawn_at_cities(_view.hex_map)

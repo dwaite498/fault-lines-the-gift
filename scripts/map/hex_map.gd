@@ -101,6 +101,8 @@ var last_capture := {}
 var growth_mods: Dictionary = {}
 ## Faction trait modifiers (factions.json faction_traits), filled by load_faction_traits.
 var traits := FactionTraits.new()
+## Affinity axes, rivals and attitude (Task 42); empty until load_attitude.
+var attitude := Attitude.new()
 ## The game's current turn (main.gd keeps it); the plunder cooldown reads it.
 var current_turn := 0
 ## nation -> turn it last plundered a city (used when plunder_cooldown_scope is "nation").
@@ -896,6 +898,17 @@ func plunder_turns_left(nation: int, city_id := -1) -> int:
 	return maxi(last + cooldown - current_turn, 0)
 
 
+## Loads the affinity axes, rivals and AI weights (factions.json) for this map's nations
+## (nation_factions must be set).
+func load_attitude(factions: Array, global_block: Dictionary, ai_block: Dictionary) -> void:
+	attitude.load_factions(factions, global_block, ai_block, nation_factions)
+
+
+## Attitude of nation a toward nation b (axes, rivals and b's atrocity record).
+func attitude_between(a: int, b: int) -> float:
+	return attitude.between(self, a, b)
+
+
 ## Loads faction_traits and the global block (factions.json) for this map's nations
 ## (nation_factions must be set), and gives each nation its static growth_mod through
 ## growth_mods.
@@ -938,7 +951,7 @@ func is_atrocity_to(observer_faction: String, event: Dictionary) -> bool:
 
 ## How heavily the observing faction weighs a reputation_event: an atrocity to it counts
 ## capture.atrocity_weight x the faction's atrocity sensitivity, any other event counts its
-## base severity. Task 42's attitude will consume this; nothing does yet.
+## base severity. Attitude.between() consumes this (Task 42).
 func reputation_weight_to(observer_faction: String, event: Dictionary) -> float:
 	if is_atrocity_to(observer_faction, event):
 		return float(city_rules.capture.atrocity_weight) * float(faction_sensitivity.get(observer_faction, 1.0))
