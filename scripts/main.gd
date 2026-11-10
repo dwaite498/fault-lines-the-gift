@@ -3,7 +3,7 @@ extends Node2D
 ## Controls: click your division to select it, then click a reachable hex to order
 ## a move or an adjacent enemy to order an attack (right-click without dragging, or Esc, clears the
 ## order). Camera: arrow keys pan, middle/right-drag pans, wheel zooms at the cursor. F fortifies. Esc opens the menu (Save Game, Main Menu, Quit) when there is nothing to cancel. Space ends the turn and executes all orders (AI orders are
-## issued at the start of each turn, before yours). With your city panel open, R recruits infantry. N toggles the military panel. Capturing a city opens a popup to choose Annex, Occupy, Plunder, Reduce, Raze or Enslave; an occupied city shows an Annex button once its timer is up. Debug: K removes the newest city.
+## issued at the start of each turn, before yours). With your city panel open, R recruits infantry and P queues a colony pod (B on a selected pod founds an Outpost). N toggles the military panel. Capturing a city opens a popup to choose Annex, Occupy, Plunder, Reduce, Raze or Enslave; an occupied city shows an Annex button once its timer is up. Debug: K removes the newest city.
 
 const GAME_TITLE := "Fault Lines: Planetfall"
 const MAP_CONFIG_PATH := "res://data/map_config.json"
@@ -79,6 +79,11 @@ func _ready() -> void:
 	_city_panel.roster = _view.roster
 	_city_panel.player_nation = PLAYER_NATION
 	_city_panel.recruit_pressed.connect(_on_recruit_pressed)
+	_city_panel.pod_pressed.connect(func() -> void:
+			message.text = ""
+			if not _city.is_empty() and _city.nation == PLAYER_NATION:
+				_try_colony_pod()
+			_refresh_panels())
 	_city_panel.labor_pressed.connect(_on_labor_pressed)
 	_city_panel.annex_pressed.connect(_on_annex_pressed)
 	_capture_popup.chosen.connect(_on_capture_chosen)
@@ -197,6 +202,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		select_unit(next_idle_unit(_view.selected))
 	elif key.keycode == KEY_R and not _city.is_empty() and _city.nation == PLAYER_NATION:
 		_try_recruit()
+	elif key.keycode == KEY_P and not _city.is_empty() and _city.nation == PLAYER_NATION:
+		_try_colony_pod()
 	elif key.keycode == KEY_N:
 		_military_panel.toggle()
 	elif key.keycode == KEY_K and OS.is_debug_build():
@@ -272,7 +279,7 @@ func _on_annex_pressed() -> void:
 
 ## Hotkeys for the unit panel's action buttons (Task 26). N toggles the military
 ## panel (was M); K is the debug remove-city key (was D).
-const ACTION_KEYS := {KEY_M: "move", KEY_A: "attack", KEY_D: "dig_in", KEY_F: "follow", KEY_ESCAPE: "cancel"}
+const ACTION_KEYS := {KEY_M: "move", KEY_A: "attack", KEY_D: "dig_in", KEY_F: "follow", KEY_B: "found", KEY_ESCAPE: "cancel"}
 
 
 ## Selects d (or nothing) and leaves any target mode.
@@ -302,6 +309,10 @@ func do_action(action: String) -> void:
 		elif action == "dig_in":
 			_view.roster.clear_order(d)
 			_view.roster.fortify(d)
+		elif action == "found":
+			var city := _view.roster.found_city(d, _view.hex_map)
+			message.text = "Founded an Outpost" if not city.is_empty() else "Cannot found a city here"
+			select_unit(null)
 		else:
 			_set_mode(action)
 	_refresh_panels()
@@ -374,6 +385,17 @@ func _try_recruit() -> void:
 		print("Recruiting at city %d; arrives in %d turns" % [_city.id, int(_economy.config.training_turns)])
 	else:
 		message.text = "Cannot recruit: " + reason
+		print(message.text)
+
+
+## P key and the city panel's Colony pod button.
+func _try_colony_pod() -> void:
+	var reason := _economy.colony_block_reason(_city, PLAYER_NATION)
+	if reason == "":
+		_economy.queue_colony_pod(_city, PLAYER_NATION)
+		print("Colony pod queued at city %d" % _city.id)
+	else:
+		message.text = "Cannot queue a colony pod: " + reason
 		print(message.text)
 
 

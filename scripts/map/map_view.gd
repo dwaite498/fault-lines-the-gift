@@ -184,9 +184,9 @@ func counter_fill(nation: int) -> Color:
 	return _color_for(nation).darkened(float(c.darken))
 
 
-## "x" (infantry, default), "ellipse" (armor) or "dot" (artillery).
+## "x" (infantry, default), "ellipse" (armor), "dot" (artillery) or "plus" (colony pod).
 static func symbol_for(unit_type: String) -> String:
-	return {"armor": "ellipse", "artillery": "dot"}.get(unit_type, "x")
+	return {"armor": "ellipse", "artillery": "dot", "colony_pod": "plus"}.get(unit_type, "x")
 
 
 ## [org, strength] bar fill fractions, clamped to 0..1.
@@ -224,6 +224,9 @@ func _draw_counter(d: Division) -> void:
 			draw_polyline(pts, light, 2.0)
 		"dot":
 			draw_circle(center, 5 * k, light)
+		"plus":
+			draw_line(Vector2(center.x - inner.size.x / 2, center.y), Vector2(center.x + inner.size.x / 2, center.y), light, 2.0)
+			draw_line(Vector2(center.x, inner.position.y), Vector2(center.x, inner.end.y), light, 2.0)
 	var font := ThemeDB.fallback_font
 	var fs := int(round(10 * k))
 	var tw := font.get_string_size("XX", HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x

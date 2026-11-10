@@ -20,5 +20,17 @@
 		"type": "robotic",
 		"people_per_strength": 2,
 		"upkeep": {"cash": 10, "alloy": 1, "fuel": 1}
+	},
+	"colony_pod": {
+		"type": "colony_pod",
+		"colonizer": true,
+		"strength": 100,
+		"organization": 10,
+		"morale": 0.5,
+		"attack": 0,
+		"defense": 1,
+		"move": 2,
+		"people_per_strength": 30,
+		"upkeep": {}
 	}
 }
