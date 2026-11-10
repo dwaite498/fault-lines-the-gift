@@ -6,5 +6,11 @@
 		"mountains": {"color": "#8a8580", "move_cost": 3, "defense_mult": 2.0, "passable": true},
 		"water": {"color": "#29528c", "move_cost": 1, "defense_mult": 1.0, "passable": false}
 	},
+	"elevation": {
+		"min": -3,
+		"max": 4,
+		"shallows": 0,
+		"by_terrain": {"water": -1, "plains": 1, "forest": 1, "hills": 2, "mountains": 3, "crater": 0, "scorched": 1}
+	},
 	"land_weights": {"plains": 50, "forest": 25, "hills": 15, "mountains": 10}
 }

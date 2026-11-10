@@ -46,6 +46,10 @@ var coastal_nations: Array[int] = []
 var seed_value := 0
 ## Vector2i cell -> terrain name ("plains", "forest", ...). See generate_terrain().
 var terrain: Dictionary = {}
+## Vector2i cell -> elevation int (-3..4), from terrain_config.json's "elevation" table.
+## Water touching land is "shallows"; other water uses the table's water value.
+## View-only for now (Task 33); no rules read it.
+var elevation: Dictionary = {}
 ## Terrain name -> {color, move_cost, defense_mult, passable} from terrain_config.json.
 var terrain_types: Dictionary = {}
 
@@ -98,6 +102,24 @@ func generate_terrain(config: Dictionary) -> void:
 				terrain[cell] = weights.keys().back()
 	for city in cities:
 		terrain[city.cell] = "plains"
+	_assign_elevation(config.get("elevation", {}))
+
+
+func _assign_elevation(cfg: Dictionary) -> void:
+	elevation.clear()
+	var by_terrain: Dictionary = cfg.get("by_terrain", {})
+	var lo := int(cfg.get("min", -3))
+	var hi := int(cfg.get("max", 4))
+	for cell in terrain:
+		var e := int(by_terrain.get(terrain[cell], 0))
+		if terrain[cell] == "water" and neighbors(cell).any(func(n: Vector2i) -> bool: return cells[n] != WATER):
+			e = int(cfg.get("shallows", e))
+		elevation[cell] = clampi(e, lo, hi)
+
+
+## Elevation of cell; 0 before generate_terrain() has run.
+func elevation_of(cell: Vector2i) -> int:
+	return int(elevation.get(cell, 0))
 
 
 ## Fallback terrain when generate_terrain() hasn't run or a name is unknown.

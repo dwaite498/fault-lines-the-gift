@@ -9,6 +9,16 @@
 		"crater": "#2A2626",
 		"scorched": "#5A524A"
 	},
+	"iso": {
+		"tile_w": 96,
+		"tile_h": 48,
+		"step": 10,
+		"min_elev": -3,
+		"max_elev": 4,
+		"skirt_dark": [0.35, 0.20],
+		"origin": [64, 120],
+		"view_scale": 0.5
+	},
 	"grid": {
 		"color": "#000000",
 		"alpha": 0.18,
