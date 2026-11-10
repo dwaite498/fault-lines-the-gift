@@ -44,6 +44,7 @@ func _initialize() -> void:
 	test_save_load()
 	test_victory()
 	test_colonizers()
+	test_fog()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -1577,7 +1578,11 @@ func save_game_setup(seed_value: int) -> Dictionary:
 	var roster := make_roster()
 	roster.spawn_at_cities(m)
 	roster.economy = eco
-	return {"map": m, "eco": eco, "roster": roster, "cfg": cfg}
+	var fog := Fog.from_config(cfg)
+	roster.fog = fog
+	fog.explore_landing(m)
+	fog.update(m, roster)
+	return {"map": m, "eco": eco, "roster": roster, "cfg": cfg, "fog": fog}
 
 
 ## One end turn with every nation run by the AI (the order main.gd uses).
@@ -1591,13 +1596,15 @@ func save_play_turn(g: Dictionary) -> void:
 	m.grow_cities(roster.unit_cells())
 	g.eco.end_turn(m, roster)
 	roster.run_ai(-1, m)
+	g.fog.update(m, roster)
 
 
 func save_state(g: Dictionary, turn: int) -> Dictionary:
 	var ids: Array = []
 	for i in g.map.nations.size():
 		ids.append("f%d" % i)
-	return SaveGame.capture(g.map, g.roster, g.eco, turn, g.cfg, ids)
+	g.fog.update(g.map, g.roster)
+	return SaveGame.capture(g.map, g.roster, g.eco, turn, g.cfg, ids, {"fog": g.fog.capture()})
 
 
 func test_save_load() -> void:
@@ -1636,6 +1643,7 @@ func test_save_load() -> void:
 	# Load into fresh objects.
 	var g2 := save_game_setup(5)
 	var turn2 := SaveGame.restore(read, g2.map, g2.roster, g2.eco)
+	g2.fog.restore(read.extras.fog)
 	var h2 := SaveGame.state_hash(save_state(g2, turn2))
 	ok(turn2 == turn_n and h2 == h1, "saving on turn %d, loading and saving again gives the same state hash" % turn_n)
 	# The loaded game plays on exactly like the original (including the AI's random stream).
@@ -1888,3 +1896,162 @@ func test_colonizers() -> void:
 				founded_ok = false
 	ok(founded_ok, "no two cities are closer than 3 hexes after AI colonization")
 	ok(MapView.symbol_for("colony_pod") == "plus", "a pod draws a plus counter")
+
+
+# --- Task 40f: fog of war ---
+
+func fog_world() -> Dictionary:
+	var m := make_map(12, 7)
+	m.nations.assign([0, 1])
+	var roster := make_roster()
+	var fog := Fog.load_config()
+	roster.fog = fog
+	return {"map": m, "roster": roster, "fog": fog}
+
+
+func fog_visible_count(fog: Fog, m: HexMap, nation: int) -> int:
+	var n := 0
+	for cell in m.cells:
+		if fog.state(nation, cell) == Fog.VISIBLE:
+			n += 1
+	return n
+
+
+func test_fog() -> void:
+	var cfg: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://data/map_config.json"))
+	var rules: Dictionary = cfg.fog
+	ok(rules.landfall_radius == 2 and rules.sight.infantry == 2 and rules.sight.scout == 3 and rules.sight.city == 2 and rules.city_sight_bonus == 1 and rules.elevated_sight_bonus == 1 and rules.blocking_terrain == ["mountains"], "fog config: landfall 2, infantry 2, scout 3, city 2 (+1 at City tier), +1 elevated, mountains block")
+	ok(cfg.ai.respects_fog == false, "ai.respects_fog is false (the AI is omniscient)")
+	# Hex lines.
+	var lines_ok := true
+	for pair in [[Vector2i(0, 0), Vector2i(5, 3)], [Vector2i(4, 1), Vector2i(1, 5)], [Vector2i(2, 2), Vector2i(2, 2)], [Vector2i(0, 3), Vector2i(6, 3)], [Vector2i(3, 0), Vector2i(3, 6)]]:
+		var line := HexMap.hex_line(pair[0], pair[1])
+		lines_ok = lines_ok and line.size() == HexMap.hex_distance(pair[0], pair[1]) + 1 and line[0] == pair[0] and line[-1] == pair[1]
+		for i in range(1, line.size()):
+			lines_ok = lines_ok and HexMap.hex_distance(line[i - 1], line[i]) == 1
+	ok(lines_ok, "hex_line runs from a to b in unit steps")
+	# Sight ranges.
+	var w := fog_world()
+	var m: HexMap = w.map
+	var roster: DivisionRoster = w.roster
+	var fog: Fog = w.fog
+	var inf := roster.spawn_division(0, Vector2i(5, 3), "infantry")
+	fog.update(m, roster)
+	var within2 := 0
+	var all_in := true
+	for cell in m.cells:
+		var seen := fog.state(0, cell) == Fog.VISIBLE
+		if HexMap.hex_distance(inf.hex, cell) <= 2:
+			within2 += 1
+			all_in = all_in and seen
+		else:
+			all_in = all_in and not seen
+	ok(all_in and within2 == 19, "infantry sees exactly the 19 hexes within 2")
+	ok(fog_visible_count(fog, m, 1) == 0 and fog.state(1, inf.hex) == Fog.UNEXPLORED, "another nation with no units or cities sees nothing")
+	inf.unit_type = "scout"
+	fog.update(m, roster)
+	ok(fog_visible_count(fog, m, 0) == 37, "a scout sees 3 hexes (37 hexes)")
+	inf.unit_type = "infantry"
+	m.terrain[inf.hex] = "hills"
+	fog.update(m, roster)
+	ok(fog.sight_of_unit(inf, m) == 3 and fog_visible_count(fog, m, 0) == 37, "a unit on hills sees +1")
+	m.terrain[inf.hex] = "mountains"
+	ok(fog.sight_of_unit(inf, m) == 3, "a unit on mountains sees +1")
+	m.terrain[inf.hex] = "plains"
+	# Cities: sight 2, +1 at City tier (15,000).
+	m.cities.append({"id": 0, "nation": 0, "cell": Vector2i(9, 1), "population": 14999, "radius": 1})
+	ok(fog.sight_of_city(m.cities[0]) == 2 and fog.tier_of(14999) == "base", "a 14,999 city sees 2 (Base)")
+	m.cities[0].population = 15000
+	ok(fog.sight_of_city(m.cities[0]) == 3 and fog.tier_of(15000) == "city" and fog.tier_of(4999) == "outpost" and fog.tier_of(30000) == "metropolis", "a 15,000 city (City tier) sees 3")
+	# Mountains block sight to the tiles behind them, but can be seen themselves.
+	var w2 := fog_world()
+	var m2: HexMap = w2.map
+	var roster2: DivisionRoster = w2.roster
+	var fog2: Fog = w2.fog
+	var u := roster2.spawn_division(0, Vector2i(1, 3), "infantry")
+	m2.terrain[Vector2i(2, 3)] = "mountains"
+	fog2.update(m2, roster2)
+	ok(fog2.state(0, Vector2i(2, 3)) == Fog.VISIBLE, "the mountain itself is visible")
+	ok(fog2.state(0, Vector2i(3, 3)) != Fog.VISIBLE, "the tile directly behind a mountain is not")
+	ok(fog2.state(0, Vector2i(2, 2)) == Fog.VISIBLE or fog2.state(0, Vector2i(1, 2)) == Fog.VISIBLE, "tiles beside the mountain are still seen")
+	var mid_ok := fog2.sees(m2, Vector2i(1, 3), Vector2i(2, 3), 2) and not fog2.sees(m2, Vector2i(1, 3), Vector2i(3, 3), 2)
+	ok(mid_ok, "sees(): the mountain is seen, the tile behind it is not")
+	# A unit standing on a mountain is not blocked by its own tile.
+	m2.terrain[Vector2i(1, 3)] = "mountains"
+	m2.terrain[Vector2i(2, 3)] = "plains"
+	fog2.update(m2, roster2)
+	ok(fog2.state(0, Vector2i(3, 3)) == Fog.VISIBLE and fog2.state(0, Vector2i(4, 3)) == Fog.VISIBLE, "a unit on a mountain sees past its own tile (3 hexes)")
+	# Explored memory: owner and tier as last seen, no live updates.
+	var w3 := fog_world()
+	var m3: HexMap = w3.map
+	var roster3: DivisionRoster = w3.roster
+	var fog3: Fog = w3.fog
+	m3.cities.append({"id": 5, "nation": 1, "cell": Vector2i(6, 3), "population": 4000, "radius": 1})
+	m3.cells[Vector2i(6, 3)] = 1
+	m3.cells[Vector2i(5, 3)] = 1
+	var scout := roster3.spawn_division(0, Vector2i(4, 3), "infantry")
+	fog3.update(m3, roster3)
+	ok(fog3.state(0, Vector2i(6, 3)) == Fog.VISIBLE and fog3.last_seen(0, Vector2i(6, 3)).city.tier == "outpost" and fog3.last_seen(0, Vector2i(6, 3)).owner == 1, "a seen city is remembered with its owner and tier")
+	scout.hex = Vector2i(0, 3)
+	fog3.update(m3, roster3)
+	ok(fog3.state(0, Vector2i(6, 3)) == Fog.EXPLORED and fog3.state(0, Vector2i(11, 6)) == Fog.UNEXPLORED, "leaving it behind makes it Explored; never-seen tiles stay Unexplored")
+	m3.cities[0].nation = 2  # taken by a nation this one does not see
+	m3.cities[0].population = 16000
+	m3.cells[Vector2i(6, 3)] = 2
+	fog3.update(m3, roster3)
+	var memory := fog3.last_seen(0, Vector2i(6, 3))
+	ok(memory.owner == 1 and memory.city.nation == 1 and memory.city.tier == "outpost", "changes out of sight are not shown: still the old owner and tier")
+	scout.hex = Vector2i(4, 3)
+	fog3.update(m3, roster3)
+	memory = fog3.last_seen(0, Vector2i(6, 3))
+	ok(memory.owner == 2 and memory.city.nation == 2 and memory.city.tier == "city", "seeing it again refreshes the memory")
+	# MapView draws owners as remembered; unexplored is unowned.
+	var view := MapView.new()
+	view.hex_map = m3
+	view.fog = fog3
+	view.player_nation = 0
+	scout.hex = Vector2i(0, 3)
+	fog3.update(m3, roster3)
+	m3.cells[Vector2i(6, 3)] = 1
+	ok(view.owner_of(Vector2i(6, 3)) == 2 and view.owner_of(Vector2i(11, 6)) == HexMap.UNCLAIMED and view.fog_state(Vector2i(6, 3)) == Fog.EXPLORED, "the map shows the remembered owner on explored tiles")
+	view.free()
+	# Landfall: only radius 2 around the landing site is explored.
+	var w4 := fog_world()
+	var m4: HexMap = w4.map
+	var fog4: Fog = w4.fog
+	m4.cities.append({"id": 0, "nation": 0, "cell": Vector2i(5, 3), "population": 10000, "radius": 1})
+	fog4.explore_landing(m4)
+	var landing_ok := true
+	for cell in m4.cells:
+		var near := HexMap.hex_distance(Vector2i(5, 3), cell) <= 2
+		landing_ok = landing_ok and (fog4.state(0, cell) == Fog.EXPLORED) == near and fog4.state(1, cell) == Fog.UNEXPLORED
+	ok(landing_ok, "at landfall exactly the 19 hexes within 2 of the landing site are explored")
+	# Targeting: what the player cannot see cannot be targeted. The AI is not filtered.
+	var w5 := fog_world()
+	var m5: HexMap = w5.map
+	var roster5: DivisionRoster = w5.roster
+	var fog5: Fog = w5.fog
+	var mine := roster5.spawn_division(0, Vector2i(3, 3), "infantry")
+	var enemy := roster5.spawn_division(1, Vector2i(4, 3), "infantry")
+	mine.supplied = true
+	fog5.update(m5, roster5)
+	ok(roster5.action_targets(mine, "attack", m5).has(Vector2i(4, 3)) and not roster5.hides_from(0, Vector2i(4, 3)), "a visible adjacent enemy can be targeted")
+	fog5.visible[0] = {}
+	ok(not roster5.action_targets(mine, "attack", m5).has(Vector2i(4, 3)) and roster5.hides_from(0, Vector2i(4, 3)), "an enemy on a tile the player cannot see is not a target")
+	ok(not roster5.set_order(mine, Vector2i(4, 3), m5) and mine.order_path.is_empty(), "the player cannot order an attack on an unseen unit")
+	ok(not roster5.hides_from(1, Vector2i(3, 3)) and roster5.set_order(enemy, Vector2i(3, 3), m5), "the AI nation is not filtered: it can order the same attack")
+	fog5.respects_fog = true
+	fog5.visible[1] = {}
+	ok(roster5.hides_from(1, Vector2i(3, 3)), "with ai.respects_fog on, the AI would be filtered too")
+	fog5.respects_fog = false
+	# Fog off: everything is visible.
+	var off := Fog.new()
+	off.rules = {"enabled": false}
+	ok(off.state(0, Vector2i(0, 0)) == Fog.VISIBLE and not off.filters(0), "with fog disabled every tile is visible")
+	# Speed: a full update on the 20x12 test map with 4 nations.
+	var g := save_game_setup(5)
+	var t0 := Time.get_ticks_usec()
+	for i in 10:
+		g.fog.update(g.map, g.roster)
+	var per := (Time.get_ticks_usec() - t0) / 10000.0
+	ok(per < 50.0, "a fog update on the test map takes %.1f ms (under 50)" % per)

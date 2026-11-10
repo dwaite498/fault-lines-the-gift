@@ -420,6 +420,34 @@ static func hex_distance(a: Vector2i, b: Vector2i) -> int:
 	return maxi(maxi(absi(ac.x - bc.x), absi(ac.y - bc.y)), absi(ac.z - bc.z))
 
 
+## The cells on the straight line from a to b, both ends included (cube lerp and round, with
+## a tiny fixed nudge so ties always break the same way).
+static func hex_line(a: Vector2i, b: Vector2i) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	var n := hex_distance(a, b)
+	var ac := _to_cube(a)
+	var bc := _to_cube(b)
+	for i in n + 1:
+		var t := float(i) / float(maxi(n, 1))
+		var fx := lerpf(ac.x, bc.x, t) + 1e-6
+		var fy := lerpf(ac.y, bc.y, t) + 2e-6
+		var fz := lerpf(ac.z, bc.z, t) - 3e-6
+		var rx := roundi(fx)
+		var ry := roundi(fy)
+		var rz := roundi(fz)
+		var dx := absf(rx - fx)
+		var dy := absf(ry - fy)
+		var dz := absf(rz - fz)
+		if dx > dy and dx > dz:
+			rx = -ry - rz
+		elif dy > dz:
+			ry = -rx - rz
+		else:
+			rz = -rx - ry
+		out.append(Vector2i(rx + int((rz - (rz & 1)) / 2.0), rz))
+	return out
+
+
 static func _to_cube(cell: Vector2i) -> Vector3i:
 	var x := cell.x - int((cell.y - (cell.y & 1)) / 2.0)
 	return Vector3i(x, -x - cell.y, cell.y)

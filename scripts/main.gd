@@ -21,6 +21,7 @@ var _nation_panel: NationPanel
 var _military_panel: MilitaryPanel
 var _capture_popup := CapturePopup.new()
 var _pause_menu := PauseMenu.new()
+var _fog: Fog
 var _game_over := GameOverScreen.new()
 ## Share of nation-owned cities that wins by domination (map_config.json "victory").
 var _domination_share := Victory.DEFAULT_SHARE
@@ -60,6 +61,10 @@ func _ready() -> void:
 	_view.roster = DivisionRoster.new()
 	_view.roster.spawn_at_cities(_view.hex_map)
 	_view.hidden_nations = _view.roster.neutral_nations
+	_fog = Fog.from_config(map_cfg, PLAYER_NATION)
+	_view.roster.fog = _fog
+	_view.fog = _fog
+	_view.player_nation = PLAYER_NATION
 	add_child(_view)
 	_camera.configure(map_cfg.get("camera", {}))
 	add_child(_camera)
@@ -119,19 +124,22 @@ func _ready() -> void:
 	add_child(_game_over)
 	if not saved.is_empty():
 		turn = SaveGame.restore(saved, _view.hex_map, _view.roster, _economy)
+		_fog.restore(saved.extras.get("fog", {}))
 		_loaded = true
 		print("Loaded the saved game at turn %d" % turn)
 	else:
+		_fog.explore_landing(_view.hex_map)
 		_view.roster.run_ai(PLAYER_NATION, _view.hex_map)
 	_refresh_panels()
 
 
 ## The game state for saving.
 func _capture_state() -> Dictionary:
+	_fog.update(_view.hex_map, _view.roster)
 	var ids: Array = []
 	for i in _view.factions.assigned.size():
 		ids.append(_view.factions.id_of(i))
-	return SaveGame.capture(_view.hex_map, _view.roster, _economy, turn, _map_cfg, ids)
+	return SaveGame.capture(_view.hex_map, _view.roster, _economy, turn, _map_cfg, ids, {"fog": _fog.capture()})
 
 
 func _on_save_pressed() -> void:
@@ -335,6 +343,7 @@ func next_idle_unit(after: Division) -> Division:
 
 func _refresh_panels() -> void:
 	_economy.refresh_labor(_view.hex_map)
+	_fog.update(_view.hex_map, _view.roster)
 	var acts: Array[String] = []
 	if _view.selected and _view.selected.nation == PLAYER_NATION:
 		acts = _view.roster.valid_actions(_view.selected, _view.hex_map)
@@ -368,12 +377,18 @@ func _on_hex_clicked(hex: Vector2i) -> void:
 		_refresh_panels()
 		return
 	var unit := roster.division_at(hex)
+	if unit and unit.nation != PLAYER_NATION and not _fog.can_target(PLAYER_NATION, hex):
+		unit = null  # an enemy in the fog cannot be selected
 	_city = {}
 	if unit and unit != selected:
 		select_unit(unit)
 	else:
 		select_unit(null)
 		_city = _view.hex_map.city_at(hex)
+		if not _city.is_empty() and _city.nation != PLAYER_NATION and not _fog.can_target(PLAYER_NATION, hex):
+			var seen: Dictionary = _fog.last_seen(PLAYER_NATION, hex).get("city", {})
+			message.text = "Last seen: %s city, %s" % [_view.factions.name_of(int(seen.nation)), seen.tier] if not seen.is_empty() else ""
+			_city = {}
 	_refresh_panels()
 
 
