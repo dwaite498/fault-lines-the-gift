@@ -135,14 +135,17 @@ func _draw() -> void:
 		for x in hex_map.width:
 			for d in units_at.get(Vector2i(x, y), []):
 				_draw_counter(d)
+	var hl: Dictionary = palette.highlight
+	var reach_color := Color(Color.html(hl.reach), float(hl.reach_alpha))
+	var blocked_color := Color(Color.html(hl.blocked), float(hl.blocked_alpha))
 	for cell in highlights:
 		var hc := _corners(hex_to_pixel(cell))
 		hc.append(hc[0])
-		draw_polyline(hc, Color(1, 1, 1, 0.9), 3.0)
+		draw_polyline(hc, reach_color, float(hl.width))
 	for cell in blocked_highlights:
 		var bc := _corners(hex_to_pixel(cell))
 		bc.append(bc[0])
-		draw_polyline(bc, Color(0.55, 0.55, 0.55, 0.9), 3.0)
+		draw_polyline(bc, blocked_color, float(hl.width))
 	if roster:
 		_draw_orders()
 
