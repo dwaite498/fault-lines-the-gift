@@ -29,6 +29,7 @@ func _initialize() -> void:
 	test_population()
 	test_player_faction_warning()
 	test_labor()
+	test_labor_sinks()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -498,3 +499,122 @@ func test_labor() -> void:
 		if c.nation == nat:
 			expect_total += geco.labor_points(c)
 	ok(t.total == expect_total and t.total == t.free + t.training + t.infrastructure + t.growth and t.growth > 0, "nation totals add up (total %d, growth %d, free %d)" % [t.total, t.growth, t.free])
+
+
+## A generated map, an economy set up on it, an empty roster and the first nation-0 city.
+func sink_setup(training: int, infra: int) -> Dictionary:
+	var m := build(5)
+	var eco := NationEconomy.new()
+	eco.setup(m)
+	var roster := make_roster()
+	var city: Dictionary = m.cities.filter(func(c: Dictionary) -> bool: return c.nation == 0)[0]
+	city.labor = {"training": training, "infrastructure": infra, "growth": 0}
+	eco.stocks[0].manpower = 100.0
+	eco.stocks[0].capacity = 100.0
+	return {"map": m, "eco": eco, "roster": roster, "city": city}
+
+
+func turns_to_division(training: int) -> int:
+	var s := sink_setup(training, 0)
+	var eco: NationEconomy = s.eco
+	eco.recruit(s.city, 0, s.roster)
+	for turn in range(1, 41):
+		s.city.labor = {"training": training, "infrastructure": 0, "growth": 0}
+		eco.spawn_pending(s.map, s.roster)
+		if not s.roster.divisions.is_empty():
+			return turn
+	return -1
+
+
+func test_labor_sinks() -> void:
+	var eco0 := NationEconomy.new()
+	ok(eco0.training_labor_cost() == 15 and eco0.infra_labor_per_level() == 10, "config: a division costs 15 labor-turns, +1 infra costs 10 (resources_config.json labor)")
+	# Training queue: progress adds Training points each turn; a division needs 15 labor
+	# and at least training_turns (3) turns.
+	ok(turns_to_division(15) == 3, "15 Training points: labor is full after 1 turn but the division still takes the minimum 3 turns")
+	ok(turns_to_division(5) == 3, "5 Training points: 15 labor-turns in 3 turns -> division on turn 3")
+	ok(turns_to_division(4) == 4, "4 Training points: 16 labor-turns -> division on turn 4")
+	ok(turns_to_division(1) == 15, "1 Training point: 15 turns")
+	ok(turns_to_division(0) == -1, "0 Training points: the queue never finishes")
+	var s := sink_setup(4, 0)
+	var eco: NationEconomy = s.eco
+	ok(eco.recruit(s.city, 0, s.roster) and eco.stocks[0].manpower == 80.0 and eco.stocks[0].capacity == 85.0, "recruiting still pays the existing cost (manpower 20, capacity 15) from the nation pool")
+	eco.spawn_pending(s.map, s.roster)
+	ok(eco.pending[s.city.id].labor == 4 and eco.pending[s.city.id].turns_left == 2, "one turn adds 4 labor and ticks the timer")
+	ok(NationEconomy.queue_text(eco.pending[s.city.id]) == "Division 4/15 labor, 2 turns left", "queue text shows labor progress and turns")
+	for i in 3:
+		eco.spawn_pending(s.map, s.roster)
+	ok(s.roster.divisions.size() == 1 and not eco.pending.has(s.city.id), "the division appears once labor and time are both done")
+	ok(NationEconomy.queue_text({"turns_left": 0, "labor": 3, "cost": 15}) == "Division 3/15 labor, needs more Training labor", "queue text when only the timer is done")
+	# Occupied hex: labor is capped at the cost and the recruit waits.
+	var s2 := sink_setup(15, 0)
+	var e2: NationEconomy = s2.eco
+	e2.recruit(s2.city, 0, s2.roster)
+	s2.roster.spawn_division(0, s2.city.cell, "infantry")
+	for i in 5:
+		e2.spawn_pending(s2.map, s2.roster)
+	ok(e2.pending[s2.city.id].labor == 15 and s2.roster.divisions.size() == 1, "labor progress is capped at the cost and an occupied hex holds the recruit")
+	# Auto-training: queueing a recruit in a city with no Training moves its labor there;
+	# the default split returns when the queue clears.
+	var s3 := sink_setup(0, 1)
+	var e3: NationEconomy = s3.eco
+	s3.city.labor = {"training": 0, "infrastructure": 1, "growth": 2}
+	e3.recruit(s3.city, 0, s3.roster)
+	ok(s3.city.labor == {"training": 4, "infrastructure": 1, "growth": 0}, "queueing a recruit puts the free labor on Training (5 points: 4 Training, 1 Infrastructure kept)")
+	for i in 5:
+		e3.spawn_pending(s3.map, s3.roster)
+	ok(s3.roster.divisions.size() == 1 and s3.city.labor.training == 0 and s3.city.labor.growth == 2 and s3.city.labor.infrastructure == 1, "when the queue clears the default Growth returns and Training goes back to 0")
+	var s4 := sink_setup(0, 0)
+	s4.city.labor = {"training": 0, "infrastructure": 0, "growth": 2}
+	s4.eco.recruit(s4.city, 0, s4.roster)
+	s4.eco.adjust_labor(s4.city, "training", -1)
+	for i in 5:
+		s4.eco.spawn_pending(s4.map, s4.roster)
+	ok(s4.city.labor.training == 4, "a manual change keeps the player's assignment after the queue clears (no auto reset)")
+	# The AI path: run_ai queues, auto-training feeds it, and a division arrives with no player input.
+	var s5 := sink_setup(0, 0)
+	var e5: NationEconomy = s5.eco
+	var ai_city: Dictionary = s5.map.cities.filter(func(c: Dictionary) -> bool: return c.nation != 0)[0]
+	e5.stocks[ai_city.nation].manpower = 100.0
+	e5.stocks[ai_city.nation].capacity = 100.0
+	e5.recruit(ai_city, ai_city.nation, s5.roster)
+	for i in 6:
+		e5.spawn_pending(s5.map, s5.roster)
+	ok(s5.roster.divisions.any(func(d: Division) -> bool: return d.nation == ai_city.nation), "an AI city's recruit completes through its default Training labor")
+	# Infrastructure: 10 labor-turns = +1 infra = +3,000 housing; leftover carries over.
+	var s6 := sink_setup(0, 3)
+	var e6: NationEconomy = s6.eco
+	var infra0: float = float(s6.city.infrastructure)
+	var cap0: int = s6.map.housing_cap(s6.city)
+	for i in 3:
+		e6.apply_infrastructure(s6.map)
+	ok(s6.city.infra_progress == 9 and float(s6.city.infrastructure) == infra0, "3 Infrastructure points x 3 turns = 9 labor-turns, no level yet")
+	e6.apply_infrastructure(s6.map)
+	ok(float(s6.city.infrastructure) == infra0 + 1.0 and s6.city.infra_progress == 2, "the 4th turn reaches 12: +1 infra and 2 carried over")
+	ok(s6.map.housing_cap(s6.city) == cap0 + 3000, "+1 infra raises the housing cap by 3,000")
+	var s7 := sink_setup(0, 0)
+	s7.eco.apply_infrastructure(s7.map)
+	ok(s7.city.infra_progress == 0, "no Infrastructure points means no progress")
+	# Infrastructure labor rebuilds capture damage: levels count toward the repair and the
+	# rebuild finishes early (never below the target).
+	var s8 := sink_setup(0, 10)
+	s8.city.infrastructure = 7.0
+	s8.city.rebuild_target = 10.0
+	s8.city.rebuild_turns_left = 20
+	for i in 3:
+		s8.eco.apply_infrastructure(s8.map)
+	ok(float(s8.city.infrastructure) == 10.0, "10 Infrastructure points a turn add +1 infra a turn: 3 turns repair 7 -> 10")
+	s8.map._rebuild_step(s8.city)
+	ok(not s8.city.has("rebuild_turns_left") and float(s8.city.infrastructure) == 10.0, "the rebuild ends once labor has repaired it to the target")
+	var s9 := sink_setup(0, 0)
+	s9.city.infrastructure = 7.0
+	s9.city.rebuild_target = 10.0
+	s9.city.rebuild_turns_left = 2
+	s9.map._rebuild_step(s9.city)
+	ok(float(s9.city.infrastructure) == 8.5 and s9.city.rebuild_turns_left == 1, "the timed rebuild still works with no labor (7 -> 8.5, one turn left)")
+	# The turn step runs both sinks: economy end_turn applies training and infrastructure.
+	var s10 := sink_setup(2, 3)
+	s10.eco.recruit(s10.city, 0, s10.roster)
+	s10.city.labor = {"training": 2, "infrastructure": 3, "growth": 0}
+	s10.eco.end_turn(s10.map, s10.roster)
+	ok(s10.eco.pending[s10.city.id].labor == 2 and s10.city.infra_progress == 3, "end_turn feeds the training queue and infrastructure progress")

@@ -39,6 +39,8 @@
 - A city over its housing cap (for example after capture costs it infrastructure) holds its population: it neither grows nor shrinks. Balance for this comes later.
 - When population drops, assigned labor is trimmed to the new labor points, taking Growth first, then Infrastructure, then Training (`labor.clamp_order`).
 
+- Labor sinks (Task 37): a queued recruit still costs the existing manpower and capacity from the nation pool. It needs 15 labor-turns of Training (`labor.training_labor_cost`) and at least `training_turns` (3) turns, whichever finishes last. Infrastructure points add to a progress counter; every 10 labor-turns (`labor.infra_labor_per_level`) is +1 infra (+3,000 housing), and the levels also repair capture damage (the timed rebuild still runs). Queueing a recruit in a city with nothing on Training moves its labor to Training until the queue clears (`labor.recruit_auto_training_share`).
+
 ## Out of scope
 Tech, happiness and unrest effects, trade, specialists, and food as a separate resource.
 

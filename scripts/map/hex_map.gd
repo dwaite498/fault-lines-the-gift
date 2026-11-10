@@ -404,8 +404,9 @@ func _rebuild_step(city: Dictionary) -> void:
 		return
 	var left := int(city.rebuild_turns_left)
 	var target := float(city.rebuild_target)
-	if left <= 1:
-		city.infrastructure = target
+	# Infrastructure labor may already have repaired it (or built past the target).
+	if left <= 1 or float(city.infrastructure) >= target:
+		city.infrastructure = maxf(float(city.infrastructure), target)
 		city.erase("rebuild_turns_left")
 		city.erase("rebuild_target")
 		return
