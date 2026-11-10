@@ -113,12 +113,16 @@ func _draw() -> void:
 			var owner := owner_of(cell)
 			if owner >= 0:
 				draw_colored_polygon(corners, Color(_color_for(owner), float(palette.tint_alpha)))
-			if hex_map.fungus_tiles.has(cell):  # fungus: a purple tint, deeper with density
-				draw_colored_polygon(corners, Color(0.55, 0.15, 0.6, 0.12 * float(hex_map.fungus_tiles[cell])))
+			var is_mat := false
+			if hex_map.fungus_tiles.has(cell):
+				is_mat = _draw_fungus(cell, corners)
 			if fstate == Fog.EXPLORED:
 				draw_colored_polygon(corners, EXPLORED_DIM)
 			corners.append(corners[0])
-			draw_polyline(corners, grid_color, float(grid.width))
+			if is_mat:
+				_draw_mat_grid(cell, corners, grid_color, float(grid.width))
+			else:
+				draw_polyline(corners, grid_color, float(grid.width))
 		for x in hex_map.width:
 			var cell := Vector2i(x, y)
 			# Dashed border in the nation color on edges between different owners.
@@ -475,6 +479,71 @@ func _draw_border(cell: Vector2i, other: Vector2i, color: Color) -> void:
 	while t < length:
 		draw_line(from + dir * t, from + dir * minf(t + dash, length), Color(color, float(b.alpha)), float(b.width))
 		t += dash + gap
+
+
+## Pink worm fungus on the top face (UI v2 U2): `base` at the density's alpha with density + 1
+## vein strokes; a mat (density 4, or 5+ of 6 neighbors fungus) is `base` at mat_alpha with 4 strokes.
+## Strokes are seeded from the cell, so they are identical on every redraw and after a load.
+## Returns true for a mat.
+func _draw_fungus(cell: Vector2i, corners: PackedVector2Array) -> bool:
+	var fp: Dictionary = palette.fungus
+	var density := clampi(int(hex_map.fungus_tiles[cell]), 1, 4)
+	var mat := density >= 4 or _fungus_neighbors(cell) >= 5
+	var alpha := float(fp.mat_alpha) if mat else float(fp.alpha_by_density[density - 1])
+	draw_colored_polygon(corners, Color(Color.html(fp.base), alpha))
+	var strokes := 4 if mat else density + 1
+	var vein := Color.html(fp.vein)
+	var light := Color.html(fp.highlight)
+	var center := hex_to_pixel(cell)
+	var rx := _w * 0.5 * 0.8
+	var ry := _h * 0.5 * 0.7
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(cell)
+	for s in strokes:
+		var start := Vector2.from_angle(rng.randf() * TAU) * rng.randf() * 0.3
+		var dir := Vector2.from_angle(rng.randf() * TAU)
+		var side := Vector2(-dir.y, dir.x)
+		var phase := rng.randf() * TAU
+		var pts := PackedVector2Array()
+		for i in 7:
+			var t := float(i) / 6.0 - 0.5
+			var p := start + dir * t + side * (0.15 * sin(t * TAU * 1.5 + phase))
+			if p.length() > 0.95:
+				p = p.normalized() * 0.95
+			pts.append(center + Vector2(p.x * rx, p.y * ry))
+		var up := PackedVector2Array()
+		for p in pts:
+			up.append(p + Vector2(0, -1))
+		draw_polyline(pts, vein, 2.0, true)
+		draw_polyline(up, light, 1.0, true)
+	return mat
+
+
+func _fungus_neighbors(cell: Vector2i) -> int:
+	var n := 0
+	for o in hex_map.neighbors(cell):
+		if hex_map.fungus_tiles.has(o):
+			n += 1
+	return n
+
+
+## The cell's grid outline where an edge shared with another mat hex is drawn at half alpha so a
+## mat reads as one mass. `corners` is the closed top-face loop.
+func _draw_mat_grid(cell: Vector2i, corners: PackedVector2Array, grid_color: Color, width: float) -> void:
+	var center := hex_to_pixel(cell)
+	var half := Color(grid_color, grid_color.a * 0.5)
+	var mat_neighbors := []
+	for o in hex_map.neighbors(cell):
+		if hex_map.fungus_tiles.has(o) and (int(hex_map.fungus_tiles[o]) >= 4 or _fungus_neighbors(o) >= 5):
+			mat_neighbors.append(hex_to_pixel(o))
+	for i in 6:
+		var mid := (corners[i] + corners[i + 1]) * 0.5
+		var shared := false
+		for np in mat_neighbors:
+			if mid.distance_to((center + np) * 0.5) < 2.0:
+				shared = true
+				break
+		draw_line(corners[i], corners[i + 1], half if shared else grid_color, width)
 
 
 ## The 96x48 top face around center: corner i is at angle 60*i - 30 degrees.

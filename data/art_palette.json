@@ -26,6 +26,13 @@
 		"alpha": 0.20,
 		"width": 1.0
 	},
+	"fungus": {
+		"base": "#B0558F",
+		"vein": "#6E2F6B",
+		"highlight": "#E07AB8",
+		"alpha_by_density": [0.25, 0.40, 0.55, 0.70],
+		"mat_alpha": 0.85
+	},
 	"highlight": {
 		"reach": "#5FD3C0",
 		"reach_alpha": 0.9,
