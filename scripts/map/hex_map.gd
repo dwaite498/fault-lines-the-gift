@@ -50,6 +50,9 @@ var terrain: Dictionary = {}
 ## Water touching land is "shallows"; other water uses the table's water value.
 ## View-only for now (Task 33); no rules read it.
 var elevation: Dictionary = {}
+## The "elevation" block of terrain_config.json: climb_cost, cliff_diff, smooth_max_step,
+## ridge_terrain. Without it there are no elevation rules (no climb cost, no cliffs).
+var elevation_rules: Dictionary = {}
 ## Terrain name -> {color, move_cost, defense_mult, passable} from terrain_config.json.
 var terrain_types: Dictionary = {}
 
@@ -106,6 +109,7 @@ func generate_terrain(config: Dictionary) -> void:
 
 
 func _assign_elevation(cfg: Dictionary) -> void:
+	elevation_rules = cfg
 	elevation.clear()
 	var by_terrain: Dictionary = cfg.get("by_terrain", {})
 	var lo := int(cfg.get("min", -3))
@@ -115,6 +119,103 @@ func _assign_elevation(cfg: Dictionary) -> void:
 		if terrain[cell] == "water" and neighbors(cell).any(func(n: Vector2i) -> bool: return cells[n] != WATER):
 			e = int(cfg.get("shallows", e))
 		elevation[cell] = clampi(e, lo, hi)
+	_smooth_elevation()
+	ensure_reachable()
+
+
+## True if terrain is passable for a step from `from` to its neighbor `to`: the target
+## terrain is passable and the elevation difference is below cliff_diff (a cliff).
+func can_step(from: Vector2i, to: Vector2i) -> bool:
+	if not terrain_of(to).passable:
+		return false
+	return absi(elevation_of(to) - elevation_of(from)) < int(elevation_rules.get("cliff_diff", 1 << 20))
+
+
+## Move points to step from `from` into `to`: the target's move_cost, plus climb_cost
+## when it is one or more levels higher. Downhill and level steps cost the normal amount.
+func step_cost(from: Vector2i, to: Vector2i) -> int:
+	var cost := int(terrain_of(to).move_cost)
+	if elevation_of(to) > elevation_of(from):
+		cost += int(elevation_rules.get("climb_cost", 0))
+	return cost
+
+
+func _is_ridge(cell: Vector2i) -> bool:
+	return elevation_rules.get("ridge_terrain", []).has(terrain_name(cell))
+
+
+## Lowers the higher of any two neighboring land hexes that differ by more than
+## smooth_max_step, except when either is a ridge terrain (mountains). Deterministic.
+func _smooth_elevation() -> void:
+	var max_step := int(elevation_rules.get("smooth_max_step", 1 << 20))
+	var keys: Array = terrain.keys()
+	keys.sort()
+	for pass_index in keys.size():
+		var changed := false
+		for cell in keys:
+			if not terrain_of(cell).passable or _is_ridge(cell):
+				continue
+			for n in neighbors(cell):
+				if terrain_of(n).passable and not _is_ridge(n) and elevation[cell] > elevation[n] + max_step:
+					elevation[cell] = elevation[n] + max_step
+					changed = true
+		if not changed:
+			break
+
+
+## Hexes reachable from start by can_step (ignoring units).
+func reachable_from(start: Vector2i) -> Dictionary:
+	var seen := {start: true}
+	var queue: Array[Vector2i] = [start]
+	var i := 0
+	while i < queue.size():
+		for n in neighbors(queue[i]):
+			if not seen.has(n) and can_step(queue[i], n):
+				seen[n] = true
+				queue.append(n)
+		i += 1
+	return seen
+
+
+## Makes every land hex connected (by land, ignoring cliffs) to a start reachable from
+## that start's first city: while some are not, lowers one cliff edge to a one-step
+## pass. Land with no city on it (islands) is left alone. Deterministic; returns the
+## number of passes made. Called when elevation is assigned.
+func ensure_reachable() -> int:
+	var passes := 0
+	var cliff := int(elevation_rules.get("cliff_diff", 1 << 20))
+	var done := {}
+	for city in cities:
+		if done.has(city.cell):
+			continue
+		var comp := {}
+		for c in land_component(city.cell):
+			comp[c] = true
+			done[c] = true
+		var guard := 0
+		while guard < comp.size() * 8:
+			guard += 1
+			var reach := reachable_from(city.cell)
+			var keys: Array = reach.keys()
+			keys.sort()
+			var fixed := false
+			for a in keys:
+				var ns := neighbors(a)
+				ns.sort()
+				for b in ns:
+					if comp.has(b) and not reach.has(b):
+						# b is passable land that a cannot step to: a cliff between them.
+						var lo := mini(elevation[a], elevation[b])
+						var hi_cell: Vector2i = a if elevation[a] > elevation[b] else b
+						elevation[hi_cell] = maxi(lo + cliff - 1, int(elevation_rules.get("min", -3)))
+						passes += 1
+						fixed = true
+						break
+				if fixed:
+					break
+			if not fixed:
+				break
+	return passes
 
 
 ## Elevation of cell; 0 before generate_terrain() has run.

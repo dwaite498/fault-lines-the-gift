@@ -62,18 +62,18 @@ func division_at(hex: Vector2i) -> Division:
 func can_move(d: Division, hex: Vector2i, hex_map: HexMap) -> bool:
 	if d.moves_left <= 0 or not hex in hex_map.neighbors(d.hex) or division_at(hex) != null:
 		return false
-	var terrain := hex_map.terrain_of(hex)
-	if not terrain.passable:
+	if not hex_map.can_step(d.hex, hex):
 		return false
-	return d.moves_left >= int(terrain.move_cost) or not d.has_moved
+	return d.moves_left >= hex_map.step_cost(d.hex, hex) or not d.has_moved
 
 
 ## Moves d one hex; moving onto an enemy city captures it.
 func try_move(d: Division, hex: Vector2i, hex_map: HexMap) -> bool:
 	if not can_move(d, hex, hex_map):
 		return false
+	var cost := hex_map.step_cost(d.hex, hex)
 	d.hex = hex
-	d.moves_left = maxi(d.moves_left - int(hex_map.terrain_of(hex).move_cost), 0)
+	d.moves_left = maxi(d.moves_left - cost, 0)
 	d.has_moved = true
 	d.fortify_level = 0
 	var city := hex_map.city_at(hex)
@@ -125,6 +125,18 @@ func defense_of(defender: Division, hex_map: HexMap) -> float:
 	return defender.defense * terrain_mult * fort_mult * city_mult * flank_mult(defender)
 
 
+## Attack multiplier for hitting defender_hex from attacker_hex: -uphill_attack_per_level
+## for each level the target is higher, capped at uphill_attack_cap. Downhill and level
+## attacks are 1.0, and the defender gets no height bonus. Naval and bombard attacks
+## ignore elevation: pass ranged = true (hook for the naval slice; none exist yet).
+func elevation_attack_mult(attacker_hex: Vector2i, defender_hex: Vector2i, hex_map: HexMap, ranged := false) -> float:
+	if ranged:
+		return 1.0
+	var levels := maxi(hex_map.elevation_of(defender_hex) - hex_map.elevation_of(attacker_hex), 0)
+	var penalty := minf(float(combat.uphill_attack_per_level) * levels, float(combat.uphill_attack_cap))
+	return 1.0 - penalty
+
+
 ## Damage one side deals: base_dmg * (attack / other_defense) * rand(roll_min..roll_max).
 func roll_damage(attack_value: float, other_defense: float) -> float:
 	return (float(combat.base_dmg) * (attack_value / other_defense)
@@ -142,7 +154,8 @@ func attack(attacker: Division, defender: Division, hex_map: HexMap) -> Dictiona
 		defender.attacked_from.append(attacker.hex)
 	var def_defense := defense_of(defender, hex_map)
 	var atk_defense := attacker.defense
-	var dmg_to_defender := roll_damage(attacker.attack, def_defense)
+	var uphill := elevation_attack_mult(attacker.hex, defender.hex, hex_map)
+	var dmg_to_defender := roll_damage(attacker.attack * uphill, def_defense)
 	var dmg_to_attacker := roll_damage(defender.attack, atk_defense)
 	var taken_by_defender := _damage(defender, dmg_to_defender)
 	var taken_by_attacker := _damage(attacker, dmg_to_attacker)
@@ -151,7 +164,7 @@ func attack(attacker: Division, defender: Division, hex_map: HexMap) -> Dictiona
 	attacker.in_combat = true
 	defender.in_combat = true
 	return {
-		"defender_defense": def_defense, "flank_mult": flank_mult(defender), "attacker_defense": atk_defense,
+		"defender_defense": def_defense, "flank_mult": flank_mult(defender), "uphill_mult": uphill, "attacker_defense": atk_defense,
 		"damage_to_defender": dmg_to_defender, "damage_to_attacker": dmg_to_attacker,
 		"defender_org_loss": taken_by_defender.org, "defender_strength_loss": taken_by_defender.strength,
 		"attacker_org_loss": taken_by_attacker.org, "attacker_strength_loss": taken_by_attacker.strength,
@@ -191,7 +204,7 @@ func _after_combat(d: Division, hex_map: HexMap, captor: int) -> String:
 	for n in hex_map.neighbors(d.hex):
 		var owner: int = hex_map.cells[n]
 		if ((owner == d.nation or owner == HexMap.UNCLAIMED) and division_at(n) == null
-				and hex_map.terrain_of(n).passable):
+				and hex_map.can_step(d.hex, n)):
 			d.hex = n
 			d.fortify_level = 0
 			return "retreated"
@@ -241,7 +254,7 @@ func can_swap(a: Division, b: Division, hex_map: HexMap) -> bool:
 		return false
 	if not hex_map.neighbors(a.hex).has(b.hex):
 		return false
-	if not hex_map.terrain_of(a.hex).passable or not hex_map.terrain_of(b.hex).passable:
+	if not hex_map.can_step(a.hex, b.hex) or not hex_map.can_step(b.hex, a.hex):
 		return false
 	return a.moves_left > 0 and b.moves_left > 0
 
@@ -315,7 +328,7 @@ func plan_path(d: Division, dest: Vector2i, hex_map: HexMap) -> Array[Vector2i]:
 	while not queue.is_empty() and not came.has(dest):
 		var cell: Vector2i = queue.pop_front()
 		for n in hex_map.neighbors(cell):
-			if came.has(n) or not hex_map.terrain_of(n).passable:
+			if came.has(n) or not hex_map.can_step(cell, n):
 				continue
 			var occ := division_at(n)
 			# Only a friendly that is moving out may be followed into its hex.
@@ -344,7 +357,7 @@ func turn_split(d: Division, path: Array[Vector2i], hex_map: HexMap) -> Array[in
 	var steps := 0
 	var i := 0
 	while i < path.size():
-		var cost := int(hex_map.terrain_of(path[i]).move_cost)
+		var cost := hex_map.step_cost(path[i - 1] if i > 0 else d.hex, path[i])
 		if moves <= 0 or (moves < cost and moved):
 			out.append(steps)
 			steps = 0
@@ -544,10 +557,12 @@ func execute_orders(hex_map: HexMap) -> void:
 ## Two friendlies trading hexes both complete the swap, no combat.
 func _friendly_swap(a: Division, b: Division, hex_map: HexMap) -> void:
 	var ha := a.hex
-	a.hex = b.hex
+	var hb := b.hex
+	var costs := {a: hex_map.step_cost(ha, hb), b: hex_map.step_cost(hb, ha)}
+	a.hex = hb
 	b.hex = ha
 	for d in [a, b]:
-		d.moves_left = maxi(d.moves_left - int(hex_map.terrain_of(d.hex).move_cost), 0)
+		d.moves_left = maxi(d.moves_left - int(costs[d]), 0)
 		d.has_moved = true
 		d.fortify_level = 0
 	turn_log.append("Div %d and div %d (n%d) swap %s <-> %s" % [a.id, b.id, a.nation, b.hex, a.hex])

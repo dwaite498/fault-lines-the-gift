@@ -109,10 +109,10 @@ These factions secretly take over nations that still look neutral.
 - Each nation tracks the POWs it holds, by owner nation. The player's nation panel shows POWs held and POWs lost.
 - POWs return to the owner's manpower pool on peace, or immediately if the captor joins the owner's side.
 - If a nation is eliminated, the POWs it holds and the POWs held from it stay recorded.
-- Later: POW exchanges, POWs as bargaining chips, and a soul-cost mistreatment option.
+- Later: POW exchanges, POWs as bargaining chips, and a mistreatment option.
 ## First playable version
 
-- The Concord only, against simple AI
+- One faction only, against simple AI
 - Units: infantry, armor, and artillery
 - Influence-based diplomacy
 - Unity with a few requests and events
@@ -147,7 +147,7 @@ Status tags: **[Built]** is in the game now. **[Partial]** is partly built. **[P
 - To be built as a modular piece.
 - Control points work like Terra Invicta's.
 - 3 starting agents (whether per player or per faction is TBD). Agents have Persuasion, Investigation, and Security stats.
-- Ops are Investigate, Propaganda, Coup, Purge, Sabotage (a candidate soul-cost op), and Protect.
+- Ops are Investigate, Propaganda, Coup, Purge, Sabotage, and Protect.
 - Each op is a contested roll, and a failed op exposes the agent.
 
 ### 5. Player info screens

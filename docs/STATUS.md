@@ -1,6 +1,6 @@
 # Fault Lines: Planetfall — Status
 
-Last updated: Nov 9 2026 (Task 33)
+Last updated: Nov 9 2026 (Task 34)
 
 ## Current direction
 An Alpha Centauri (SMAC) homage with landfall and 10 ideological factions.
@@ -15,6 +15,7 @@ Pending the Designer's pivot brief.
 - Action bar and multi-turn moves
 - Color-named nations
 - Iso view: elevation, skirts, back-to-front draw, picking (Task 33; docs/art/ART_SPEC_v2.md)
+- Elevation rules: climb cost, cliffs, uphill attack penalty, smoothed and reachable maps; headless tests in tests/run_tests.gd
 
 ## Next
 - The pivot brief
