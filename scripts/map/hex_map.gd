@@ -117,6 +117,8 @@ var faction_art := {}
 ## Vector2i cell -> true for fungus tiles (hook; the map has no fungus yet). A terrain
 ## named "fungus" also counts.
 var fungus_tiles: Dictionary = {}
+## data/natives.json (spawner, fungus attrition, raids); empty disables them. See load_natives_config.
+var natives_config := {}
 ## Nations whose first cities should sit on the coast (sea factions until the naval
 ## slice). Set before generate(). A hex counts as coastal if it touches water; if a
 ## nation has no such hex, a map-edge hex is next best.
@@ -216,7 +218,7 @@ func can_step(from: Vector2i, to: Vector2i) -> bool:
 ## Move points to step from `from` into `to`: the target's move_cost, plus climb_cost
 ## when it is one or more levels higher. Downhill and level steps cost the normal amount.
 func step_cost(from: Vector2i, to: Vector2i, nation := -1) -> int:
-	var cost := int(terrain_of(to).move_cost)
+	var cost := int(terrain_of(to).move_cost) + fungus_extra_cost(to, nation)
 	if elevation_of(to) > elevation_of(from):
 		var free: Array = traits.mod(nation, "no_uphill_penalty_terrain", []) if nation >= 0 else []
 		if not free.has(terrain_name(to)):
@@ -527,6 +529,68 @@ func grow_cities(unit_cells := {}) -> bool:
 
 
 ## Housing cap in people: infrastructure x housing_per_infra, rounded down.
+## Loads data/natives.json (NativeSpawner.load_config()).
+func load_natives_config(cfg: Dictionary) -> void:
+	natives_config = cfg
+
+
+## Fungus attrition scale for a nation: 1 for most, a faction's fungus_attrition_mult trait (Verdant
+## 0.5), 0 for natives (they are exempt), and 0 if fungus_attrition is not configured.
+func fungus_scale(nation: int) -> float:
+	var rules: Dictionary = natives_config.get("fungus_attrition", {})
+	if rules.is_empty() or (nation == int(natives_config.get("native_nation", -2)) and rules.get("exempt_natives", true)):
+		return 0.0
+	return float(traits.mod(nation, "fungus_attrition_mult", 1.0))
+
+
+## Extra move cost for entering a fungus tile (fungus_attrition.move_cost x the nation's scale, rounded down).
+func fungus_extra_cost(cell: Vector2i, nation: int) -> int:
+	if not fungus_tiles.has(cell):
+		return 0
+	return int(floor(float(natives_config.get("fungus_attrition", {}).get("move_cost", 0)) * fungus_scale(nation)))
+
+
+## True for a fungus tile.
+func is_fungus(cell: Vector2i) -> bool:
+	return fungus_tiles.has(cell) or terrain_name(cell) == "fungus"
+
+
+## Places `fungus.patches` patches of fungus (seeded by `rng`) at least `fungus.min_city_distance`
+## from every city: density max_density at the centre, one less per ring, minimum 1. There is no
+## fungus growth or spread yet. Returns the number of tiles placed.
+func place_fungus(rng: RandomNumberGenerator) -> int:
+	var rules: Dictionary = natives_config.get("fungus", {})
+	if rules.is_empty():
+		return 0
+	var land: Array[Vector2i] = []
+	for cell in cells:
+		if cells[cell] != WATER and terrain_name(cell) != "water" and city_at(cell).is_empty():
+			land.append(cell)
+	land.sort()
+	var placed := 0
+	for i in int(rules.patches):
+		var options := land.filter(func(c: Vector2i) -> bool: return not _city_near(c, int(rules.min_city_distance) - 1))
+		if options.is_empty():
+			break
+		var centre: Vector2i = options[rng.randi_range(0, options.size() - 1)]
+		for cell in land:
+			var ring := hex_distance(cell, centre)
+			if ring <= int(rules.patch_radius) and not _city_near(cell, int(rules.min_city_distance) - 1):
+				var density := maxi(int(rules.max_density) - ring, 1)
+				if density > int(fungus_tiles.get(cell, 0)):
+					if not fungus_tiles.has(cell):
+						placed += 1
+					fungus_tiles[cell] = density
+	return placed
+
+
+func _city_near(cell: Vector2i, radius: int) -> bool:
+	for c in cities:
+		if hex_distance(cell, c.cell) <= radius:
+			return true
+	return false
+
+
 ## Faction traits: a sea city of a faction with sea_housing_per_infra uses that per infra,
 ## housing_flat_per_city adds to each of the first flat_bonus_city_cap cities, and
 ## housing_mult scales the total.

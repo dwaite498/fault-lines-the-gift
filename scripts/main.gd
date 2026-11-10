@@ -60,9 +60,12 @@ func _ready() -> void:
 	_view.hex_map.load_faction_views(factions.all)
 	_view.hex_map.load_faction_traits(factions.all, FactionRoster.load_global())
 	_view.hex_map.load_attitude(factions.all, FactionRoster.load_global(), FactionRoster.load_ai())
+	_view.hex_map.load_natives_config(NativeSpawner.load_config())
 	_view.roster = DivisionRoster.new()
 	_view.roster.traits = _view.hex_map.traits
 	_view.roster.spawn_at_cities(_view.hex_map)
+	if saved.is_empty():
+		_view.hex_map.place_fungus(_view.roster.rng)  # a loaded game brings its own fungus
 	_view.hidden_nations = _view.roster.neutral_nations
 	_fog = Fog.from_config(map_cfg, PLAYER_NATION)
 	_view.roster.fog = _fog
@@ -294,6 +297,8 @@ func _finish_turn() -> void:
 	_economy.end_turn(_view.hex_map, roster)
 	turn += 1
 	_view.hex_map.current_turn = turn
+	NativeSpawner.run(_view.hex_map, roster, turn)
+	NativeAI.raid_step(_view.hex_map, roster, turn)
 	var stalled := _economy.stalled_cities(PLAYER_NATION, _view.hex_map)
 	if not stalled.is_empty():
 		message.text = "Recruit stalled in city %s: assign Training labor" % ", ".join(stalled.map(func(i: int) -> String: return str(i)))

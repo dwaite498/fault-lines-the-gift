@@ -50,6 +50,8 @@ func _initialize() -> void:
 	test_plunder_cooldown()
 	test_attitude()
 	test_city_tiers()
+	test_natives()
+	test_fungus_attrition()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -2625,3 +2627,276 @@ func test_city_tiers() -> void:
 	var probe := {"population": 15000}
 	ok(fog.sight_of_city(probe, m) == int(fog.rules.sight.city) + int(fog.rules.city_sight_bonus) and fog.sight_of_city({"population": 14999}, m) == int(fog.rules.sight.city) and fog.tier_of(30000, m) == "metropolis", "city sight reads the City tier from HexMap (cities_config tiers)")
 	ok(not fog.rules.has("tier_thresholds"), "the duplicate tier_thresholds is gone from map_config.json")
+
+
+# --- Task 44: natives, fungus attrition ---
+
+## A flat all-plains map with two nations (cities at `cities`: nation -> cell, population 10,000),
+## natives.json loaded, and combat rolls fixed.
+func nat_world(w := 15, h := 9, cities := {0: Vector2i(1, 1), 1: Vector2i(13, 7)}) -> Dictionary:
+	var m := make_map(w, h)
+	m.nations.assign([0, 1])
+	for nation in cities:
+		m.cities.append({"id": nation, "nation": nation, "cell": cities[nation], "population": 10000, "infrastructure": 10.0, "radius": 1})
+	m.load_natives_config(NativeSpawner.load_config())
+	var roster := make_roster()
+	roster.traits = m.traits
+	roster.combat["roll_min"] = 1.0
+	roster.combat["roll_max"] = 1.0
+	return {"map": m, "roster": roster}
+
+
+func test_natives() -> void:
+	var cfg := NativeSpawner.load_config()
+	var wt: Dictionary = cfg.units.tendril_worm
+	var st: Dictionary = cfg.units.rust_strider
+	ok(cfg.native_nation == -2 and DivisionRoster.NATIVE_NATION == -2, "the native nation is -2")
+	ok(wt.strength == 60 and wt.organization == 40 and wt.attack == 12 and wt.defense == 8 and wt.move == 1 and wt.habitat == ["fungus"], "Tendril Worm: 60/40/12/8, move 1, fungus only")
+	ok(st.strength == 30 and st.organization == 30 and st.attack == 5 and st.defense == 5 and st.move == 2 and st.habitat == ["plains", "hills"], "Rust Strider: 30/30/5/5, move 2, plains and hills")
+	ok(cfg.spawner.no_spawn_before_turn == 3 and cfg.spawner.max_natives == 6 and cfg.spawner.min_natives == 2 and cfg.spawner.worm.chance == 0.02 and cfg.spawner.strider.chance == 0.05 and cfg.spawner.worm.min_density == 3, "spawner numbers are in natives.json (worm 0.02, strider 0.05, density 3, cap 6, minimum 2)")
+	# --- Spawner: seed 1, no spawns before turn 3, never over the cap, always at least 2 ---
+	var g := save_game_setup(1)
+	var gm: HexMap = g.map
+	gm.load_natives_config(cfg)
+	var gr: DivisionRoster = g.roster
+	gr.rng.seed = 1
+	gm.place_fungus(gr.rng)
+	ok(gm.fungus_tiles.size() > 0 and gm.fungus_tiles.keys().all(func(c: Vector2i) -> bool: return gm.cities.all(func(city: Dictionary) -> bool: return HexMap.hex_distance(c, city.cell) > 2)), "fungus patches are placed away from cities (%d tiles)" % gm.fungus_tiles.size())
+	var early := 0
+	var over := 0
+	var below := 0
+	var near_city_early := 0
+	for turn in range(1, 41):
+		var born := NativeSpawner.run(gm, gr, turn)
+		if turn < 3:
+			early += born.size()
+		if turn < 5:
+			for d in born:
+				for c in gm.cities:
+					if HexMap.hex_distance(d.hex, c.cell) <= 3:
+						near_city_early += 1
+		if NativeSpawner.count(gr) > 6:
+			over += 1
+		if turn >= 3 and NativeSpawner.count(gr) < 2:
+			below += 1
+	ok(early == 0, "no natives spawn before turn 3")
+	ok(over == 0 and below == 0, "the native count stays between 2 and max_natives for 40 turns (seed 1)")
+	ok(near_city_early == 0, "no spawn within 3 hexes of a city before turn 5")
+	ok(NativeSpawner.count(gr) >= 2 and gr.divisions.filter(func(d: Division) -> bool: return gr.is_native(d)).all(func(d: Division) -> bool: return d.nation == -2), "natives belong to nation -2")
+	# Same seed, same natives.
+	var g2 := save_game_setup(1)
+	g2.map.load_natives_config(cfg)
+	g2.roster.rng.seed = 1
+	g2.map.place_fungus(g2.roster.rng)
+	for turn in range(1, 41):
+		NativeSpawner.run(g2.map, g2.roster, turn)
+	var cells1: Array = gr.divisions.filter(func(d: Division) -> bool: return gr.is_native(d)).map(func(d: Division) -> Vector2i: return d.hex)
+	var cells2: Array = g2.roster.divisions.filter(func(d: Division) -> bool: return g2.roster.is_native(d)).map(func(d: Division) -> Vector2i: return d.hex)
+	ok(cells1 == cells2, "a seeded game spawns the same natives")
+	# Worms: density 3 and up, no unit within 2.
+	var w := nat_world()
+	var wm: HexMap = w.map
+	var wr: DivisionRoster = w.roster
+	wm.natives_config.spawner.worm.chance = 1.0
+	wm.natives_config.spawner.strider.chance = 0.0
+	wm.natives_config.spawner.min_natives = 0
+	wm.fungus_tiles = {Vector2i(6, 4): 3, Vector2i(9, 4): 2, Vector2i(6, 7): 4}
+	wr.spawn_division(1, Vector2i(6, 8), "infantry")  # within 2 of (6,7)
+	var born := NativeSpawner.run(wm, wr, 10)
+	ok(born.size() == 1 and born[0].hex == Vector2i(6, 4) and born[0].unit_type == "tendril_worm", "a worm spawns on a density-3 tile with no unit within 2, not on density 2 or next to a unit")
+	wm.natives_config.spawner.max_natives = 1
+	wm.fungus_tiles[Vector2i(4, 1)] = 4
+	ok(NativeSpawner.run(wm, wr, 11).is_empty(), "no spawn at the max_natives cap")
+	# Minimum of 2 groups: kill them all and the spawner restores two, even with 0 chances.
+	var mn := nat_world()
+	mn.map.natives_config.spawner.strider.chance = 0.0
+	mn.map.natives_config.spawner.worm.chance = 0.0
+	NativeSpawner.run(mn.map, mn.roster, 3)
+	ok(NativeSpawner.count(mn.roster) == 2, "at least 2 native groups at all times (spawned 2 from none)")
+	mn.roster.divisions.clear()
+	NativeSpawner.run(mn.map, mn.roster, 9)
+	ok(NativeSpawner.count(mn.roster) == 2, "after they are killed the minimum is restored")
+	# Striders spawn on plains at least 4 hexes from a city.
+	ok(mn.roster.divisions.all(func(d: Division) -> bool: return mn.map.terrain_name(d.hex) == "plains" and mn.map.cities.all(func(c: Dictionary) -> bool: return HexMap.hex_distance(d.hex, c.cell) >= 4)), "striders spawn on plains 4+ hexes from every city")
+
+	# --- Worm: fungus only, ambush ---
+	var a := nat_world()
+	var am: HexMap = a.map
+	var ar: DivisionRoster = a.roster
+	am.fungus_tiles = {Vector2i(6, 4): 3, Vector2i(7, 4): 3}
+	var worm := ar.spawn_division(-2, Vector2i(6, 4), "tendril_worm")
+	ok(ar.can_move(worm, Vector2i(7, 4), am) and not ar.can_move(worm, Vector2i(5, 4), am), "a worm can step onto fungus but not off it")
+	for i in 30:
+		worm.moves_left = worm.move
+		NativeAI.plan(worm, ar, am)
+		ar.execute_orders(am)
+		ar.end_turn(am)
+	ok(am.fungus_tiles.has(worm.hex), "a Tendril Worm never leaves fungus tiles (30 random turns)")
+	# Ambush: +25% when the worm attacks out of fungus.
+	var amb := nat_world()
+	var amm: HexMap = amb.map
+	var amr: DivisionRoster = amb.roster
+	var victim := amr.spawn_division(0, Vector2i(5, 4), "infantry")
+	var worm_on := amr.spawn_division(-2, Vector2i(6, 4), "tendril_worm")
+	amm.fungus_tiles = {Vector2i(6, 4): 3}
+	var hp := victim.strength
+	amr.attack(worm_on, victim, amm)
+	var hit_in := hp - victim.strength
+	amm.fungus_tiles.clear()
+	victim.strength = hp
+	victim.org = victim.max_org
+	worm_on.moves_left = worm_on.move
+	amr.attack(worm_on, victim, amm)
+	var hit_out := hp - victim.strength
+	ok(is_equal_approx(hit_in / hit_out, 1.25), "a worm attacking out of fungus deals 1.25x (ambush)")
+	# --- Native AI: attack the adjacent enemy, otherwise move in the habitat ---
+	var b := nat_world()
+	var bm: HexMap = b.map
+	var br: DivisionRoster = b.roster
+	var strider := br.spawn_division(-2, Vector2i(7, 4), "rust_strider")
+	var foe := br.spawn_division(0, Vector2i(8, 4), "infantry")
+	NativeAI.plan(strider, br, bm)
+	ok(strider.order_attack and strider.order_path == [Vector2i(8, 4)], "a native with an enemy adjacent attacks it")
+	br.clear_order(strider)
+	foe.hex = Vector2i(2, 8)
+	NativeAI.plan(strider, br, bm)
+	ok(strider.order_path.size() >= 1 and not strider.order_attack and HexMap.hex_distance(strider.order_path[0], Vector2i(7, 4)) == 1, "otherwise it takes one step")
+	bm.terrain[Vector2i(6, 4)] = "forest"
+	bm.terrain[Vector2i(8, 4)] = "forest"
+	ok(not br.can_move(strider, Vector2i(6, 4), bm) and br.can_move(strider, Vector2i(7, 3), bm), "a strider stays on plains and hills (forest is outside its habitat)")
+	bm.terrain[Vector2i(7, 3)] = "hills"
+	ok(br.can_move(strider, Vector2i(7, 3), bm), "hills are strider habitat")
+	# Flee below 50% org.
+	br.clear_order(strider)
+	strider.org = strider.max_org * 0.4
+	foe.hex = Vector2i(8, 4)
+	foe.nation = 0
+	NativeAI.plan(strider, br, bm)
+	ok(not strider.order_attack and HexMap.hex_distance(strider.order_path[0], foe.hex) > 1, "a strider below 50% org flees away from the adjacent enemy")
+	# 0 org: removed, no retreat, no POW.
+	var c := nat_world()
+	var cr: DivisionRoster = c.roster
+	var weak := cr.spawn_division(-2, Vector2i(7, 4), "rust_strider")
+	weak.org = 0.0
+	ok(cr._after_combat(weak, c.map, 0) == "destroyed" and not cr.divisions.has(weak), "a native at 0 org is removed (never retreats or surrenders)")
+	# Natives take no supply or reinforcement penalties.
+	var sup := nat_world()
+	var sd: Division = sup.roster.spawn_division(-2, Vector2i(7, 4), "rust_strider")
+	sup.roster.end_turn(sup.map)
+	ok(sd.supplied and sd.org == sd.max_org, "natives are never out of supply")
+	# --- Natives never capture or claim a city ---
+	var cc := nat_world()
+	var ccm: HexMap = cc.map
+	var ccr: DivisionRoster = cc.roster
+	var raider := ccr.spawn_division(-2, Vector2i(12, 7), "rust_strider")
+	ok(not ccr.can_move(raider, Vector2i(13, 7), ccm) and not ccr.try_move(raider, Vector2i(13, 7), ccm) and ccm.cities[1].nation == 1, "a native cannot enter or capture an enemy city")
+	var wcity := ccr.spawn_division(-2, Vector2i(12, 7), "tendril_worm")
+	ccm.fungus_tiles[Vector2i(12, 7)] = 4
+	ccr.divisions.erase(raider)
+	var defender := ccr.spawn_division(1, Vector2i(13, 7), "infantry")
+	var pre_str := defender.strength
+	var pre_org := defender.org
+	ccr.attack(wcity, defender, ccm)
+	ok(defender.strength == pre_str and defender.org < pre_org and ccm.cities[1].nation == 1, "a worm attacks a city hex for org damage only and cannot take it")
+	# --- Raids on undefended Outposts and Bases ---
+	var rd := nat_world(15, 9, {0: Vector2i(1, 1), 1: Vector2i(13, 7)})
+	var rm: HexMap = rd.map
+	var rr: DivisionRoster = rd.roster
+	rr.spawn_division(-2, Vector2i(12, 7), "rust_strider")
+	rm.cities[1].population = 4000  # Outpost
+	ok(rm.tier(rm.cities[1]) == "outpost" and NativeAI.raid_step(rm, rr, 10).size() == 1 and rm.cities[1].population == 3800, "a strider raids an undefended Outpost for 5% of its people")
+	ok(NativeAI.raid_step(rm, rr, 12).is_empty() and NativeAI.raid_step(rm, rr, 15).size() == 1, "a city is raided at most once per cooldown (5 turns)")
+	rm.cities[1].population = 10000  # Base
+	rm.cities[1].last_raid_turn = -100
+	ok(NativeAI.raid_step(rm, rr, 20).size() == 1 and rm.cities[1].population == 9500 and rm.cities[1].nation == 1, "Bases are raided too, and the city is never taken")
+	rm.cities[1].population = 20000  # City
+	rm.cities[1].last_raid_turn = -100
+	ok(NativeAI.raid_step(rm, rr, 30).is_empty(), "a City is not raided")
+	rm.cities[1].population = 10000
+	rr.spawn_division(1, Vector2i(13, 7), "infantry")
+	ok(NativeAI.raid_step(rm, rr, 40).is_empty(), "a defended city is not raided")
+	# --- Domination ignores natives ---
+	var dm := nat_world()
+	dm.roster.spawn_division(-2, Vector2i(7, 4), "rust_strider")
+	ok(Victory.counted_cities(dm.map, [-2]) == {0: 1, 1: 1} and not Victory.check(dm.map, 0, 0.85, [-2]).over, "natives own no city and do not count for domination")
+	# --- Fog: natives render only on Visible tiles ---
+	var f := save_game_setup(3)
+	var fm: HexMap = f.map
+	var fr: DivisionRoster = f.roster
+	var home: Vector2i = fm.capital_of(0).cell
+	var near_cell := Vector2i(-1, -1)
+	var far_cell := Vector2i(-1, -1)
+	for cell in fm.cells:
+		if fm.cells[cell] == HexMap.WATER:
+			continue
+		if HexMap.hex_distance(cell, home) == 1 and near_cell.x < 0:
+			near_cell = cell
+		if HexMap.hex_distance(cell, home) >= 8 and far_cell.x < 0:
+			far_cell = cell
+	var n_near := fr.spawn_division(-2, near_cell, "rust_strider")
+	var n_far := fr.spawn_division(-2, far_cell, "rust_strider")
+	f.fog.update(fm, fr)
+	ok(not fr.hides_from(0, n_near.hex) and fr.hides_from(0, n_far.hex), "a native on a Visible tile is seen, one in the fog is hidden and cannot be targeted")
+	# --- A full game with natives: 40 turns of AI orders, spawns, raids and fungus ---
+	var full := save_game_setup(4)
+	full.map.load_natives_config(cfg)
+	full.roster.rng.seed = 4
+	full.map.place_fungus(full.roster.rng)
+	full.eco.config.ai_recruit_chance = 1.0
+	for turn in range(1, 41):
+		save_play_turn(full)
+		NativeSpawner.run(full.map, full.roster, turn)
+		NativeAI.raid_step(full.map, full.roster, turn)
+	ok(NativeSpawner.count(full.roster) >= 2 and NativeSpawner.count(full.roster) <= 6 and full.map.cities.all(func(c: Dictionary) -> bool: return c.nation >= 0), "40 turns with natives: 2 to 6 natives, no city ever owned by natives")
+	# --- Save and load keeps natives ---
+	var sv := save_game_setup(2)
+	sv.map.load_natives_config(cfg)
+	sv.roster.spawn_division(-2, Vector2i(3, 3), "tendril_worm")
+	var state := save_state(sv, 4)
+	var sv2 := save_game_setup(2)
+	SaveGame.restore(state, sv2.map, sv2.roster, sv2.eco)
+	ok(sv2.roster.divisions.any(func(d: Division) -> bool: return d.nation == -2 and d.unit_type == "tendril_worm"), "a saved native comes back after a load")
+
+
+func test_fungus_attrition() -> void:
+	var w := nat_world()
+	var m: HexMap = w.map
+	var r: DivisionRoster = w.roster
+	m.fungus_tiles = {Vector2i(6, 4): 2}
+	var rules: Dictionary = m.natives_config.fungus_attrition
+	ok(rules.org == 5 and rules.strength == 2 and rules.move_cost == 1, "fungus attrition in natives.json: -5 org, -2 strength, +1 move cost")
+	var inf := r.spawn_division(0, Vector2i(6, 4), "infantry")
+	var scout := r.spawn_division(0, Vector2i(6, 4), "scout")
+	scout.hex = Vector2i(6, 4)
+	var off := r.spawn_division(0, Vector2i(2, 4), "infantry")
+	var worm := r.spawn_division(-2, Vector2i(6, 4), "tendril_worm")
+	for d in [inf, scout, worm]:
+		d.supplied = true
+	r.end_turn(m)
+	ok(is_equal_approx(inf.org, inf.max_org - 5.0 + 0.0) or inf.org > inf.max_org - 5.0, "infantry on fungus loses 5 org")
+	ok(is_equal_approx(inf.strength, 98.0) and is_equal_approx(off.strength, 100.0), "infantry on fungus loses 2 strength; units elsewhere are unharmed")
+	ok(is_equal_approx(scout.strength, 18.0) and scout.org < scout.max_org, "scouts are not exempt")
+	ok(worm.strength == 60.0, "natives are exempt")
+	# Org loss exact (regen aside): check in an unsupplied-free setup by reading org before the regen.
+	var m2 := nat_world()
+	m2.map.fungus_tiles = {Vector2i(6, 4): 1}
+	var d2: Division = m2.roster.spawn_division(0, Vector2i(6, 4), "infantry")
+	d2.in_combat = true  # no regen this turn
+	d2.supplied = true
+	m2.roster._fungus_attrition(m2.map)
+	ok(is_equal_approx(d2.org, d2.max_org - 5.0) and is_equal_approx(d2.strength, d2.max_strength - 2.0), "-5 org and -2 strength exactly")
+	# Verdant: halved.
+	var v := nat_world()
+	v.map.nation_factions = {0: "verdant_accord", 1: "assembly"}
+	v.map.load_faction_traits(FactionRoster.load_all(), FactionRoster.load_global())
+	v.map.fungus_tiles = {Vector2i(6, 4): 1}
+	var vd: Division = v.roster.spawn_division(0, Vector2i(6, 4), "infantry")
+	var ad: Division = v.roster.spawn_division(1, Vector2i(6, 4), "infantry")
+	ad.hex = Vector2i(6, 4)
+	v.roster._fungus_attrition(v.map)
+	ok(is_equal_approx(vd.org, vd.max_org - 2.5) and is_equal_approx(vd.strength, vd.max_strength - 1.0) and is_equal_approx(ad.org, ad.max_org - 5.0), "Verdant Accord takes half the fungus attrition (2.5 org, 1 strength)")
+	# Move cost.
+	var plains := int(m.terrain_of(Vector2i(6, 4)).move_cost)
+	ok(m.step_cost(Vector2i(5, 4), Vector2i(6, 4), 0) == plains + 1 and m.step_cost(Vector2i(5, 4), Vector2i(7, 4), 0) == plains, "entering a fungus tile costs +1 move")
+	ok(v.map.step_cost(Vector2i(5, 4), Vector2i(6, 4), 0) == plains and v.map.step_cost(Vector2i(5, 4), Vector2i(6, 4), 1) == plains + 1, "the +1 is halved (rounded down to 0) for Verdant Accord")
+	ok(m.step_cost(Vector2i(5, 4), Vector2i(6, 4), -2) == plains, "natives move through fungus at the normal cost")

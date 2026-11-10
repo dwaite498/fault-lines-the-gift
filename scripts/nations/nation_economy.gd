@@ -681,7 +681,7 @@ func reinforce_plan(roster: DivisionRoster, hex_map: HexMap, pools: Dictionary,
 	order.sort_custom(func(a, b): return a.id < b.id)
 	for d in order:
 		if (only_nation >= 0 and d.nation != only_nation) or not d.supplied or d.strength >= d.max_strength \
-				or roster.is_colonizer(d):
+				or roster.is_colonizer(d) or roster.is_native(d):
 			continue
 		var rate := roster.people_per_strength(d)
 		var gain := minf(cap * reinforce_mult(d, hex_map, d.fought_this_turn), d.max_strength - d.strength)
