@@ -57,6 +57,7 @@ func _ready() -> void:
 	_city_panel.roster = _view.roster
 	_city_panel.player_nation = PLAYER_NATION
 	_city_panel.recruit_pressed.connect(_on_recruit_pressed)
+	_city_panel.labor_pressed.connect(_on_labor_pressed)
 	_panel.roster = _view.roster
 	_panel.player_nation = PLAYER_NATION
 	_panel.factions = factions
@@ -178,6 +179,7 @@ func next_idle_unit(after: Division) -> Division:
 
 
 func _refresh_panels() -> void:
+	_economy.refresh_labor(_view.hex_map)
 	var acts: Array[String] = []
 	if _view.selected and _view.selected.nation == PLAYER_NATION:
 		acts = _view.roster.valid_actions(_view.selected, _view.hex_map)
@@ -229,6 +231,13 @@ func _try_recruit() -> void:
 	else:
 		message.text = "Cannot recruit: " + reason
 		print(message.text)
+
+
+## A city panel labor button: +1 or -1 point on a sink of the open player city.
+func _on_labor_pressed(sink: String, delta: int) -> void:
+	if not _city.is_empty() and _city.nation == PLAYER_NATION:
+		_economy.adjust_labor(_city, sink, delta)
+	_refresh_panels()
 
 
 func _on_recruit_pressed() -> void:

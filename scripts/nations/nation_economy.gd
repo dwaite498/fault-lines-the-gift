@@ -5,6 +5,10 @@ extends RefCounted
 
 const CONFIG_PATH := "res://data/resources_config.json"
 const RESOURCES: Array[String] = ["cash", "influence", "operations", "manpower", "capacity"]
+## The three labor sinks a city's labor points are assigned to. Training and
+## Infrastructure are only stored for now (their sinks are Task 37); Growth feeds
+## HexMap.growth_rate.
+const SINKS: Array[String] = ["training", "infrastructure", "growth"]
 
 var config: Dictionary = {}
 ## nation index -> {"cash": float, "influence": ..., ...}
@@ -30,6 +34,7 @@ func setup(hex_map: HexMap) -> void:
 	upkeep_paid.clear()
 	pows.clear()
 	reinforce_spent.clear()
+	refresh_labor(hex_map)
 	for nation in hex_map.nations:
 		stocks[nation] = {}
 		upkeep_paid[nation] = true
@@ -49,6 +54,82 @@ func unassigned_labor(city: Dictionary) -> int:
 	for sink in city.get("labor", {}):
 		assigned += int(city.labor[sink])
 	return maxi(labor_points(city) - assigned, 0)
+
+
+## Default assignment for a city: labor.default_growth_share of its labor points on
+## Growth (rounded down), nothing on Training or Infrastructure; the rest is left
+## unassigned and makes cash. Used for new and AI cities.
+func default_labor(city: Dictionary) -> Dictionary:
+	var share := float(config.get("labor", {}).get("default_growth_share", 0.0))
+	return {"training": 0, "infrastructure": 0, "growth": int(floor(labor_points(city) * share))}
+
+
+## Sum of the points assigned to the three sinks.
+func assigned_labor(city: Dictionary) -> int:
+	var total := 0
+	for sink in SINKS:
+		total += int(city.get("labor", {}).get(sink, 0))
+	return total
+
+
+## Gives the city its default assignment if it has none, otherwise clamps the
+## existing one to the current labor points. Safe to call any time.
+func ensure_labor(city: Dictionary) -> void:
+	if not city.has("labor"):
+		city.labor = default_labor(city)
+		return
+	clamp_labor(city)
+
+
+## Trims the assignment so it never exceeds labor_points (population dropped, e.g.
+## after capture or siege). Takes points from the sinks in labor.clamp_order
+## (Growth first, then Infrastructure, then Training).
+func clamp_labor(city: Dictionary) -> void:
+	var excess := assigned_labor(city) - labor_points(city)
+	if excess <= 0:
+		return
+	var order: Array = config.get("labor", {}).get("clamp_order", SINKS)
+	for sink in order:
+		var take := mini(excess, int(city.labor.get(sink, 0)))
+		city.labor[sink] = int(city.labor.get(sink, 0)) - take
+		excess -= take
+		if excess <= 0:
+			break
+
+
+## Sets one sink to `points`, limited to 0..(its current points + free labor).
+## Returns the value actually set.
+func set_labor(city: Dictionary, sink: String, points: int) -> int:
+	ensure_labor(city)
+	var room := int(city.labor[sink]) + unassigned_labor(city)
+	city.labor[sink] = clampi(points, 0, room)
+	return int(city.labor[sink])
+
+
+## Moves one sink by delta points (the panel's -/+ buttons). Returns true if it changed.
+func adjust_labor(city: Dictionary, sink: String, delta: int) -> bool:
+	ensure_labor(city)
+	var before := int(city.labor[sink])
+	return set_labor(city, sink, before + delta) != before
+
+
+## Gives every city a default assignment if it has none and clamps the rest.
+func refresh_labor(hex_map: HexMap) -> void:
+	for city in hex_map.cities:
+		ensure_labor(city)
+
+
+## Labor totals for a nation: {"total", "training", "infrastructure", "growth", "free"}.
+func labor_totals(nation: int, hex_map: HexMap) -> Dictionary:
+	var t := {"total": 0, "training": 0, "infrastructure": 0, "growth": 0, "free": 0}
+	for city in hex_map.cities:
+		if city.nation != nation:
+			continue
+		t.total += labor_points(city)
+		for sink in SINKS:
+			t[sink] += int(city.get("labor", {}).get(sink, 0))
+		t.free += unassigned_labor(city)
+	return t
 
 
 ## Per-turn output of one city: {"cash", "manpower", "capacity"}. Cash is
@@ -186,6 +267,7 @@ func run_ai(player_nation: int, hex_map: HexMap, roster: DivisionRoster) -> void
 ## End-of-turn economy step: income, upkeep, reinforcement, then training ticks
 ## and recruits appear.
 func end_turn(hex_map: HexMap, roster: DivisionRoster) -> void:
+	refresh_labor(hex_map)
 	collect_income(hex_map)
 	pay_upkeep(hex_map, roster)
 	reinforce(roster, hex_map)

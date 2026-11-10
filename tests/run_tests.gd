@@ -28,6 +28,7 @@ func _initialize() -> void:
 	test_camera()
 	test_population()
 	test_player_faction_warning()
+	test_labor()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -438,3 +439,62 @@ func test_player_faction_warning() -> void:
 	ok(g.player_warning == "" and g.assigned[0].id == good_id, "a valid player_faction does not warn and is nation 0")
 	cfg.player_faction = ""
 	ok(FactionRoster.from_config(cfg).player_warning == "", "blank player_faction does not warn")
+
+
+func test_labor() -> void:
+	var eco := NationEconomy.new()
+	var m := pop_map()
+	var cap := {"id": 0, "nation": 0, "population": 10000, "infrastructure": 10}
+	ok(is_equal_approx(float(eco.config.labor.default_growth_share), 0.5), "config labor.default_growth_share is 0.5 (resources_config.json)")
+	# Default: 50% of labor on Growth, rounded down; the rest unassigned and making cash.
+	eco.ensure_labor(cap)
+	ok(cap.labor == {"training": 0, "infrastructure": 0, "growth": 2}, "a 10,000 capital defaults to 2 on Growth, 0 Training, 0 Infrastructure")
+	ok(eco.labor_points(cap) == 5 and eco.unassigned_labor(cap) == 3, "5 labor points leave 3 unassigned")
+	ok(is_equal_approx(eco.city_income(cap).cash, 3.0), "3 unassigned labor make 3 cash")
+	for pair in [[2000, 0], [3999, 0], [4000, 1], [12000, 3], [14000, 3], [16000, 4]]:
+		ok(eco.default_labor({"population": pair[0]}).growth == pair[1], "default Growth rounds down: %d people -> %d" % [pair[0], pair[1]])
+	# Growth labor feeds the Task 35 growth formula: 2 points = 1% + 2 x 0.5% = 2%.
+	ok(is_equal_approx(m.growth_rate(cap), 0.02) and m.growth_amount(cap) == 200, "Growth labor feeds growth: default capital grows 2% (+200)")
+	# The default share comes from config.
+	var all_growth := NationEconomy.new()
+	all_growth.config.labor.default_growth_share = 1.0
+	var c2 := {"population": 10000, "infrastructure": 10}
+	all_growth.ensure_labor(c2)
+	ok(c2.labor.growth == 5 and all_growth.unassigned_labor(c2) == 0 and is_equal_approx(all_growth.city_income(c2).cash, 0.0), "changing default_growth_share to 1.0 gives all-Growth and no cash")
+	# Assign freely: +/- buttons, limited by free labor and by zero.
+	ok(eco.adjust_labor(cap, "training", 1) and eco.adjust_labor(cap, "infrastructure", 1) and eco.adjust_labor(cap, "training", 1), "can assign free labor to Training and Infrastructure")
+	ok(cap.labor == {"training": 2, "infrastructure": 1, "growth": 2} and eco.unassigned_labor(cap) == 0, "assignment stored 2/1/2 with nothing free")
+	ok(not eco.adjust_labor(cap, "growth", 1), "+ does nothing when no labor is free")
+	ok(eco.adjust_labor(cap, "infrastructure", -1) and eco.unassigned_labor(cap) == 1, "- frees a point")
+	ok(not eco.adjust_labor(cap, "infrastructure", -1), "- does nothing at 0")
+	ok(is_equal_approx(eco.city_income(cap).cash, 1.0), "1 free point makes 1 cash")
+	ok(eco.set_labor(cap, "growth", 99) == 3 and eco.set_labor(cap, "training", -4) == 0, "set_labor clamps to the free labor and to 0")
+	# Clamp when population drops: Growth is trimmed first, then Infrastructure, then Training.
+	var c3 := {"id": 3, "population": 10000, "infrastructure": 10, "labor": {"training": 2, "infrastructure": 1, "growth": 2}}
+	c3.population = 6000
+	eco.ensure_labor(c3)
+	ok(c3.labor == {"training": 2, "infrastructure": 1, "growth": 0} and eco.assigned_labor(c3) <= eco.labor_points(c3), "population drop to 6,000 (3 labor) trims Growth first")
+	c3.population = 2000
+	eco.ensure_labor(c3)
+	ok(c3.labor == {"training": 1, "infrastructure": 0, "growth": 0}, "population drop to 2,000 (1 labor) keeps only what fits (Training last)")
+	c3.population = 500
+	eco.ensure_labor(c3)
+	ok(eco.assigned_labor(c3) == 0 and eco.unassigned_labor(c3) == 0, "population under 2,000 leaves no labor and nothing assigned")
+	# Assignment lives through a turn: the economy end_turn clamps and defaults new cities.
+	var gm := build(5)
+	var geco := NationEconomy.new()
+	geco.setup(gm)
+	ok(gm.cities.all(func(c: Dictionary) -> bool: return c.labor.growth == 2 and c.labor.training == 0), "every generated city (AI included) starts at the default split after setup")
+	var fresh := gm.cities[0]
+	fresh.erase("labor")
+	fresh.population = 4000
+	geco.refresh_labor(gm)
+	ok(fresh.labor.growth == 1, "a city without an assignment (new or captured) gets the default for its size")
+	# Nation totals.
+	var nat: int = gm.cities[1].nation
+	var t := geco.labor_totals(nat, gm)
+	var expect_total := 0
+	for c in gm.cities:
+		if c.nation == nat:
+			expect_total += geco.labor_points(c)
+	ok(t.total == expect_total and t.total == t.free + t.training + t.infrastructure + t.growth and t.growth > 0, "nation totals add up (total %d, growth %d, free %d)" % [t.total, t.growth, t.free])
