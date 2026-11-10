@@ -54,6 +54,7 @@ func _initialize() -> void:
 	test_fungus_attrition()
 	test_pressure()
 	test_frontage()
+	test_harrier()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -3097,3 +3098,81 @@ func test_frontage() -> void:
 	# An ordinary attack with room is unaffected, and a cap of 0 means no cap.
 	r2.combat["max_attackers_per_hex"] = 0
 	ok(r2.set_order(extra, center, m2), "cap 0 disables the limit")
+
+
+# --- Task 45b: Crag Harrier (the Hollowfin Pack is deferred to the naval slice) ---
+
+func test_harrier() -> void:
+	var cfg := NativeSpawner.load_config()
+	var ht: Dictionary = cfg.units.crag_harrier
+	ok(ht.strength == 35 and ht.organization == 35 and ht.attack == 9 and ht.defense == 10 and ht.move == 2 and ht.habitat == ["hills", "mountains"], "Crag Harrier: 35/35/9/10, move 2, hills and mountains")
+	ok(ht.nest_radius == 2 and ht.ignores_terrain_cost and ht.dive_attack_mult == 1.3 and ht.zoc_leave_extra == 1 and cfg.spawner.harrier.chance == 0.015 and cfg.spawner.harrier.no_unit_radius == 2, "harrier numbers are in natives.json (nest 2, dive x1.3, pass hold +1, spawn 0.015)")
+	# Spawning: a mountain tile, no unit within 2; the tile is the nest; Hostile/Swarm scaling uses the pressure multipliers.
+	var w := nat_world()
+	var m: HexMap = w.map
+	var r: DivisionRoster = w.roster
+	var peak := Vector2i(7, 4)
+	m.terrain[peak] = "mountains"
+	m.natives_config.spawner.harrier.chance = 1.0
+	m.natives_config.spawner.strider.chance = 0.0
+	m.natives_config.spawner.min_natives = 0
+	var born := NativeSpawner.run(m, r, 10)
+	var hs := born.filter(func(d: Division) -> bool: return d.unit_type == "crag_harrier")
+	ok(hs.size() == 1 and hs[0].hex == peak and hs[0].nest == peak and hs[0].strength == 35.0 and hs[0].attack == 9.0, "a Harrier spawns on a mountain tile with that tile as its nest")
+	ok(NativeSpawner.run(m, r, 11).filter(func(d: Division) -> bool: return d.unit_type == "crag_harrier").is_empty(), "no second Harrier spawns with a unit within 2 hexes")
+	var w2 := nat_world()
+	w2.map.terrain[peak] = "mountains"
+	w2.map.natives_config.spawner.harrier.chance = 1.0
+	w2.map.natives_config.spawner.min_natives = 0
+	w2.map.pressure.set_score(25.0)
+	var h2: Division = NativeSpawner.run(w2.map, w2.roster, 10).filter(func(d: Division) -> bool: return d.unit_type == "crag_harrier")[0]
+	ok(roundi(h2.strength) == 44 and roundi(h2.attack * 10.0) == 113 and h2.org == 35.0 and h2.defense == 10.0 and h2.move == 2, "Hostile: about 44 strength, x1.25 attack, org, defense and move unchanged")
+	var w3 := nat_world()
+	w3.map.terrain[peak] = "mountains"
+	w3.map.natives_config.spawner.harrier.chance = 1.0
+	w3.map.natives_config.spawner.min_natives = 0
+	w3.map.pressure.set_score(60.0)
+	var h3: Division = NativeSpawner.run(w3.map, w3.roster, 10).filter(func(d: Division) -> bool: return d.unit_type == "crag_harrier")[0]
+	ok(roundi(h3.strength) == 66 and roundi(h3.attack) == 17, "Swarm: about 66 strength and 17 attack")
+	# Habitat: hills and mountains only, within 2 hexes of the nest.
+	var far := Vector2i(7, 7)
+	var inside := Vector2i(7, 6)
+	for c in [Vector2i(7, 5), inside, far, Vector2i(8, 4)]:
+		m.terrain[c] = "hills"
+	m.terrain[Vector2i(6, 4)] = "plains"
+	var h: Division = hs[0]
+	ok(r.can_move(h, Vector2i(8, 4), m) and not r.can_move(h, Vector2i(6, 4), m), "the Harrier moves onto hills but not plains")
+	h.hex = inside
+	ok(HexMap.hex_distance(inside, peak) == 2 and not r.native_habitat_ok(h, far, m) and r.native_habitat_ok(h, Vector2i(7, 5), m), "it stays within 2 hexes of its nest")
+	h.hex = peak
+	# Ignores terrain cost; a ground unit pays the map's cost.
+	var inf := r.spawn_division(0, Vector2i(6, 3), "infantry")
+	ok(r.step_cost_for(h, peak, Vector2i(7, 5), m) == 1, "the Harrier ignores terrain move cost (always 1)")
+	# Pass hold: leaving a hex next to a Harrier costs +1 for non-natives only.
+	inf.hex = Vector2i(7, 5)
+	var base := m.step_cost(Vector2i(7, 5), Vector2i(8, 5), 0)
+	ok(HexMap.hex_distance(inf.hex, peak) == 1 and r.step_cost_for(inf, inf.hex, Vector2i(8, 5), m) == base + 1, "an enemy leaving a hex next to a Harrier pays +1 movement")
+	ok(r.step_cost_for(inf, Vector2i(2, 2), Vector2i(2, 3), m) == m.step_cost(Vector2i(2, 2), Vector2i(2, 3), 0), "not next to one: the normal cost")
+	var other_native := r.spawn_division(-2, Vector2i(7, 5), "rust_strider")
+	inf.hex = Vector2i(2, 2)
+	ok(r.step_cost_for(other_native, other_native.hex, Vector2i(8, 5), m) == m.step_cost(other_native.hex, Vector2i(8, 5), -2), "natives do not pay the pass-hold cost")
+	r.divisions.erase(other_native)
+	# Dive: +30% against a defender that moved this turn; fortified or stationary units are safe.
+	var target := r.spawn_division(0, Vector2i(7, 5), "infantry")
+	var loss := func(moved: bool, fort: int) -> float:
+		target.strength = 100.0
+		target.org = 100.0
+		target.has_moved = moved
+		target.fortify_level = fort
+		h.moves_left = 2
+		h.has_moved = false
+		var before := target.strength + target.org
+		r.attack(h, target, m)
+		return before - (target.strength + target.org)
+	var still: float = loss.call(false, 0)
+	var moved: float = loss.call(true, 0)
+	var fortified: float = loss.call(false, 2)
+	ok(moved > still and absf(moved / still - 1.3) < 0.05, "Dive: +30%% damage against a unit that moved this turn (%.2f vs %.2f)" % [moved, still])
+	ok(fortified <= still, "a fortified unit is safe from the dive")
+	# The nest is saved with the division (SaveGame stores every script variable).
+	ok(Division.new().get_property_list().any(func(p: Dictionary) -> bool: return p.name == "nest"), "the nest is a saved division property")
