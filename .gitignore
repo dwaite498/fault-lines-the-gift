@@ -8,3 +8,5 @@ export_credentials.cfg
 # OS
 .DS_Store
 Thumbs.db
+# Export output
+/build/
