@@ -25,6 +25,7 @@ func _initialize() -> void:
 	test_uphill_penalty()
 	test_uphill_damage()
 	test_reachability()
+	test_mountains()
 	test_camera()
 	test_population()
 	test_player_faction_warning()
@@ -215,7 +216,6 @@ func test_reachability() -> void:
 					all_ok = false
 					worst = "smooth seed %d %s" % [seed_value, str(cell)]
 	ok(all_ok, "all land reachable from its start on 20 seeds %s" % worst)
-	test_mountains()
 	ok(m_idempotent(), "ensure_reachable finds nothing more to fix")
 	ok(deterministic, "same seed gives the same elevations")
 

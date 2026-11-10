@@ -48,6 +48,7 @@ See [docs/PIVOT.md](PIVOT.md) for the pivot brief.
 - Save fix (fix-save-labor): a save made mid-turn right after Occupy (the city's labor plan is cleared until end turn) hashed differently after loading, because the load's first panel refresh ran `ensure_labor` and refilled the labor. Loading now keeps the saved labor (main.gd `_refresh_panels(false)` on a load); every later refresh refills as before. Test: `test_save_mid_turn_occupy`.
 - Harrier leash orders (fix-harrier-leash-order): `DivisionRoster.set_order` rejects a move order for a Crag Harrier whose path goes past its `nest_radius` (it used to accept it and stop at the leash) and sets `order_message` ("... is past its leash ..."), which main.gd shows as the turn message. Orders inside the leash are unchanged.
 - Attack disabled on a full frontage (fix-frontage-attack-disabled): when every attackable enemy hex already has 3 attackers, the unit panel shows Attack greyed out as "Attack (A) - Frontage full (3/3)" (also its tooltip) instead of hiding it (`DivisionRoster.attack_disabled_reason`, `UnitPanel.refresh(..., disabled)`). `valid_actions` is unchanged; no reason is shown when there is simply no target.
+- Test registration (fix-register-test-mountains): `test_mountains` was only called from the middle of `test_reachability`; it is now registered in `_initialize` right after it (runs once). No game code changed.
 ## On hold
 - Rail Tasks 27 and 28
 
