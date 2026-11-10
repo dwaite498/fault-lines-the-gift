@@ -11,6 +11,10 @@ var palette: Dictionary = load_palette()
 var factions := FactionRoster.new()
 ## Nations drawn as neutral (no tint, no border), e.g. hidden minor factions.
 var hidden_nations: Array[int] = []
+## Fog of war for player_nation, or null: unexplored tiles are black, explored ones show
+## terrain and cities as last seen (dimmed, no units), visible ones are live.
+var fog: Fog = null
+const EXPLORED_DIM := Color(0, 0, 0, 0.45)
 
 ## Iso numbers from palette.iso, cached in _init().
 var _w := 96.0
@@ -72,10 +76,19 @@ func _draw() -> void:
 		edges[e[0]].append(e[1])
 	var city_at := {}
 	for city in hex_map.cities:
-		city_at[city.cell] = city
+		if fog_state(city.cell) == Fog.VISIBLE:
+			city_at[city.cell] = city
+	for cell in hex_map.cells:
+		if fog_state(cell) == Fog.EXPLORED:
+			var seen: Dictionary = fog.last_seen(player_nation, cell).get("city", {})
+			if not seen.is_empty():
+				city_at[cell] = {"id": seen.id, "nation": seen.nation, "cell": cell,
+						"name": hex_map.city_by_id(int(seen.id)).get("name", "City %d" % int(seen.id))}
 	var units_at := {}
 	if roster:
 		for d in roster.divisions:
+			if d.nation != player_nation and fog_state(d.hex) != Fog.VISIBLE:
+				continue
 			if not units_at.has(d.hex):
 				units_at[d.hex] = []
 			units_at[d.hex].append(d)
@@ -86,6 +99,11 @@ func _draw() -> void:
 			var cell := Vector2i(x, y)
 			if not hex_map.cells.has(cell):
 				continue
+			var fstate := fog_state(cell)
+			if fstate == Fog.UNEXPLORED:
+				var black := _corners(hex_to_pixel(cell))
+				draw_colored_polygon(black, Color.BLACK)
+				continue
 			for sk in skirt_polys(cell):
 				draw_colored_polygon(sk[0], sk[1])
 			var corners := _corners(hex_to_pixel(cell))
@@ -93,6 +111,8 @@ func _draw() -> void:
 			var owner := owner_of(cell)
 			if owner >= 0:
 				draw_colored_polygon(corners, Color(_color_for(owner), float(palette.tint_alpha)))
+			if fstate == Fog.EXPLORED:
+				draw_colored_polygon(corners, EXPLORED_DIM)
 			corners.append(corners[0])
 			draw_polyline(corners, grid_color, float(grid.width))
 		for x in hex_map.width:
@@ -327,7 +347,17 @@ static func load_palette(path := PALETTE_PATH) -> Dictionary:
 ## Owner as drawn: hidden nations count as neutral (UNCLAIMED).
 func owner_of(cell: Vector2i) -> int:
 	var owner: int = hex_map.cells[cell]
+	match fog_state(cell):
+		Fog.UNEXPLORED:
+			return HexMap.UNCLAIMED
+		Fog.EXPLORED:
+			owner = int(fog.last_seen(player_nation, cell).get("owner", HexMap.UNCLAIMED))
 	return HexMap.UNCLAIMED if hidden_nations.has(owner) else owner
+
+
+## Fog.UNEXPLORED, EXPLORED or VISIBLE for player_nation at cell (VISIBLE with no fog).
+func fog_state(cell: Vector2i) -> int:
+	return Fog.VISIBLE if fog == null else fog.state(player_nation, cell)
 
 
 func terrain_color(cell: Vector2i) -> Color:

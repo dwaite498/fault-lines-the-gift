@@ -17,6 +17,9 @@ var economy: NationEconomy = null
 var turn_log: Array[String] = []
 ## Nations treated as neutral: their hexes can be neither ordered into nor attacked.
 var neutral_nations: Array[int] = []
+## Fog of war (Fog), or null for none. A nation the fog filters (the player) cannot order an
+## attack on, or list as a target, a unit on a tile it cannot see.
+var fog: Fog = null
 ## Cities taken this turn that still await a capture choice: the result of
 ## HexMap.take_city, in capture order. Resolved by resolve_ai_captures and the popup.
 var pending_captures: Array[Dictionary] = []
@@ -53,6 +56,11 @@ func people_per_strength(d: Division) -> float:
 ## captures, is not reinforced, cannot dig in, and founds a city with found_city.
 func is_colonizer(d: Division) -> bool:
 	return bool(templates.get(d.unit_type, {}).get("colonizer", false))
+
+
+## True if the fog hides the tile `hex` from `nation` (it cannot see or target what is there).
+func hides_from(nation: int, hex: Vector2i) -> bool:
+	return fog != null and fog.filters(nation) and not fog.can_target(nation, hex)
 
 
 ## Founds an Outpost on the pod's hex for its nation (HexMap.found_city) and uses the pod up.
@@ -321,6 +329,8 @@ func _after_combat(d: Division, hex_map: HexMap, captor: int) -> String:
 ## several turns (Task 25). Returns false (order unchanged) if dest is unreachable.
 func set_order(d: Division, dest: Vector2i, hex_map: HexMap) -> bool:
 	var target := division_at(dest)
+	if target and hides_from(d.nation, dest):
+		return false
 	if target and neutral_nations.has(target.nation):
 		return false
 	if target and can_attack(d, target, hex_map):
@@ -374,7 +384,7 @@ func action_targets(d: Division, action: String, hex_map: HexMap) -> Array[Vecto
 			if o == d:
 				continue
 			if action == "attack" and o.nation != d.nation and not neutral_nations.has(o.nation) \
-					and can_attack(d, o, hex_map):
+					and not hides_from(d.nation, o.hex) and can_attack(d, o, hex_map):
 				out.append(o.hex)
 			elif action == "follow" and o.nation == d.nation:
 				if (is_leaving(o) and not plan_path(d, o.hex, hex_map).is_empty()) \
