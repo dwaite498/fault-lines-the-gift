@@ -10,11 +10,14 @@ const SETUP_CONFIG_PATH := "res://data/map_config.json"
 static var settings := {}
 ## True when the game scene should load the save slot instead of starting a new game.
 static var load_requested := false
+## True when the main menu should open on the setup screen (New Game from the end screen).
+static var open_setup := false
 
 
 static func clear() -> void:
 	settings = {}
 	load_requested = false
+	open_setup = false
 
 
 ## The setup screen limits from map_config.json "setup": {"min_ai", "max_ai", "default_ai"}.

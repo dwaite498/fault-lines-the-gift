@@ -62,6 +62,9 @@ func _ready() -> void:
 	new_game.connect(_go_new_game)
 	load_game.connect(_go_load_game)
 	quit_game.connect(func() -> void: get_tree().quit())
+	if GameSession.open_setup:
+		GameSession.open_setup = false
+		show_setup()
 
 
 func _build_setup() -> void:

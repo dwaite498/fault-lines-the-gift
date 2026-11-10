@@ -42,6 +42,7 @@ func _initialize() -> void:
 	test_atrocity_views()
 	test_main_menu()
 	test_save_load()
+	test_victory()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -1661,3 +1662,77 @@ func test_save_load() -> void:
 	pause.close()
 	ok(not pause.is_open(), "Resume closes the Esc menu")
 	pause.free()
+
+
+# --- Task 40d: domination victory and defeat ---
+
+func test_victory() -> void:
+	var share := Victory.domination_share()
+	ok(is_equal_approx(share, 0.85), "victory.domination_share is 0.85 in map_config.json")
+	var g := save_game_setup(5)
+	var m: HexMap = g.map
+	var player := 0
+	var total := m.cities.size()
+	ok(Victory.check(m, player, share).over == false, "a fresh game is not over")
+	# Give the player cities until just under 85%, then to 85%.
+	var need := ceili(share * total - 0.000001)
+	var others: Array[Dictionary] = []
+	for c in m.cities:
+		if c.nation != player:
+			others.append(c)
+	for i in need - 1 - nation_cities(m, player).size():
+		others[i].nation = player
+	var held := nation_cities(m, player).size()
+	var r := Victory.check(m, player, share)
+	ok(held == need - 1 and not r.over, "%d of %d cities (below the share) is not a win" % [held, total])
+	# One more city reaches the share.
+	for c in m.cities:
+		if c.nation != player:
+			c.nation = player
+			break
+	r = Victory.check(m, player, share)
+	ok(r.over and r.result == "victory" and r.reason == "domination" and r.winner == player, "%d of %d cities (the share) is a domination win" % [nation_cities(m, player).size(), total])
+	# An AI nation reaching the share is a defeat for the player.
+	var ai_game := save_game_setup(5)
+	var am: HexMap = ai_game.map
+	var keep: Dictionary = nation_cities(am, 0)[0]
+	for c in am.cities:
+		if c.id != keep.id:
+			c.nation = 1
+	var ar := Victory.check(am, 0, share)
+	ok(ar.over and ar.result == "defeat" and ar.reason == "domination" and ar.winner == 1, "an AI nation with the share defeats the player")
+	# Natives and alien sites are not counted, as owners or in the total.
+	var nm := pop_map()
+	nm.cities.clear()
+	for i in 7:
+		nm.cities.append({"id": i, "nation": 0, "cell": Vector2i(i, 0)})
+	nm.cities.append({"id": 7, "nation": 1, "cell": Vector2i(7, 0)})
+	var native_city := {"id": 8, "nation": 2, "cell": Vector2i(8, 0)}
+	var alien_city := {"id": 9, "nation": 3, "cell": Vector2i(9, 0), "alien_site": true}
+	var native_flag := {"id": 10, "nation": 1, "cell": Vector2i(10, 0), "native": true}
+	for i in 5:
+		nm.cities.append(native_city.merged({"id": 20 + i}))
+	nm.cities.append(alien_city)
+	nm.cities.append(native_flag)
+	ok(Victory.dominating_nation(nm, share, [2]) == 0, "7 of 8 counted cities wins when neutral natives and alien sites are left out")
+	ok(Victory.dominating_nation(nm, share, []) == -1, "the same map without excluding natives is not a win (7 of 14)")
+	# Elimination.
+	var em := save_game_setup(5)
+	var em_map: HexMap = em.map
+	for c in nation_cities(em_map, 0).duplicate():
+		em_map.remove_city(c.id)
+	var er := Victory.check(em_map, 0, share)
+	ok(er.over and er.result == "defeat" and er.reason == "elimination", "the player with no cities is eliminated: defeat")
+	# The end screen.
+	var screen := GameOverScreen.new()
+	var pressed := []
+	screen.new_game_pressed.connect(func() -> void: pressed.append("new"))
+	screen.main_menu_pressed.connect(func() -> void: pressed.append("menu"))
+	screen.open(r, "")
+	ok(screen.is_open() and screen.title.text == "Victory", "the victory screen opens")
+	screen.new_button.pressed.emit()
+	screen.menu_button.pressed.emit()
+	ok(pressed == ["new", "menu"], "the end screen offers New Game and Main Menu")
+	screen.open(er, "")
+	ok(screen.title.text == "Defeat" and screen.message.text.contains("eliminated"), "the defeat screen says the nation was eliminated")
+	screen.free()
