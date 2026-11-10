@@ -385,9 +385,13 @@ func _refresh_panels(refill_labor := true) -> void:
 		_economy.refresh_labor(_view.hex_map)
 	_fog.update(_view.hex_map, _view.roster)
 	var acts: Array[String] = []
+	var off := {}
 	if _view.selected and _view.selected.nation == PLAYER_NATION:
 		acts = _view.roster.valid_actions(_view.selected, _view.hex_map)
-	_panel.refresh(_view.selected, _view.hex_map, acts, _mode)
+		var why := _view.roster.attack_disabled_reason(_view.selected, _view.hex_map)
+		if why != "":
+			off["attack"] = why
+	_panel.refresh(_view.selected, _view.hex_map, acts, _mode, off)
 	_city_panel.refresh(_city)
 	_top_bar.refresh(_view.factions.name_of(PLAYER_NATION), turn)
 	_nation_panel.refresh(PLAYER_NATION, turn, _view.hex_map, _economy)

@@ -3096,6 +3096,10 @@ func test_frontage() -> void:
 	ok(not r.can_attack(ring[3], target, m) and not r.set_order(ring[3], center, m) and ring[3].order_path.is_empty(), "a 4th attacker is refused (manual order)")
 	ok(not r.action_targets(ring[3], "attack", m).has(center) and r.frontage_blocked_targets(ring[3], m) == [center], "the attack preview excludes the full hex and lists it as blocked")
 	ok(r.action_targets(ring[0], "attack", m) == [center] and r.set_order(ring[0], center, m), "an attacker already in the 3 may re-issue its order")
+	# Attack is shown disabled with a reason (not hidden) when every target hex is full.
+	ok(r.attack_disabled_reason(ring[3], m) == "Frontage full (3/3)" and not r.valid_actions(ring[3], m).has("attack"), "all targets full: Attack is disabled with 'Frontage full (3/3)'")
+	ok(r.attack_disabled_reason(ring[0], m) == "", "an attacker already in the 3 is not disabled")
+	ok(r.attack_disabled_reason(r.spawn_division(1, Vector2i(0, 0), "infantry"), m) == "", "no reason when there is simply no target")
 	# The AI never picks a full hex as a target.
 	r.run_ai(-1, m)
 	ok(not ring[3].order_attack and not ring[4].order_attack and not ring[5].order_attack, "the AI does not order a 4th attack on a full hex")

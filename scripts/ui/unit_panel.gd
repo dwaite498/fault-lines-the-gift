@@ -78,11 +78,16 @@ func _layout() -> void:
 	panel.size = Vector2(WIDTH, vs.y - 32)
 
 ## Shows d's current stats, or hides the panel when d is null.
-func refresh(d: Division, hex_map: HexMap, actions: Array[String] = [], mode := "") -> void:
+## `disabled` maps an action to the reason it is shown greyed out instead of hidden.
+func refresh(d: Division, hex_map: HexMap, actions: Array[String] = [], mode := "", disabled := {}) -> void:
 	_map = hex_map
 	_shown = d
 	for a in buttons:
-		buttons[a].visible = d != null and actions.has(a)
+		var off: bool = d != null and not actions.has(a) and disabled.has(a)
+		buttons[a].visible = d != null and (actions.has(a) or off)
+		buttons[a].disabled = off
+		buttons[a].tooltip_text = str(disabled[a]) if off else ""
+		buttons[a].text = ("%s - %s" % [ACTION_LABELS[a], disabled[a]]) if off else str(ACTION_LABELS[a])
 	if d == null:
 		label.text = "None"
 		swatch.visible = false
