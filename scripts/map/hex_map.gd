@@ -532,6 +532,17 @@ func grow_cities(unit_cells := {}) -> bool:
 ## Loads data/natives.json (NativeSpawner.load_config()).
 func load_natives_config(cfg: Dictionary) -> void:
 	natives_config = cfg
+	pressure.configure(cfg.get("pressure", {}))
+
+
+## Alien Pressure (Part B of ALIENS.md); configured by load_natives_config.
+var pressure := Pressure.new()
+
+
+## Adds a pressure event caused by `nation` (events with no faction, such as natives, are ignored).
+func pressure_event(nation: int, key: String, count := 1.0) -> void:
+	if nation >= 0:
+		pressure.add(str(nation_factions.get(nation, "")), key, count)
 
 
 ## Fungus attrition scale for a nation: 1 for most, a faction's fungus_attrition_mult trait (Verdant
@@ -965,6 +976,7 @@ func found_city(nation: int, cell: Vector2i) -> Dictionary:
 			"infrastructure": int(rules.outpost_infrastructure)}
 	cities.append(city)
 	update_ownership()
+	pressure_event(nation, "city_founded")
 	return city
 
 
@@ -1158,6 +1170,8 @@ func apply_capture(city_id: int, option: String) -> Dictionary:
 	var opt: Dictionary = city_rules.capture.options[option]
 	var victim := int(city.capture_victim)
 	var captor := int(city.nation)
+	if option == "raze" or option == "enslave":
+		pressure_event(captor, option)
 	var cell: Vector2i = city.cell
 	var pop := int(city.population)
 	var result := {"option": option, "city_id": city_id, "captor": captor, "victim": victim,

@@ -24,5 +24,21 @@
 	"raid": {"city_tiers": ["outpost", "base"], "pop_loss": 0.05, "min_population": 1000, "city_cooldown_turns": 5},
 	"fungus_attrition": {"org": 5, "strength": 2, "move_cost": 1, "min_strength": 1, "exempt_natives": true},
 	"fungus": {"patches": 4, "patch_radius": 2, "min_city_distance": 3, "max_density": 4},
+	"pressure": {
+		"max": 100,
+		"events": {"infra": 0.5, "city_founded": 2, "big_city_per_turn": 1, "battle": 1, "raze": 5, "enslave": 3},
+		"big_city_population": 30000,
+		"faction_pressure_mult": {"verdant_accord": 0.5, "syndicate": 1.25, "deepwater_guild": 1.25},
+		"default_pressure_mult": 1.0,
+		"recent_decay": 0.9,
+		"level_decay_per_turn": 0.5,
+		"level_drop_margin": 5,
+		"levels": [
+			{"name": "Wary", "threshold": 0},
+			{"name": "Hostile", "threshold": 25, "spawn_mult": 2, "stat_mult": 1.25, "max_natives_bonus": 4, "event": "The planet stirs"},
+			{"name": "Swarm", "threshold": 60, "spawn_mult": 3, "stat_mult": 1.5, "max_natives_bonus": 8, "worm_min_density": 2, "event": "The planet rises against you"}
+		],
+		"offender_bias": {"chance": 0.7, "radius": 3}
+	},
 	"render": {"outline": "#FF00FF"}
 }

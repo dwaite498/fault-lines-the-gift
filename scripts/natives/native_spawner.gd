@@ -30,25 +30,36 @@ static func run(hex_map: HexMap, roster: DivisionRoster, turn: int) -> Array[Div
 	if cfg.is_empty() or turn < int(cfg.spawner.no_spawn_before_turn):
 		return out
 	var sp: Dictionary = cfg.spawner
-	var cap := int(sp.max_natives)
+	var pressure: Pressure = hex_map.pressure
+	var cap := int(sp.max_natives) + pressure.max_natives_bonus()
+	var chance_mult := pressure.spawn_mult()
 	# Worms: each fungus tile of enough density with no unit nearby.
 	var worm: Dictionary = sp.worm
+	var min_density := pressure.worm_min_density(int(worm.min_density))
 	var cells: Array = hex_map.fungus_tiles.keys()
 	cells.sort()
-	for cell in cells:
+	for tile in cells:
+		var cell: Vector2i = tile
 		if count(roster) >= cap:
 			break
-		if int(hex_map.fungus_tiles[cell]) < int(worm.min_density) or not _free(cell, hex_map, roster, turn):
+		if int(hex_map.fungus_tiles[cell]) < min_density or not _free(cell, hex_map, roster, turn):
 			continue
 		if _unit_within(cell, int(worm.no_unit_radius), roster):
 			continue
-		if roster.rng.randf() < float(worm.chance):
-			out.append(_spawn("tendril_worm", cell, roster))
+		if roster.rng.randf() < minf(float(worm.chance) * chance_mult, 1.0):
+			var target := _offender_cells(hex_map, roster)
+			if not target.is_empty():  # biased: prefer an eligible fungus tile near the offender
+				var near: Array = cells.filter(func(c: Vector2i) -> bool:
+						return target.has(c) and int(hex_map.fungus_tiles[c]) >= min_density \
+								and _free(c, hex_map, roster, turn) and not _unit_within(c, int(worm.no_unit_radius), roster))
+				if not near.is_empty():
+					cell = near[roster.rng.randi_range(0, near.size() - 1)]
+			out.append(_spawn("tendril_worm", cell, roster, pressure))
 	# Striders: one random plains tile far from every city, with a chance per turn.
 	if count(roster) < cap:
 		var cell := _strider_tile(hex_map, roster, turn, int(sp.strider.min_city_distance))
-		if cell != Vector2i(-1, -1) and roster.rng.randf() < float(sp.strider.chance):
-			out.append(_spawn("rust_strider", cell, roster))
+		if cell != Vector2i(-1, -1) and roster.rng.randf() < minf(float(sp.strider.chance) * chance_mult, 1.0):
+			out.append(_spawn("rust_strider", cell, roster, pressure))
 	# Minimum: always at least min_natives groups.
 	while count(roster) < mini(int(sp.min_natives), cap):
 		var cell := _strider_tile(hex_map, roster, turn, int(sp.strider.min_city_distance))
@@ -56,12 +67,42 @@ static func run(hex_map: HexMap, roster: DivisionRoster, turn: int) -> Array[Div
 			cell = _strider_tile(hex_map, roster, turn, int(sp.city_safe_radius))
 		if cell == Vector2i(-1, -1):
 			break
-		out.append(_spawn("rust_strider", cell, roster))
+		out.append(_spawn("rust_strider", cell, roster, pressure))
 	return out
 
 
-static func _spawn(key: String, cell: Vector2i, roster: DivisionRoster) -> Division:
+## Offender bias: with probability offender_bias.chance (and some recent pressure) a spawn is
+## placed in or within offender_bias.radius hexes of the territory of a faction picked by recent
+## contribution. Returns that set of cells, or {} for a random placement (the other 30%, no
+## offender, or no territory).
+static func _offender_cells(hex_map: HexMap, roster: DivisionRoster) -> Dictionary:
+	var bias: Dictionary = hex_map.natives_config.get("pressure", {}).get("offender_bias", {})
+	if bias.is_empty() or roster.rng.randf() >= float(bias.chance):
+		return {}
+	var faction := hex_map.pressure.target_faction(roster.rng)
+	if faction == "":
+		return {}
+	var owned: Array[Vector2i] = []
+	for cell in hex_map.cells:
+		var owner := int(hex_map.cells[cell])
+		if owner >= 0 and str(hex_map.nation_factions.get(owner, "")) == faction:
+			owned.append(cell)
+	var near := {}
+	for cell in hex_map.cells:
+		for o in owned:
+			if HexMap.hex_distance(cell, o) <= int(bias.radius):
+				near[cell] = true
+				break
+	return near
+
+
+## Spawns a native; its strength and attack carry the current pressure level's stat_mult.
+static func _spawn(key: String, cell: Vector2i, roster: DivisionRoster, pressure: Pressure) -> Division:
 	var d := roster.spawn_division(DivisionRoster.NATIVE_NATION, cell, key)
+	var m := pressure.stat_mult()
+	d.strength *= m
+	d.max_strength = d.strength
+	d.attack *= m
 	print("native_spawn: %s at %s" % [key, cell])
 	return d
 
@@ -70,6 +111,7 @@ static func _spawn(key: String, cell: Vector2i, roster: DivisionRoster) -> Divis
 ## zone), or (-1, -1). Candidates are sorted so the pick depends only on the random stream.
 static func _strider_tile(hex_map: HexMap, roster: DivisionRoster, turn: int, min_distance: int) -> Vector2i:
 	var options: Array[Vector2i] = []
+	var near := _offender_cells(hex_map, roster)
 	for cell in hex_map.cells:
 		if hex_map.terrain_name(cell) != "plains" or hex_map.cells[cell] == HexMap.WATER:
 			continue
@@ -78,6 +120,10 @@ static func _strider_tile(hex_map: HexMap, roster: DivisionRoster, turn: int, mi
 		options.append(cell)
 	if options.is_empty():
 		return Vector2i(-1, -1)
+	if not near.is_empty():  # no valid habitat near the offender: stay random
+		var close := options.filter(func(c: Vector2i) -> bool: return near.has(c))
+		if not close.is_empty():
+			options = close
 	options.sort()
 	return options[roster.rng.randi_range(0, options.size() - 1)]
 

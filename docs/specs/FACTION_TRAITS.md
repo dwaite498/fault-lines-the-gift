@@ -10,7 +10,7 @@ Identity, colors and leaders: see PIVOT.md. This spec adds mechanics. Every numb
 ```json
 {
   "global": {"plunder_cooldown_turns": 20, "flat_bonus_city_cap": 6, "growth_bonus_pop_ceiling": 15000, "rival_attitude": -2},
-  "ai": {"attitude_weight": 1.0, "distance_weight": 0.5, "strength_ratio_weight": 1.0, "min_attack_score": 0},
+  "ai": {"attitude_weight": 1.0, "distance_weight": 0.5, "strength_ratio_weight": 1.0, "min_attack_score": 0, "target_range": 12, "local_radius": 2, "empty_city_strength": 1.0},
   "factions": [
     {"id": 0, "key": "assembly", "axes": {"order": -2, "faith": 0, "planet": 0}, "atrocity_sensitivity": 1.5,
      "rivals": ["directorate", "collective"], "capture_allowed": ["annex", "occupy"],
@@ -40,6 +40,12 @@ Rules:
 - `growth_mod` applies to every city, and growth can't go below 0.
 - Global plunder cooldown: each city stores `last_plundered_turn`. If fewer than `plunder_cooldown_turns` (20) turns have passed since any nation plundered it, Plunder is not offered.
 - The Collective's Enslave uses the standard 1.5x labor. There's no Collective override.
+
+## `ai` block keys added in Task 42 (implementation notes, not in the original spec)
+- `target_range` (12): enemy cities farther than this many hexes are not scored.
+- `local_radius` (2): a nation's local strength is the strength of its divisions within this many hexes of the division (mine) or the city (theirs).
+- `empty_city_strength` (1.0): the strength used for a city with no defenders, so the ratio never divides by zero.
+- `global.reputation_attitude_scale` (1.0) scales the atrocity record's effect on attitude.
 
 ## Affinity and attitude
 - Axes are integers from -2 to +2: order (+Order / -Liberty), faith (+Faith / -Reason), planet (+Planet / -Industry).

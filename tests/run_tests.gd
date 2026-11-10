@@ -52,6 +52,7 @@ func _initialize() -> void:
 	test_city_tiers()
 	test_natives()
 	test_fungus_attrition()
+	test_pressure()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -1620,11 +1621,15 @@ func save_state(g: Dictionary, turn: int) -> Dictionary:
 	for i in g.map.nations.size():
 		ids.append("f%d" % i)
 	g.fog.update(g.map, g.roster)
-	return SaveGame.capture(g.map, g.roster, g.eco, turn, g.cfg, ids, {"fog": g.fog.capture()})
+	return SaveGame.capture(g.map, g.roster, g.eco, turn, g.cfg, ids, {"fog": g.fog.capture(), "pressure": g.map.pressure.capture()})
 
 
 func test_save_load() -> void:
 	var g := save_game_setup(5)
+	g.map.load_natives_config(NativeSpawner.load_config())
+	g.map.pressure.set_score(30.0, 1)
+	g.map.pressure.add("syndicate", "raze")
+	g.map.pressure.end_turn(g.map, 2)
 	g.eco.config.ai_recruit_chance = 1.0
 	for t in 4:
 		save_play_turn(g)
@@ -1660,6 +1665,7 @@ func test_save_load() -> void:
 	var g2 := save_game_setup(5)
 	var turn2 := SaveGame.restore(read, g2.map, g2.roster, g2.eco)
 	g2.fog.restore(read.extras.fog)
+	g2.map.pressure.restore(read.extras.pressure)
 	var h2 := SaveGame.state_hash(save_state(g2, turn2))
 	ok(turn2 == turn_n and h2 == h1, "saving on turn %d, loading and saving again gives the same state hash" % turn_n)
 	# The loaded game plays on exactly like the original (including the AI's random stream).
@@ -2900,3 +2906,138 @@ func test_fungus_attrition() -> void:
 	ok(m.step_cost(Vector2i(5, 4), Vector2i(6, 4), 0) == plains + 1 and m.step_cost(Vector2i(5, 4), Vector2i(7, 4), 0) == plains, "entering a fungus tile costs +1 move")
 	ok(v.map.step_cost(Vector2i(5, 4), Vector2i(6, 4), 0) == plains and v.map.step_cost(Vector2i(5, 4), Vector2i(6, 4), 1) == plains + 1, "the +1 is halved (rounded down to 0) for Verdant Accord")
 	ok(m.step_cost(Vector2i(5, 4), Vector2i(6, 4), -2) == plains, "natives move through fungus at the normal cost")
+
+
+# --- Task 45: alien Pressure ---
+
+func test_pressure() -> void:
+	var cfg := NativeSpawner.load_config()
+	var pc: Dictionary = cfg.pressure
+	ok(pc.levels[1].threshold == 25 and pc.levels[2].threshold == 60 and pc.levels[1].spawn_mult == 2 and pc.levels[2].spawn_mult == 3 and pc.levels[1].max_natives_bonus == 4 and pc.levels[2].max_natives_bonus == 8, "pressure levels in natives.json: Hostile 25 (PM ruling), Swarm 60, spawn x2 / x3, max_natives +4 / +8")
+	ok(pc.events.infra == 0.5 and pc.events.city_founded == 2 and pc.events.big_city_per_turn == 1 and pc.events.battle == 1 and pc.events.raze == 5 and pc.events.enslave == 3 and pc.faction_pressure_mult.verdant_accord == 0.5 and pc.faction_pressure_mult.syndicate == 1.25 and pc.faction_pressure_mult.deepwater_guild == 1.25 and pc.recent_decay == 0.9 and pc.level_decay_per_turn == 0.5, "pressure event, faction multiplier and decay numbers are in natives.json")
+	var p := Pressure.new()
+	p.configure(pc)
+	# 5. Infrastructure as Verdant 0.25, as Syndicate 0.625, as anyone else 0.5.
+	ok(is_equal_approx(p.add("verdant_accord", "infra"), 0.25) and is_equal_approx(p.add("syndicate", "infra"), 0.625) and is_equal_approx(p.add("assembly", "infra"), 0.5), "+1 infrastructure: Verdant 0.25, Syndicate 0.625, others 0.5")
+	ok(is_equal_approx(p.score, 1.375) and is_equal_approx(p.contrib.syndicate, 0.625) and is_equal_approx(p.recent.verdant_accord, 0.25), "the score and the per-faction contributions are kept")
+	# Events through the game systems.
+	var w := nat_world()
+	var m: HexMap = w.map
+	var r: DivisionRoster = w.roster
+	m.nation_factions = {0: "verdant_accord", 1: "syndicate"}
+	m.cities[0].infrastructure = 10.0
+	var eco := NationEconomy.new()
+	eco.setup(m)
+	m.cities[0].infra_progress = 12
+	m.cities[0].labor = {"training": 0, "infrastructure": 5, "growth": 0}
+	eco.apply_infrastructure(m)
+	ok(is_equal_approx(m.pressure.score, 0.25) and m.cities[0].infrastructure == 11.0, "building 1 infrastructure as Verdant adds 0.25 pressure")
+	var pod := {"id": 9, "nation": 1, "cell": Vector2i(7, 4), "population": 3000, "infrastructure": 10, "radius": 1}
+	var before := m.pressure.score
+	m.pressure_event(1, "city_founded")
+	m.pressure_event(1, "raze")
+	m.pressure_event(1, "enslave")
+	ok(is_equal_approx(m.pressure.score - before, 1.25 * (2 + 5 + 3)), "city founded +2, raze +5, enslave +3 (Syndicate x1.25)")
+	# Battles: on a fungus tile, or involving natives; not an ordinary battle.
+	m.pressure.score = 0.0
+	var a := r.spawn_division(0, Vector2i(5, 4), "infantry")
+	var b := r.spawn_division(1, Vector2i(6, 4), "infantry")
+	r.attack(a, b, m)
+	ok(m.pressure.score == 0.0, "an ordinary battle adds nothing")
+	m.fungus_tiles[Vector2i(6, 4)] = 1
+	a.moves_left = a.move
+	r.attack(a, b, m)
+	ok(is_equal_approx(m.pressure.score, 0.5), "a battle on a fungus tile adds 1 (Verdant attacker x0.5)")
+	m.fungus_tiles.clear()
+	m.pressure.score = 0.0
+	var nat := r.spawn_division(-2, Vector2i(4, 4), "rust_strider")
+	a.moves_left = a.move
+	r.attack(nat, a, m)
+	ok(is_equal_approx(m.pressure.score, 0.5), "a battle involving natives adds 1 to the other side's faction")
+	# Each city above 30,000 adds 1 a turn.
+	m.pressure.score = 0.0
+	m.cities[0].population = 30001
+	m.cities[1].population = 30000
+	m.pressure.end_turn(m, 5)
+	ok(is_equal_approx(m.pressure.score, 0.5), "a city above 30,000 adds 1 per turn (Verdant x0.5); exactly 30,000 does not")
+	m.cities.clear()  # the level checks below must not gain big-city pressure
+	# 6. Levels.
+	var q := Pressure.new()
+	q.configure(pc)
+	ok(q.level == 1 and q.spawn_mult() == 1.0 and q.stat_mult() == 1.0 and q.max_natives_bonus() == 0, "Wary: base spawn chances and stats")
+	q.score = 24.9
+	q.end_turn(m, 6)
+	ok(q.level == 1, "24.9 is still Wary")
+	q.score = 25.0
+	var lines := q.end_turn(m, 7)
+	ok(q.level == 2 and q.spawn_mult() == 2.0 and q.stat_mult() == 1.25 and q.max_natives_bonus() == 4 and lines == ["The planet stirs"], "pressure 25 gives Hostile: spawn x2, stats x1.25, +4 natives, a world event")
+	q.score = 60.0
+	lines = q.end_turn(m, 8)
+	ok(q.level == 3 and q.spawn_mult() == 6.0 and is_equal_approx(q.stat_mult(), 1.875) and q.max_natives_bonus() == 8 and q.worm_min_density(3) == 2 and lines.size() == 1, "pressure 60 gives Swarm: spawn x6 total, stats x1.875, +8 natives, worms on density 2")
+	q.score = 0.0
+	for turn in range(9, 30):
+		q.end_turn(m, turn)
+	ok(q.level == 3 and q.score == 0.0, "Swarm stays even when pressure is forced to 0 and never decays")
+	# Decay and the Hostile -> Wary drop.
+	var d := Pressure.new()
+	d.configure(pc)
+	d.set_score(25.0)
+	d.score = 24.0
+	d.end_turn(m, 1)
+	ok(d.level == 2 and is_equal_approx(d.score, 23.5), "below the Hostile threshold the score decays 0.5 a turn (the level holds)")
+	for turn in range(2, 12):
+		d.end_turn(m, turn)
+	ok(d.level == 1 and d.score < 20.0, "Hostile drops back to Wary only through decay")
+	# Recent contribution decays 0.9 a turn.
+	var rc := Pressure.new()
+	rc.configure(pc)
+	rc.add("assembly", "raze")
+	rc.end_turn(m, 1)
+	ok(is_equal_approx(rc.recent.assembly, 4.5) and is_equal_approx(rc.contrib.assembly, 5.0), "recent_contrib decays 0.9 per turn, the total does not")
+	# Spawn chance, cap and stats follow the level.
+	var s := nat_world()
+	var sm: HexMap = s.map
+	sm.natives_config.spawner.min_natives = 0
+	sm.natives_config.spawner.max_natives = 1
+	sm.natives_config.spawner.strider.chance = 0.01
+	sm.natives_config.spawner.worm.chance = 1.0
+	sm.pressure.set_score(60.0)
+	sm.fungus_tiles = {Vector2i(6, 4): 2, Vector2i(9, 4): 2, Vector2i(3, 6): 2}
+	var born := NativeSpawner.run(sm, s.roster, 10)
+	ok(born.size() >= 1 and born.size() <= 9, "Swarm raises the cap (1 + 8) and lets worms spawn on density 2")
+	ok(born.all(func(x: Division) -> bool: return x.unit_type != "tendril_worm" or is_equal_approx(x.attack, 12.0 * 1.875)) and born.all(func(x: Division) -> bool: return is_equal_approx(x.strength, x.max_strength)), "natives spawned at Swarm carry the x1.875 strength and attack")
+	# 7. Offender bias: only X razes, at least 60% of 100 spawns land near X's territory.
+	var o := nat_world(24, 12, {0: Vector2i(2, 2), 1: Vector2i(21, 9)})
+	var om: HexMap = o.map
+	var orr: DivisionRoster = o.roster
+	om.nation_factions = {0: "assembly", 1: "directorate"}
+	for cell in om.cells:
+		om.cells[cell] = 0 if cell.x < 6 and cell.y < 5 else (1 if cell.x > 17 and cell.y > 6 else HexMap.UNCLAIMED)
+	om.natives_config.spawner.min_natives = 1
+	om.natives_config.spawner.max_natives = 1
+	om.natives_config.spawner.city_safe_radius = 0
+	om.natives_config.spawner.strider.min_city_distance = 1
+	orr.rng.seed = 7
+	var near := 0
+	for i in 100:
+		om.pressure.add("directorate", "raze")  # only the Directorate offends
+		orr.divisions.clear()
+		var spawned := NativeSpawner.run(om, orr, 10)
+		for sd in spawned:
+			var close := false
+			for cell in om.cells:
+				if om.cells[cell] == 1 and HexMap.hex_distance(cell, sd.hex) <= 3:
+					close = true
+					break
+			if close:
+				near += 1
+	ok(near >= 60, "only the Directorate razes: %d of 100 spawns land within 3 hexes of its territory (at least 60)" % near)
+	# Pressure state is part of the save (the round trip is in test_save_load).
+	var cap := q.capture()
+	var q2 := Pressure.new()
+	q2.configure(pc)
+	q2.restore(cap)
+	ok(q2.level == 3 and q2.capture() == cap, "Pressure.capture and restore round-trip")
+	# The Task 42 AI keys are documented in the faction spec's config block.
+	var doc := FileAccess.get_file_as_string("res://docs/specs/FACTION_TRAITS.md")
+	ok(doc.contains("target_range") and doc.contains("local_radius") and doc.contains("empty_city_strength"), "ai.target_range, ai.local_radius and ai.empty_city_strength are documented")
