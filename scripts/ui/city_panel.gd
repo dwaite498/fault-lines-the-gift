@@ -89,6 +89,8 @@ func refresh(city: Dictionary) -> void:
 		if economy.pending.has(city.id):
 			label.text += "\nRecruiting: " + NationEconomy.queue_text(economy.pending[city.id])
 			label.text += " (+%d/turn)" % economy.training_points(city)
+			if economy.recruit_stalled(city):
+				label.text += "\nRecruit stalled: assign Training labor"
 	button.visible = economy != null and roster != null and city.nation == player_nation
 	var psize := label.get_minimum_size() + Vector2(30, 12)
 	var editable: bool = economy != null and city.nation == player_nation

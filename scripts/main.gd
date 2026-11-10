@@ -100,6 +100,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		_view.hex_map.grow_cities(roster.unit_cells())
 		_economy.end_turn(_view.hex_map, roster)
 		turn += 1
+		var stalled := _economy.stalled_cities(PLAYER_NATION, _view.hex_map)
+		if not stalled.is_empty():
+			message.text = "Recruit stalled in city %s: assign Training labor" % ", ".join(stalled.map(func(i: int) -> String: return str(i)))
 		roster.run_ai(PLAYER_NATION, _view.hex_map)
 		print("Turn ended")
 	elif ACTION_KEYS.has(key.keycode):
@@ -188,7 +191,7 @@ func _refresh_panels() -> void:
 	_top_bar.refresh(_view.factions.name_of(PLAYER_NATION), turn)
 	_nation_panel.refresh(PLAYER_NATION, turn, _view.hex_map, _economy)
 	var np := _nation_panel.panel
-	_military_panel.refresh(PLAYER_NATION, _view.roster, _economy, np.position.y + np.size.y + 8)
+	_military_panel.refresh(PLAYER_NATION, _view.roster, _economy, np.position.y + np.size.y + 8, _view.hex_map)
 	_view.queue_redraw()
 
 

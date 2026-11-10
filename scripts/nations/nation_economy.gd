@@ -317,6 +317,24 @@ func spawn_pending(hex_map: HexMap, roster: DivisionRoster) -> void:
 			end_auto_training(city)
 
 
+## True if the city has a recruit queued, no Training labor to feed it, and the recruit
+## still needs labor (the queue cannot progress until the player assigns Training).
+func recruit_stalled(city: Dictionary) -> bool:
+	if not pending.has(city.id):
+		return false
+	var entry: Dictionary = pending[city.id]
+	return training_points(city) <= 0 and int(entry.get("labor", 0)) < int(entry.get("cost", 0))
+
+
+## Ids of the cities of `nation` whose recruit is stalled (see recruit_stalled).
+func stalled_cities(nation: int, hex_map: HexMap) -> Array[int]:
+	var ids: Array[int] = []
+	for c in hex_map.cities:
+		if c.nation == nation and recruit_stalled(c):
+			ids.append(int(c.id))
+	return ids
+
+
 ## Queue text for one pending recruit, e.g. "Division 9/15 labor, 2 turns left".
 ## The labor cost comes from the entry, so no config is needed here.
 static func queue_text(entry: Dictionary) -> String:

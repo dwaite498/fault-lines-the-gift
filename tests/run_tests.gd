@@ -33,6 +33,7 @@ func _initialize() -> void:
 	test_growth_tuning()
 	test_recruit_pool()
 	test_siege_capture_ai()
+	test_stalled_recruit()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -976,3 +977,25 @@ func test_siege_capture_ai() -> void:
 	eco2.run_ai(0, m2, roster)
 	ok(eco2.pending.has(ai_cap.id) and ai_cap.pool == 0 and ai_cap.population == 9000, "an AI capital with a full pool recruits and pays 1,000 people")
 	ok(m2.cities.all(func(c: Dictionary) -> bool: return c.has("labor") and c.labor.training >= 0), "AI cities get the default labor assignment (and auto-training for the recruit)")
+
+
+func test_stalled_recruit() -> void:
+	var s := sink_setup(0, 0)
+	var eco: NationEconomy = s.eco
+	var city: Dictionary = s.city
+	ok(not eco.recruit_stalled(city), "no recruit queued: not stalled")
+	eco.recruit(city, 0, s.roster)
+	city.labor = {"training": 0, "infrastructure": 0, "growth": 2}
+	ok(eco.recruit_stalled(city) and eco.stalled_cities(0, s.map) == [city.id], "a queued recruit with 0 Training labor is stalled and listed")
+	var panel := CityPanel.new()
+	panel.hex_map = s.map
+	panel.economy = eco
+	panel.roster = s.roster
+	panel.player_nation = 0
+	panel.factions = FactionRoster.from_config({"seed": 5, "faction_count": 4, "faction_seed": -1})
+	panel.refresh(city)
+	ok(panel.label.text.contains("Recruit stalled: assign Training labor"), "the city panel says 'Recruit stalled: assign Training labor'")
+	city.labor.training = 2
+	panel.refresh(city)
+	ok(not eco.recruit_stalled(city) and not panel.label.text.contains("Recruit stalled") and eco.stalled_cities(0, s.map).is_empty(), "assigning Training clears the warning")
+	panel.free()

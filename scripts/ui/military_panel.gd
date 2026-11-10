@@ -21,7 +21,8 @@ func _init() -> void:
 func toggle() -> void:
 	panel.visible = not panel.visible
 
-func refresh(nation: int, roster: DivisionRoster, economy: NationEconomy, top: float) -> void:
+func refresh(nation: int, roster: DivisionRoster, economy: NationEconomy, top: float,
+		hex_map: HexMap = null) -> void:
 	var lines: Array[String] = ["%s - Military (M to close)" % factions.name_of(nation), "Leader: %s" % factions.leader_of(nation)]
 	for d in roster.divisions:
 		if d.nation != nation:
@@ -40,7 +41,9 @@ func refresh(nation: int, roster: DivisionRoster, economy: NationEconomy, top: f
 	ids.sort()
 	for id in ids:
 		if economy.pending[id].nation == nation:
-			lines.append("city %d: %s" % [id, NationEconomy.queue_text(economy.pending[id])])
+			var stalled := hex_map != null and economy.recruit_stalled(hex_map.city_by_id(id))
+			lines.append("city %d: %s%s" % [id, NationEconomy.queue_text(economy.pending[id]),
+					"  STALLED: assign Training labor" if stalled else ""])
 	label.text = "\n".join(lines)
 	swatch.color = factions.color_of(nation)
 	panel.size = label.get_minimum_size() + Vector2(30, 12)
