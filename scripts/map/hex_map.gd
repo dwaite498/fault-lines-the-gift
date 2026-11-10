@@ -48,7 +48,7 @@ var seed_value := 0
 var terrain: Dictionary = {}
 ## Vector2i cell -> elevation int (-3..4), from terrain_config.json's "elevation" table.
 ## Water touching land is "shallows"; other water uses the table's water value.
-## View-only for now (Task 33); no rules read it.
+## Read by the movement and combat rules (can_step, step_cost, uphill attack; Task 34).
 var elevation: Dictionary = {}
 ## The "elevation" block of terrain_config.json: climb_cost, cliff_diff, smooth_max_step,
 ## ridge_terrain. Without it there are no elevation rules (no climb cost, no cliffs).
@@ -206,6 +206,7 @@ func _smooth_elevation() -> void:
 				changed = true
 		if not changed:
 			break
+	_prune_ridges()
 
 
 ## Hexes reachable from start by can_step (ignoring units).
@@ -228,7 +229,6 @@ func reachable_from(start: Vector2i) -> Dictionary:
 ## number of passes made. Called when elevation is assigned.
 func ensure_reachable() -> int:
 	var passes := 0
-	var cliff := int(elevation_rules.get("cliff_diff", 1 << 20))
 	var done := {}
 	for city in cities:
 		if done.has(city.cell):
@@ -250,9 +250,7 @@ func ensure_reachable() -> int:
 				for b in ns:
 					if comp.has(b) and not reach.has(b):
 						# b is passable land that a cannot step to: a cliff between them.
-						var lo := mini(elevation[a], elevation[b])
-						var hi_cell: Vector2i = a if elevation[a] > elevation[b] else b
-						elevation[hi_cell] = maxi(lo + cliff - 1, int(elevation_rules.get("min", -3)))
+						_cut_pass(a, b)
 						passes += 1
 						fixed = true
 						break
@@ -261,6 +259,37 @@ func ensure_reachable() -> int:
 			if not fixed:
 				break
 	return passes
+
+
+## Opens the cliff between a and b into a one-step pass. A mountain (ridge terrain) is
+## never lowered: when the high side is a mountain, the low side is raised to the
+## mountain's elevation - smooth_max_step instead (it becomes a foothill, like the
+## foothill pass in _smooth_elevation: hills terrain, except city hexes). Otherwise
+## the high side is lowered to low + cliff_diff - 1. Tagged ridge edges that stop being
+## cliffs are then dropped, so every ridge_edges entry stays a real cliff.
+func _cut_pass(a: Vector2i, b: Vector2i) -> void:
+	var cliff := int(elevation_rules.get("cliff_diff", 1 << 20))
+	var hi_cell: Vector2i = a if elevation[a] > elevation[b] else b
+	var lo_cell: Vector2i = b if hi_cell == a else a
+	if _is_ridge(hi_cell) and not _is_ridge(lo_cell):
+		elevation[lo_cell] = elevation[hi_cell] - int(elevation_rules.get("smooth_max_step", 1))
+		var foothill := str(elevation_rules.get("foothill_terrain", ""))
+		var is_city := cities.any(func(c: Dictionary) -> bool: return c.cell == lo_cell)
+		if foothill != "" and not is_city and terrain_types.has(foothill):
+			terrain[lo_cell] = foothill
+	else:
+		elevation[hi_cell] = maxi(elevation[lo_cell] + cliff - 1, int(elevation_rules.get("min", -3)))
+	_prune_ridges()
+
+
+## Drops tagged ridge edges whose two hexes no longer differ by cliff_diff or more.
+func _prune_ridges() -> void:
+	var cliff := int(elevation_rules.get("cliff_diff", 1 << 20))
+	for key in ridge_edges.keys():
+		var a := Vector2i(key.x, key.y)
+		var b := Vector2i(key.z, key.w)
+		if absi(elevation_of(a) - elevation_of(b)) < cliff:
+			ridge_edges.erase(key)
 
 
 ## Elevation of cell; 0 before generate_terrain() has run.
