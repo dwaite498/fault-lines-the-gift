@@ -41,6 +41,7 @@ func _initialize() -> void:
 	test_capture_gating()
 	test_atrocity_views()
 	test_main_menu()
+	test_save_load()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -1556,3 +1557,107 @@ func test_main_menu() -> void:
 			var m := HexMap.from_config_file("res://data/map_config.json", "res://data/cities_config.json",
 					"res://data/terrain_config.json", roster.sea_nations(), cfg)
 			ok(m.seed_value == sd and m.nations.size() == ai + 1 and roster.assigned.size() == ai + 1 and roster.assigned[0].id == "covenant", "seed %d with %d AI: %d nations, the player is the Covenant" % [sd, ai, ai + 1])
+
+
+# --- Task 40c: save and load ---
+
+## A fresh all-AI game from map_config.json with the given seed: {"map", "eco", "roster", "cfg"}.
+func save_game_setup(seed_value: int) -> Dictionary:
+	var cfg: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://data/map_config.json"))
+	cfg["seed"] = seed_value
+	var m := HexMap.from_config_file("res://data/map_config.json", "res://data/cities_config.json",
+			"res://data/terrain_config.json", [], cfg)
+	var eco := NationEconomy.new()
+	eco.setup(m)
+	var roster := make_roster()
+	roster.spawn_at_cities(m)
+	roster.economy = eco
+	return {"map": m, "eco": eco, "roster": roster, "cfg": cfg}
+
+
+## One end turn with every nation run by the AI (the order main.gd uses).
+func save_play_turn(g: Dictionary) -> void:
+	var m: HexMap = g.map
+	var roster: DivisionRoster = g.roster
+	g.eco.run_ai(-1, m, roster)
+	roster.execute_orders(m)
+	roster.resolve_ai_captures(m, -1)
+	roster.end_turn(m)
+	m.grow_cities(roster.unit_cells())
+	g.eco.end_turn(m, roster)
+	roster.run_ai(-1, m)
+
+
+func save_state(g: Dictionary, turn: int) -> Dictionary:
+	var ids: Array = []
+	for i in g.map.nations.size():
+		ids.append("f%d" % i)
+	return SaveGame.capture(g.map, g.roster, g.eco, turn, g.cfg, ids)
+
+
+func test_save_load() -> void:
+	var g := save_game_setup(5)
+	g.eco.config.ai_recruit_chance = 1.0
+	for t in 4:
+		save_play_turn(g)
+	# Put the interesting state in: a capture with a reputation event and an occupied city,
+	# a plunder (cash), a queued recruit and a division with an order.
+	var m: HexMap = g.map
+	var roster: DivisionRoster = g.roster
+	var victims := nation_cities(m, 1)
+	var raider_cities := nation_cities(m, 0)
+	if not victims.is_empty():
+		var guard := roster.division_at(victims[0].cell)
+		if guard:
+			roster.divisions.erase(guard)
+		roster.pending_captures.append(m.take_city(victims[0].cell, 0))
+		roster.apply_capture(int(victims[0].id), "occupy", m)
+	var marked: Division = roster.divisions[0]
+	marked.order_path.append(m.neighbors(marked.hex)[0])
+	marked.attacked_from.append(m.neighbors(marked.hex)[1])
+	for t in 6:
+		save_play_turn(g)
+	var turn_n := 11
+	var state := save_state(g, turn_n)
+	var h1 := SaveGame.state_hash(state)
+	ok(state.map.reputation.size() >= 1 and state.economy.stocks.size() == m.nations.size() and state.roster.divisions.size() > 0, "the state holds reputation events, stocks and divisions")
+	ok(state.roster.divisions.any(func(d: Dictionary) -> bool: return not d.order_path.is_empty()), "division orders are part of the state")
+	ok(m.cities.any(func(c: Dictionary) -> bool: return c.get("occupied", false) or c.has("recruit_lockout")), "capture states (occupied or lockout) are in the saved cities")
+	# File round trip.
+	var path := "user://test_save_40c.sav"
+	ok(SaveGame.write(path, state), "the state is written to user://")
+	var read := SaveGame.read(path)
+	ok(SaveGame.state_hash(read) == h1, "the state read back from disk has the same hash")
+	# Load into fresh objects.
+	var g2 := save_game_setup(5)
+	var turn2 := SaveGame.restore(read, g2.map, g2.roster, g2.eco)
+	var h2 := SaveGame.state_hash(save_state(g2, turn2))
+	ok(turn2 == turn_n and h2 == h1, "saving on turn %d, loading and saving again gives the same state hash" % turn_n)
+	# The loaded game plays on exactly like the original (including the AI's random stream).
+	g2.eco.config.ai_recruit_chance = 1.0
+	for t in 6:
+		save_play_turn(g)
+		save_play_turn(g2)
+	ok(SaveGame.state_hash(save_state(g, turn_n + 6)) == SaveGame.state_hash(save_state(g2, turn_n + 6)), "6 more turns after loading end in the same state as the original game")
+	# A different state hashes differently, and unreadable saves load as empty.
+	ok(SaveGame.state_hash(save_state(g, turn_n + 6)) != h1, "the hash changes when the game moves on")
+	var bad := read.duplicate()
+	bad["version"] = 999
+	SaveGame.write(path, bad)
+	ok(SaveGame.read(path).is_empty() and SaveGame.read("user://no_such_save.sav").is_empty(), "a save of another version or a missing file reads as empty")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	# Menus.
+	var menu := MainMenu.new()
+	ok(menu.load_button.disabled == not SaveGame.has_save(), "Load Game is enabled only when a save exists")
+	menu.free()
+	var pause := PauseMenu.new()
+	var presses := []
+	pause.save_pressed.connect(func() -> void: presses.append("save"))
+	pause.main_menu_pressed.connect(func() -> void: presses.append("menu"))
+	pause.open()
+	pause.save_button.pressed.emit()
+	pause.menu_button.pressed.emit()
+	ok(pause.is_open() and presses == ["save", "menu"] and pause.save_button.text == "Save Game", "the Esc menu offers Save Game and Main Menu")
+	pause.close()
+	ok(not pause.is_open(), "Resume closes the Esc menu")
+	pause.free()

@@ -2,7 +2,7 @@ extends Node2D
 ## Entry scene. Builds the map and divisions from data/ configs and shows them.
 ## Controls: click your division to select it, then click a reachable hex to order
 ## a move or an adjacent enemy to order an attack (right-click without dragging, or Esc, clears the
-## order). Camera: arrow keys pan, middle/right-drag pans, wheel zooms at the cursor. F fortifies. Space ends the turn and executes all orders (AI orders are
+## order). Camera: arrow keys pan, middle/right-drag pans, wheel zooms at the cursor. F fortifies. Esc opens the menu (Save Game, Main Menu, Quit) when there is nothing to cancel. Space ends the turn and executes all orders (AI orders are
 ## issued at the start of each turn, before yours). With your city panel open, R recruits infantry. N toggles the military panel. Capturing a city opens a popup to choose Annex, Occupy, Plunder, Reduce, Raze or Enslave; an occupied city shows an Annex button once its timer is up. Debug: K removes the newest city.
 
 const GAME_TITLE := "Fault Lines: Planetfall"
@@ -20,6 +20,11 @@ var _city: Dictionary = {}
 var _nation_panel: NationPanel
 var _military_panel: MilitaryPanel
 var _capture_popup := CapturePopup.new()
+var _pause_menu := PauseMenu.new()
+## The applied map config the game started from (saved with the game).
+var _map_cfg := {}
+## Set when this run was loaded from a save: skips the start-of-game AI orders.
+var _loaded := false
 var _top_bar := TopBar.new()
 ## Brief on-screen message (e.g. why R was blocked). Cleared on the next action.
 var message := Label.new()
@@ -31,8 +36,19 @@ var _mode := ""
 func _ready() -> void:
 	get_window().title = GAME_TITLE
 	_view = MapView.new()
-	var map_cfg := GameSession.apply(JSON.parse_string(FileAccess.get_file_as_string(MAP_CONFIG_PATH)))
+	var saved := {}
+	if GameSession.load_requested:
+		saved = SaveGame.read(SaveGame.latest_path())
+		if saved.is_empty():
+			push_warning("No readable save to load; starting a new game")
+	GameSession.load_requested = false
+	var map_cfg: Dictionary = saved.map_cfg if not saved.is_empty() else GameSession.apply(
+			JSON.parse_string(FileAccess.get_file_as_string(MAP_CONFIG_PATH)))
+	_map_cfg = map_cfg
 	var factions := FactionRoster.from_config(map_cfg)
+	if not saved.is_empty():
+		factions.assigned.assign(saved.faction_ids.map(func(id: String) -> Dictionary:
+				return factions.all.filter(func(f: Dictionary) -> bool: return f.id == id)[0]))
 	_view.factions = factions
 	_view.hex_map = HexMap.from_config_file(MAP_CONFIG_PATH, "res://data/cities_config.json",
 			"res://data/terrain_config.json", factions.sea_nations(), map_cfg)
@@ -84,8 +100,45 @@ func _ready() -> void:
 	message.add_theme_color_override("font_color", Color(1, 0.4, 0.4))
 	layer.add_child(message)
 	add_child(layer)
-	_view.roster.run_ai(PLAYER_NATION, _view.hex_map)
+	_pause_menu.resume_pressed.connect(_pause_menu.close)
+	_pause_menu.save_pressed.connect(_on_save_pressed)
+	_pause_menu.main_menu_pressed.connect(_on_main_menu_pressed)
+	_pause_menu.quit_pressed.connect(func() -> void: get_tree().quit())
+	add_child(_pause_menu)
+	if not saved.is_empty():
+		turn = SaveGame.restore(saved, _view.hex_map, _view.roster, _economy)
+		_loaded = true
+		print("Loaded the saved game at turn %d" % turn)
+	else:
+		_view.roster.run_ai(PLAYER_NATION, _view.hex_map)
 	_refresh_panels()
+
+
+## The game state for saving.
+func _capture_state() -> Dictionary:
+	var ids: Array = []
+	for i in _view.factions.assigned.size():
+		ids.append(_view.factions.id_of(i))
+	return SaveGame.capture(_view.hex_map, _view.roster, _economy, turn, _map_cfg, ids)
+
+
+func _on_save_pressed() -> void:
+	_pause_menu.status.text = "Game saved" if SaveGame.write(SaveGame.SLOT_PATH, _capture_state()) else "Could not save"
+
+
+func _on_main_menu_pressed() -> void:
+	get_tree().change_scene_to_file("res://scenes/menu.tscn")
+
+
+## Esc: leave a target mode, else cancel the selected unit's order, else toggle the menu.
+func _escape() -> void:
+	var d := _view.selected
+	if _pause_menu.is_open():
+		_pause_menu.close()
+	elif _mode != "" or (d and d.nation == PLAYER_NATION and not d.order_path.is_empty()):
+		do_action("cancel")
+	else:
+		_pause_menu.open()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -96,8 +149,11 @@ func _unhandled_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
 	if not key or not key.pressed or key.echo:
 		return
-	if _capture_popup.is_open():
-		return  # the capture choice comes first
+	if key.keycode == KEY_ESCAPE and not _capture_popup.is_open():
+		_escape()
+		return
+	if _capture_popup.is_open() or _pause_menu.is_open():
+		return  # the capture choice or the menu comes first
 	message.text = ""
 	var roster := _view.roster
 	if key.keycode == KEY_SPACE:
@@ -172,6 +228,7 @@ func _finish_turn() -> void:
 	if not stalled.is_empty():
 		message.text = "Recruit stalled in city %s: assign Training labor" % ", ".join(stalled.map(func(i: int) -> String: return str(i)))
 	roster.run_ai(PLAYER_NATION, _view.hex_map)
+	SaveGame.write(SaveGame.AUTOSAVE_PATH, _capture_state())
 	print("Turn ended")
 
 
@@ -253,7 +310,7 @@ func _refresh_panels() -> void:
 ## selects: a unit (any nation; a second click on it shows the city under it),
 ## else the city there, else nothing. It never creates an order.
 func _on_hex_clicked(hex: Vector2i) -> void:
-	if hex == Vector2i(-1, -1) or _capture_popup.is_open():
+	if hex == Vector2i(-1, -1) or _capture_popup.is_open() or _pause_menu.is_open():
 		return
 	var roster := _view.roster
 	message.text = ""

@@ -43,6 +43,7 @@ func _init() -> void:
 	holder.add_child(setup_box)
 	menu_box.add_theme_constant_override("separation", 8)
 	setup_box.add_theme_constant_override("separation", 8)
+	load_button.disabled = not SaveGame.has_save()
 	for pair in [[new_button, "New Game"], [load_button, "Load Game"], [quit_button, "Quit"]]:
 		pair[0].text = pair[1]
 		pair[0].custom_minimum_size = Vector2(220, 40)
@@ -133,5 +134,7 @@ func _go_new_game(settings: Dictionary) -> void:
 
 
 func _go_load_game() -> void:
+	if not SaveGame.has_save():
+		return
 	GameSession.load_requested = true
 	get_tree().change_scene_to_file(GAME_SCENE)
