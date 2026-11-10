@@ -15,6 +15,8 @@ var rng := RandomNumberGenerator.new()
 var economy: NationEconomy = null
 ## Clash/combat lines from the last execute_orders().
 var turn_log: Array[String] = []
+## The reason the last set_order refused a move order past a leash ("" if it did not); the UI shows it.
+var order_message := ""
 ## Nations treated as neutral: their hexes can be neither ordered into nor attacked.
 var neutral_nations: Array[int] = []
 ## Fog of war (Fog), or null for none. A nation the fog filters (the player) cannot order an
@@ -534,6 +536,7 @@ func _after_combat(d: Division, hex_map: HexMap, captor: int) -> String:
 ## an attack order; otherwise a move along the shortest free path, which may take
 ## several turns (Task 25). Returns false (order unchanged) if dest is unreachable.
 func set_order(d: Division, dest: Vector2i, hex_map: HexMap) -> bool:
+	order_message = ""
 	var target := division_at(dest)
 	if target and hides_from(d.nation, dest):
 		return false
@@ -548,6 +551,12 @@ func set_order(d: Division, dest: Vector2i, hex_map: HexMap) -> bool:
 	var path := plan_path(d, dest, hex_map)
 	if path.is_empty():
 		return false
+	var leash := int(templates.get(d.unit_type, {}).get("nest_radius", -1))
+	if leash >= 0 and d.nest != Vector2i(-1, -1):  # a Crag Harrier never leaves its nest radius
+		for cell in path:
+			if HexMap.hex_distance(cell, d.nest) > leash:
+				order_message = "Div %d (%s): %s is past its leash (%d hexes from its nest); order rejected" % [d.id, d.unit_type, dest, leash]
+				return false
 	d.order_path.assign(path)
 	d.order_attack = false
 	return true
