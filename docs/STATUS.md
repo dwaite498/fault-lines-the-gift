@@ -1,6 +1,6 @@
 # Fault Lines: Planetfall — Status
 
-Last updated: Nov 9 2026 (Task 34)
+Last updated: Nov 9 2026 (Task 34b)
 
 ## Current direction
 An Alpha Centauri (SMAC) homage with landfall and 10 ideological factions.
@@ -16,6 +16,7 @@ See [docs/PIVOT.md](PIVOT.md) for the pivot brief.
 - Color-named nations
 - Iso view: elevation, skirts, back-to-front draw, picking (Task 33; docs/art/ART_SPEC_v2.md)
 - Elevation rules: climb cost, cliffs, uphill attack penalty; maps smoothed to 1-level steps with mountain foothills (hills) and a few tagged ridge cliffs, all land reachable; headless tests in tests/run_tests.gd
+- Camera: arrow-key pan, middle/right-drag, wheel zoom 0.5x-2x at the cursor, clamped to the map (data/map_config.json "camera"); iso view_scale is 1.0
 
 ## Next
 - Task 31: remove doom systems

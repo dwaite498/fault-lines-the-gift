@@ -41,7 +41,7 @@ func _init() -> void:
 	_min_elev = int(iso.min_elev)
 	_max_elev = int(iso.max_elev)
 	_skirt_dark = iso.skirt_dark
-	# The whole map is 96px-wide tiles, so it is drawn scaled to fit the window.
+	# 1.0: the camera (MapCamera) handles fit and zoom. Kept as a data value.
 	scale = Vector2.ONE * float(iso.view_scale)
 
 
@@ -281,7 +281,17 @@ func _draw_city(city: Dictionary) -> void:
 			HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color.html(c.label))
 
 
-## The cell under a position (same space as before the view scale: parent/screen),
+## The world rect the camera may show: every hex including raised faces and skirts.
+func world_bounds() -> Rect2:
+	var left := _origin.x - _w * 0.5
+	var right := _origin.x + _w * (hex_map.width + 0.5)
+	var top := _origin.y - _h * 0.5 - _max_elev * _step
+	var bottom := _origin.y + _h * 0.75 * (hex_map.height - 1) + _h * 0.5 - _min_elev * _step
+	return Rect2(Vector2(left, top) * scale, Vector2(right - left, bottom - top) * scale)
+
+
+## The cell under a position (this node's parent space: world coordinates, not screen;
+## use MapCamera.screen_to_world first for a click),
 ## or Vector2i(-1, -1). Matches the draw order: rows from front to back, and within a
 ## row the raised top faces (drawn last, higher elevation first) before that row's
 ## skirts. A tall tile therefore covers what is behind it, and a click on a front

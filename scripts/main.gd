@@ -1,8 +1,8 @@
 extends Node2D
 ## Entry scene. Builds the map and divisions from data/ configs and shows them.
 ## Controls: click your division to select it, then click a reachable hex to order
-## a move or an adjacent enemy to order an attack (right-click or Esc clears the
-## order). F fortifies. Space ends the turn and executes all orders (AI orders are
+## a move or an adjacent enemy to order an attack (right-click without dragging, or Esc, clears the
+## order). Camera: arrow keys pan, middle/right-drag pans, wheel zooms at the cursor. F fortifies. Space ends the turn and executes all orders (AI orders are
 ## issued at the start of each turn, before yours). With your city panel open, R recruits infantry. M toggles the military panel. Debug: D removes the newest city.
 
 const GAME_TITLE := "Fault Lines: Planetfall"
@@ -11,6 +11,7 @@ const MAP_CONFIG_PATH := "res://data/map_config.json"
 const PLAYER_NATION := 0
 
 var _view: MapView
+var _camera := MapCamera.new()
 var _panel: UnitPanel
 var _city_panel: CityPanel
 var _economy: NationEconomy
@@ -38,6 +39,10 @@ func _ready() -> void:
 	_view.roster.spawn_at_cities(_view.hex_map)
 	_view.hidden_nations = _view.roster.neutral_nations
 	add_child(_view)
+	_camera.configure(map_cfg.get("camera", {}))
+	add_child(_camera)
+	_camera.fit_to(_view.world_bounds())
+	_camera.secondary_click.connect(do_action.bind("cancel"))
 	_economy = NationEconomy.new()
 	_economy.setup(_view.hex_map)
 	_view.roster.economy = _economy
@@ -80,10 +85,7 @@ func _ready() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	var click := event as InputEventMouseButton
 	if click and click.pressed and click.button_index == MOUSE_BUTTON_LEFT:
-		_on_hex_clicked(_view.pixel_to_hex(click.position))
-		return
-	if click and click.pressed and click.button_index == MOUSE_BUTTON_RIGHT:
-		do_action("cancel")
+		_on_hex_clicked(_view.pixel_to_hex(_camera.screen_to_world(click.position)))
 		return
 	var key := event as InputEventKey
 	if not key or not key.pressed or key.echo:

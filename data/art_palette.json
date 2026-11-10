@@ -17,7 +17,7 @@
 		"max_elev": 4,
 		"skirt_dark": [0.35, 0.20],
 		"origin": [64, 120],
-		"view_scale": 0.5
+		"view_scale": 1.0
 	},
 	"grid": {
 		"color": "#000000",

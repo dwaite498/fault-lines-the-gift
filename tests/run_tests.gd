@@ -25,6 +25,7 @@ func _initialize() -> void:
 	test_uphill_penalty()
 	test_uphill_damage()
 	test_reachability()
+	test_camera()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -261,3 +262,126 @@ func build(seed_value: int) -> HexMap:
 
 func m_idempotent() -> bool:
 	return build(5).ensure_reachable() == 0
+
+
+func make_camera() -> MapCamera:
+	var cam := MapCamera.new()
+	var cfg: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://data/map_config.json"))
+	cam.configure(cfg.camera)
+	cam.view_size = Vector2(1280, 720)
+	return cam
+
+
+func mouse_button(index: int, pressed: bool, pos: Vector2) -> InputEventMouseButton:
+	var e := InputEventMouseButton.new()
+	e.button_index = index
+	e.pressed = pressed
+	e.position = pos
+	return e
+
+
+func mouse_motion(pos: Vector2, rel: Vector2) -> InputEventMouseMotion:
+	var e := InputEventMouseMotion.new()
+	e.position = pos
+	e.relative = rel
+	return e
+
+
+func test_camera() -> void:
+	var m := build(3)
+	var view := MapView.new()
+	view.hex_map = m
+	view.roster = make_roster()
+	root.add_child(view)
+	var cam := make_camera()
+	var wb := view.world_bounds()
+	ok(view.scale == Vector2.ONE, "iso.view_scale is 1.0 (the camera fits the map)")
+	cam.fit_to(wb)
+	ok(cam.zoom.x >= cam.zoom_min and cam.zoom.x <= cam.zoom_max, "starting zoom %.2f is in range" % cam.zoom.x)
+	ok(wb.size.x * cam.zoom.x <= cam.view_size.x + 0.5 and wb.size.y * cam.zoom.x <= cam.view_size.y + 0.5, "starting zoom fits the whole map")
+	# Screen -> hex at zoom 0.5, 1 and 2 with a pan offset: every hex whose face center is
+	# visible must be picked from the screen point of its own center.
+	var cells := m.cells.keys()
+	cells.sort()
+	for z in [0.5, 1.0, 2.0]:
+		cam.zoom = Vector2.ONE * z
+		cam.position = wb.get_center() + Vector2(-210, 95)
+		cam.clamp_position()
+		var checked := 0
+		var bad := 0
+		var view_rect := Rect2(Vector2.ZERO, cam.view_size)
+		for cell in cells:
+			var screen := cam.world_to_screen(view.hex_to_pixel(cell))
+			if not view_rect.has_point(screen):
+				continue
+			var expect := view.pixel_to_hex(view.hex_to_pixel(cell))
+			checked += 1
+			if view.pixel_to_hex(cam.screen_to_world(screen)) != expect:
+				bad += 1
+		ok(checked > 0 and bad == 0, "screen -> hex at zoom %.1f with a pan offset: %d visible hexes, %d wrong" % [z, checked, bad])
+		var probe := Vector2(333, 271)
+		ok(cam.world_to_screen(cam.screen_to_world(probe)).is_equal_approx(probe), "screen/world round trip at zoom %.1f" % z)
+	# Most hexes pick themselves at zoom 1 (a tall front tile can cover a center).
+	cam.zoom = Vector2.ONE
+	cam.position = wb.get_center()
+	cam.clamp_position()
+	var self_picks := 0
+	for cell in cells:
+		if view.pixel_to_hex(cam.screen_to_world(cam.world_to_screen(view.hex_to_pixel(cell)))) == cell:
+			self_picks += 1
+	ok(self_picks >= cells.size() - 4, "hexes pick themselves through the camera (%d of %d)" % [self_picks, cells.size()])
+	# Zoom centered on the cursor keeps the world point under it (bounds widened so the
+	# clamp doesn't move the camera), and steps clamp.
+	cam.bounds = wb.grow(3000)
+	cam.zoom = Vector2.ONE
+	cam.position = wb.get_center()
+	var cursor := Vector2(900, 300)
+	var before := cam.screen_to_world(cursor)
+	cam.zoom_notch(1, cursor)
+	ok(is_equal_approx(cam.zoom.x, 1.25) and cam.screen_to_world(cursor).distance_to(before) < 0.01, "wheel zoom steps by 0.25 and stays centered on the cursor")
+	for i in 20:
+		cam.zoom_notch(1, cursor)
+	ok(is_equal_approx(cam.zoom.x, 2.0), "zoom clamps at the max (2x)")
+	for i in 20:
+		cam.zoom_notch(-1, cursor)
+	ok(is_equal_approx(cam.zoom.x, 0.5), "zoom clamps at the min (0.5x)")
+	cam.bounds = wb
+	# Clamping to the map bounds.
+	cam.zoom = Vector2.ONE * 2.0
+	cam.position = wb.position - Vector2(5000, 5000)
+	cam.clamp_position()
+	var half := cam.view_size * 0.5 / 2.0
+	ok(is_equal_approx(cam.position.x, wb.position.x + half.x) and is_equal_approx(cam.position.y, wb.position.y + half.y), "top-left clamps to the map bounds")
+	cam.position = wb.end + Vector2(5000, 5000)
+	cam.clamp_position()
+	ok(is_equal_approx(cam.position.x, wb.end.x - half.x) and is_equal_approx(cam.position.y, wb.end.y - half.y), "bottom-right clamps to the map bounds")
+	cam.zoom = Vector2.ONE * 0.5
+	cam.position = wb.position
+	cam.clamp_position()
+	var vis := Rect2(cam.position - cam.view_size * 0.5 / 0.5, cam.view_size / 0.5)
+	ok(cam.position.x == wb.get_center().x or wb.encloses(Rect2(vis.position.x, wb.position.y, vis.size.x, wb.size.y)), "an axis where the view is larger than the map is centered")
+	# Drag: middle-drag pans, a right-click without dragging is a click, a right-drag pans.
+	cam.bounds = wb.grow(3000)
+	cam.zoom = Vector2.ONE
+	cam.position = wb.get_center()
+	var start := cam.position
+	cam.handle_event(mouse_button(MOUSE_BUTTON_MIDDLE, true, Vector2(500, 400)))
+	cam.handle_event(mouse_motion(Vector2(470, 380), Vector2(-30, -20)))
+	cam.handle_event(mouse_button(MOUSE_BUTTON_MIDDLE, false, Vector2(470, 380)))
+	ok(cam.position.is_equal_approx(start + Vector2(30, 20)), "middle-drag pans the map with the pointer")
+	var clicks := []
+	cam.secondary_click.connect(func() -> void: clicks.append(1))
+	cam.handle_event(mouse_button(MOUSE_BUTTON_RIGHT, true, Vector2(500, 400)))
+	cam.handle_event(mouse_motion(Vector2(502, 401), Vector2(2, 1)))
+	cam.handle_event(mouse_button(MOUSE_BUTTON_RIGHT, false, Vector2(502, 401)))
+	ok(clicks.size() == 1, "right-click with a small wobble still counts as a click")
+	var p0 := cam.position
+	cam.handle_event(mouse_button(MOUSE_BUTTON_RIGHT, true, Vector2(500, 400)))
+	cam.handle_event(mouse_motion(Vector2(450, 400), Vector2(-50, 0)))
+	cam.handle_event(mouse_button(MOUSE_BUTTON_RIGHT, false, Vector2(450, 400)))
+	ok(clicks.size() == 1 and cam.position.is_equal_approx(p0 + Vector2(50, 0)), "right-drag past the threshold pans and is not a click")
+	ok(not cam.handle_event(mouse_button(MOUSE_BUTTON_LEFT, true, Vector2(10, 10))), "left click is left to the game")
+	cam.edge_scroll_enabled = false
+	ok(not cam.edge_scroll_enabled and cam._edge_direction(Vector2(2, 300)) == Vector2(-1, 0), "edge zone maps to a pan direction (applied only when enabled, off by default)")
+	cam.free()
+	view.free()
