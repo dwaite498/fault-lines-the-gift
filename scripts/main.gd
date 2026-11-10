@@ -142,7 +142,8 @@ func _ready() -> void:
 	else:
 		_fog.explore_landing(_view.hex_map)
 		_view.roster.run_ai(PLAYER_NATION, _view.hex_map)
-	_refresh_panels()
+	# A loaded game keeps the saved labor plans: a city just occupied (labor cleared) is not refilled.
+	_refresh_panels(saved.is_empty())
 
 
 ## The game state for saving.
@@ -367,8 +368,9 @@ func next_idle_unit(after: Division) -> Division:
 	return idle[0]
 
 
-func _refresh_panels() -> void:
-	_economy.refresh_labor(_view.hex_map)
+func _refresh_panels(refill_labor := true) -> void:
+	if refill_labor:
+		_economy.refresh_labor(_view.hex_map)
 	_fog.update(_view.hex_map, _view.roster)
 	var acts: Array[String] = []
 	if _view.selected and _view.selected.nation == PLAYER_NATION:

@@ -42,6 +42,7 @@ func _initialize() -> void:
 	test_atrocity_views()
 	test_main_menu()
 	test_save_load()
+	test_save_mid_turn_occupy()
 	test_victory()
 	test_colonizers()
 	test_fog()
@@ -2625,3 +2626,32 @@ func test_city_tiers() -> void:
 	var probe := {"population": 15000}
 	ok(fog.sight_of_city(probe, m) == int(fog.rules.sight.city) + int(fog.rules.city_sight_bonus) and fog.sight_of_city({"population": 14999}, m) == int(fog.rules.sight.city) and fog.tier_of(30000, m) == "metropolis", "city sight reads the City tier from HexMap (cities_config tiers)")
 	ok(not fog.rules.has("tier_thresholds"), "the duplicate tier_thresholds is gone from map_config.json")
+
+
+## A save made right after Occupy (labor cleared, before end turn) loads with the same hash:
+## load keeps the saved labor and does not refill it (main.gd skips refresh_labor on the load refresh).
+func test_save_mid_turn_occupy() -> void:
+	var g := save_game_setup(5)
+	for t in 3:
+		save_play_turn(g)
+	var m: HexMap = g.map
+	var roster: DivisionRoster = g.roster
+	var victims := nation_cities(m, 1)
+	ok(not victims.is_empty(), "there is a city to occupy")
+	if victims.is_empty():
+		return
+	var guard := roster.division_at(victims[0].cell)
+	if guard:
+		roster.divisions.erase(guard)
+	roster.pending_captures.append(m.take_city(victims[0].cell, 0))
+	roster.apply_capture(int(victims[0].id), "occupy", m)
+	ok(not m.city_by_id(int(victims[0].id)).has("labor"), "right after Occupy the city's labor plan is cleared")
+	var state := save_state(g, 4)
+	var h1 := SaveGame.state_hash(state)
+	var g2 := save_game_setup(5)
+	var turn2 := SaveGame.restore(state, g2.map, g2.roster, g2.eco)
+	g2.fog.restore(state.extras.fog)
+	ok(not g2.map.city_by_id(int(victims[0].id)).has("labor"), "loading keeps the cleared labor (no refill)")
+	ok(turn2 == 4 and SaveGame.state_hash(save_state(g2, turn2)) == h1, "occupy, save mid-turn, load: the hash matches")
+	var main_src := FileAccess.get_file_as_string("res://scripts/main.gd")
+	ok(main_src.contains("_refresh_panels(saved.is_empty())"), "main.gd's load refresh does not refill labor")

@@ -41,6 +41,7 @@ See [docs/PIVOT.md](PIVOT.md) for the pivot brief.
 - Task 32: factions.json, 4 factions with 1 sea
 - Then the naval slice
 
+- Save fix (fix-save-labor): a save made mid-turn right after Occupy (the city's labor plan is cleared until end turn) hashed differently after loading, because the load's first panel refresh ran `ensure_labor` and refilled the labor. Loading now keeps the saved labor (main.gd `_refresh_panels(false)` on a load); every later refresh refills as before. Test: `test_save_mid_turn_occupy`.
 ## On hold
 - Rail Tasks 27 and 28
 
