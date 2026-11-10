@@ -16,10 +16,12 @@ This file overrides the numbers in POPULATION.md, FACTION_TRAITS.md, and CITY_TI
 Turns to reach each threshold, at the base rate with no traits or terrain modifiers:
 | Allocation | Colony 3k to 5k | Colony 3k to 15k | Capital 10k to 15k | Capital 10k to 30k |
 |---|---|---|---|---|
-| No Growth labor (0.5%) | 103 | 323 | 82 | 221 |
+| No Growth labor (0.5%) | 106 | 328 | 82 | 221 |
 | Half on Growth (1.0%) | 52 | 162 | 41 | 111 |
 | Full Growth (1.5%) | 35 | 109 | 28 | 74 |
 | Assembly, full Growth (1.8% while below 15k) | 29 | 91 | 23 | 62 |
+
+Note: the 106 and 328 are the turn counts the code actually produces (whole people round down, so the colony no-Growth rows come out a few turns slower than the 103 and 323 first estimated). The tests accept the table values within max(3, 2%) turns, and the rest of the table is unchanged.
 
 What this means: a capital becomes a City in about 30-40 turns and a Metropolis in about 75-110. Colonies stay Outposts or Bases for most of a small-map game. That matches food being scarce.
 
