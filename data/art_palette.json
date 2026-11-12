@@ -32,6 +32,14 @@
 		"trench": "#08222E",
 		"background": "#08222E"
 	},
+	"coast": {
+		"foam": "#9FE0D0",
+		"foam_alpha": 0.5,
+		"foam_width": 2.0,
+		"halo": "#9FE0D0",
+		"halo_alpha": 0.3,
+		"halo_width": 6.0
+	},
 	"fungus": {
 		"base": "#B0558F",
 		"vein": "#6E2F6B",
