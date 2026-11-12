@@ -119,10 +119,7 @@ func _draw() -> void:
 			if fstate == Fog.EXPLORED:
 				draw_colored_polygon(corners, EXPLORED_DIM)
 			corners.append(corners[0])
-			if is_mat:
-				_draw_mat_grid(cell, corners, grid_color, float(grid.width))
-			else:
-				draw_polyline(corners, grid_color, float(grid.width))
+			_draw_grid(cell, corners, is_mat, grid_color, Color(grid_color, float(grid.alpha_match)), float(grid.width))
 		for x in hex_map.width:
 			var cell := Vector2i(x, y)
 			# Dashed border in the nation color on edges between different owners.
@@ -527,23 +524,34 @@ func _fungus_neighbors(cell: Vector2i) -> int:
 	return n
 
 
-## The cell's grid outline where an edge shared with another mat hex is drawn at half alpha so a
-## mat reads as one mass. `corners` is the closed top-face loop.
-func _draw_mat_grid(cell: Vector2i, corners: PackedVector2Array, grid_color: Color, width: float) -> void:
-	var center := hex_to_pixel(cell)
-	var half := Color(grid_color, grid_color.a * 0.5)
-	var mat_neighbors := []
+## The cell's grid outline (Mockup M4). An edge to a hex with the same terrain and elevation is
+## drawn faint (grid.alpha_match) and only once, from the later-drawn hex, so a plateau reads
+## as one mass; edges to differing, unexplored or missing neighbors keep the full grid line.
+## An edge shared with another mat hex is drawn at half alpha (U2). `corners` is the closed loop.
+func _draw_grid(cell: Vector2i, corners: PackedVector2Array, is_mat: bool, full: Color, faint: Color, width: float) -> void:
+	var by_edge := {}
 	for o in hex_map.neighbors(cell):
-		if hex_map.fungus_tiles.has(o) and (int(hex_map.fungus_tiles[o]) >= 4 or _fungus_neighbors(o) >= 5):
-			mat_neighbors.append(hex_to_pixel(o))
+		if not hex_map.cells.has(o):
+			continue
+		var d := flat_center(o) - flat_center(cell)
+		var ang := rad_to_deg(atan2(d.y / (_h * 0.75) * 1.5, d.x / _w * sqrt(3.0)))
+		by_edge[posmod(roundi(ang / 60.0), 6)] = o
 	for i in 6:
-		var mid := (corners[i] + corners[i + 1]) * 0.5
-		var shared := false
-		for np in mat_neighbors:
-			if mid.distance_to((center + np) * 0.5) < 2.0:
-				shared = true
-				break
-		draw_line(corners[i], corners[i + 1], half if shared else grid_color, width)
+		var color := full
+		if by_edge.has(i):
+			var o: Vector2i = by_edge[i]
+			if fog_state(o) != Fog.UNEXPLORED and hex_map.terrain_name(o) == hex_map.terrain_name(cell) \
+					and elevation_of(o) == elevation_of(cell):
+				if o.y > cell.y or (o.y == cell.y and o.x > cell.x):
+					continue
+				color = faint
+			if is_mat and _is_mat(o):
+				color = Color(color, color.a * 0.5)
+		draw_line(corners[i], corners[i + 1], color, width)
+
+
+func _is_mat(cell: Vector2i) -> bool:
+	return hex_map.fungus_tiles.has(cell) and (int(hex_map.fungus_tiles[cell]) >= 4 or _fungus_neighbors(cell) >= 5)
 
 
 ## The 96x48 top face around center: corner i is at angle 60*i - 30 degrees.

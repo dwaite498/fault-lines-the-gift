@@ -24,6 +24,7 @@
 	"grid": {
 		"color": "#000000",
 		"alpha": 0.20,
+		"alpha_match": 0.06,
 		"width": 1.0
 	},
 	"fungus": {
