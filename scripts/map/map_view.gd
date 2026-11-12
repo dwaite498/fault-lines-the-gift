@@ -459,7 +459,7 @@ func border_edges() -> Array:
 	return out
 
 
-## Dashed line on the shared edge, nudged 1px into cell so both sides show.
+## Dashed line on the shared edge, nudged half its width into cell so both sides show.
 func _draw_border(cell: Vector2i, other: Vector2i, color: Color) -> void:
 	var center := hex_to_pixel(cell)
 	var d := flat_center(other) - flat_center(cell)
@@ -467,10 +467,11 @@ func _draw_border(cell: Vector2i, other: Vector2i, color: Color) -> void:
 	var ang := rad_to_deg(atan2(d.y / (_h * 0.75) * 1.5, d.x / _w * sqrt(3.0)))
 	var i := posmod(roundi(ang / 60.0), 6)
 	var corners := _corners(center)
-	var inward := (-d).normalized()
+	var b: Dictionary = palette.border
+	# Nudged by half the line width so the whole line sits on this cell's side (M2: 3px).
+	var inward := (-d).normalized() * maxf(1.0, float(b.width) * 0.5)
 	var from: Vector2 = corners[i] + inward
 	var to: Vector2 = corners[(i + 1) % 6] + inward
-	var b: Dictionary = palette.border
 	var dash := float(b.dash)
 	var gap := float(b.gap)
 	var length := from.distance_to(to)
