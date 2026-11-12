@@ -131,6 +131,8 @@ func _draw() -> void:
 			var owner := owner_of(cell)
 			if owner >= 0:
 				draw_colored_polygon(corners, Color(_color_for(owner), float(palette.tint_alpha)))
+			if is_water(cell):
+				_draw_coast(cell, corners)
 			var is_mat := false
 			if hex_map.fungus_tiles.has(cell):
 				is_mat = _draw_fungus(cell, corners)
@@ -544,6 +546,31 @@ func _draw_border(cell: Vector2i, other: Vector2i, color: Color) -> void:
 	while t < length:
 		draw_line(from + dir * t, from + dir * minf(t + dash, length), Color(color, float(b.alpha)), float(b.width))
 		t += dash + gap
+
+
+## Mockup M3: on each edge of a water hex shared with land, a soft lighter band about
+## halo_width px wide on the water side (three stacked strips, so it fades out) and a
+## foam_width px foam line just inside the edge. Edges toward unexplored land are skipped.
+func _draw_coast(cell: Vector2i, corners: PackedVector2Array) -> void:
+	var c: Dictionary = palette.coast
+	var center := hex_to_pixel(cell)
+	var foam := Color(Color.html(c.foam), float(c.foam_alpha))
+	var halo := Color(Color.html(c.halo), float(c.halo_alpha) / 3.0)
+	var hw := float(c.halo_width)
+	for n in hex_map.neighbors(cell):
+		if not hex_map.cells.has(n) or is_water(n) or fog_state(n) == Fog.UNEXPLORED:
+			continue
+		var d := flat_center(n) - flat_center(cell)
+		var ang := rad_to_deg(atan2(d.y / (_h * 0.75) * 1.5, d.x / _w * sqrt(3.0)))
+		var i := posmod(roundi(ang / 60.0), 6)
+		var a: Vector2 = corners[i]
+		var b: Vector2 = corners[(i + 1) % 6]
+		var inward := (center - (a + b) * 0.5).normalized()
+		for k in 3:
+			var w := hw * float(3 - k) / 3.0
+			draw_colored_polygon(PackedVector2Array([a, b, b + inward * w, a + inward * w]), halo)
+		var off := inward * float(c.foam_width) * 0.5
+		draw_line(a + off, b + off, foam, float(c.foam_width))
 
 
 ## Pink worm fungus on the top face (UI v2 U2): `base` at the density's alpha with density + 1
