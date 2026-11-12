@@ -607,7 +607,7 @@ func _draw_grid(cell: Vector2i, corners: PackedVector2Array, is_mat: bool, full:
 		if by_edge.has(i):
 			var o: Vector2i = by_edge[i]
 			if fog_state(o) != Fog.UNEXPLORED and hex_map.terrain_name(o) == hex_map.terrain_name(cell) \
-					and elevation_of(o) == elevation_of(cell):
+					and drawn_elevation(o) == drawn_elevation(cell):
 				if o.y > cell.y or (o.y == cell.y and o.x > cell.x):
 					continue
 				color = faint
