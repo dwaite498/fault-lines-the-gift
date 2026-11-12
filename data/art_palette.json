@@ -45,9 +45,9 @@
 		"blocked_alpha": 0.6,
 		"width": 3.0
 	},
-	"tint_alpha": 0.35,
+	"tint_alpha": 0.12,
 	"border": {
-		"width": 2.0,
+		"width": 3.0,
 		"dash": 6.0,
 		"gap": 4.0,
 		"alpha": 1.0
