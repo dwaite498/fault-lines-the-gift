@@ -27,6 +27,11 @@
 		"alpha_match": 0.06,
 		"width": 1.0
 	},
+	"water_depth": {
+		"levels": ["#2F9C9A", "#14505A", "#0E3A48"],
+		"trench": "#08222E",
+		"background": "#08222E"
+	},
 	"fungus": {
 		"base": "#B0558F",
 		"vein": "#6E2F6B",

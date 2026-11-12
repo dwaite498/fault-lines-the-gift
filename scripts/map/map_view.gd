@@ -63,7 +63,25 @@ func elevation_of(cell: Vector2i) -> int:
 ## Center of the hex's raised top face. Everything drawn on a hex uses this, so
 ## counters, cities, borders, highlights and arrows all lift with elevation.
 func hex_to_pixel(cell: Vector2i) -> Vector2:
-	return flat_center(cell) - Vector2(0, elevation_of(cell) * _step)
+	return flat_center(cell) - Vector2(0, drawn_elevation(cell) * _step)
+
+
+## Elevation the cell is drawn at: water lies flat on the sea plane (0), land at its elevation.
+func drawn_elevation(cell: Vector2i) -> int:
+	return 0 if is_water(cell) else elevation_of(cell)
+
+
+func is_water(cell: Vector2i) -> bool:
+	return hex_map.terrain_name(cell) == "water"
+
+
+## Mockup M1: the viewport behind the map is the trench color instead of grey.
+func _enter_tree() -> void:
+	RenderingServer.set_default_clear_color(Color.html(palette.water_depth.background))
+
+
+func _exit_tree() -> void:
+	RenderingServer.set_default_clear_color(ProjectSettings.get_setting("rendering/environment/defaults/default_clear_color"))
 
 
 func _draw() -> void:
@@ -152,7 +170,9 @@ func _draw() -> void:
 ## darkened on the left and right by palette.iso.skirt_dark.
 func skirt_polys(cell: Vector2i) -> Array:
 	var out := []
-	var e := elevation_of(cell)
+	if is_water(cell):
+		return out
+	var e := drawn_elevation(cell)
 	var base := terrain_color(cell)
 	var cs := _corners(hex_to_pixel(cell))
 	var odd := cell.y % 2 == 1
@@ -162,7 +182,7 @@ func skirt_polys(cell: Vector2i) -> Array:
 	for edge in [[3, 2, sw, 0], [2, 1, se, 1]]:
 		var ne := _min_elev
 		if hex_map.cells.has(edge[2]):
-			ne = elevation_of(edge[2])
+			ne = drawn_elevation(edge[2])
 		var drop := float(e - ne) * _step
 		if drop <= 0.0:
 			continue
@@ -437,7 +457,52 @@ func fog_state(cell: Vector2i) -> int:
 
 func terrain_color(cell: Vector2i) -> Color:
 	var name := hex_map.terrain_name(cell)
+	if name == "water":
+		return water_color(cell)
 	return Color.html(palette.terrain.get(name, hex_map.terrain_of(cell).color))
+
+
+## Mockup M1: water color by depth. Depth is the deeper of the hex's own depth (-elevation)
+## and its distance in hexes from land (shallows next to land are 1), so the sea is lighter
+## near land and darker offshore: 1 / 2 / 3 -> water_depth.levels, 4+ -> trench.
+func water_color(cell: Vector2i) -> Color:
+	var wd: Dictionary = palette.water_depth
+	var levels: Array = wd.levels
+	var depth := maxi(int(_land_distance().get(cell, levels.size() + 1)), -hex_map.elevation_of(cell))
+	if depth > levels.size():
+		return Color.html(wd.trench)
+	return Color.html(levels[maxi(depth, 1) - 1])
+
+
+var _dist_map: HexMap = null
+var _dist_key := 0
+var _dist := {}
+
+
+## Hexes from the nearest land for each water cell (BFS), cached per HexMap and terrain; capped at 4.
+func _land_distance() -> Dictionary:
+	var key := hex_map.terrain.hash() ^ hex_map.cells.size()
+	if _dist_map == hex_map and _dist_key == key:
+		return _dist
+	_dist_map = hex_map
+	_dist_key = key
+	_dist = {}
+	var frontier: Array[Vector2i] = []
+	for cell in hex_map.cells:
+		if not is_water(cell):
+			_dist[cell] = 0
+			frontier.append(cell)
+	var level := 0
+	while not frontier.is_empty() and level < 4:
+		level += 1
+		var next: Array[Vector2i] = []
+		for cell in frontier:
+			for n in hex_map.neighbors(cell):
+				if hex_map.cells.has(n) and not _dist.has(n):
+					_dist[n] = level
+					next.append(n)
+		frontier = next
+	return _dist
 
 
 ## [cell, neighbor] pairs where cell has a visible owner and the neighbor's drawn owner differs.
