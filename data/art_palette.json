@@ -59,7 +59,11 @@
 		"width": 3.0,
 		"dash": 6.0,
 		"gap": 4.0,
-		"alpha": 1.0
+		"alpha": 1.0,
+		"inset": 2.0,
+		"keyline": "#070C0B",
+		"keyline_alpha": 0.6,
+		"keyline_width": 1.0
 	},
 	"counter": {
 		"neutral_fill": "#6F6F6A",
