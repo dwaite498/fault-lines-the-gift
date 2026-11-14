@@ -142,7 +142,7 @@ func _draw() -> void:
 			_draw_grid(cell, corners, is_mat, grid_color, Color(grid_color, float(grid.alpha_match)), float(grid.width))
 		for x in hex_map.width:
 			var cell := Vector2i(x, y)
-			# Dashed border in the nation color on edges between different owners.
+			# Border in the nation color on edges between different owners (solid; dashed under explored fog).
 			for other in edges.get(cell, []):
 				_draw_border(cell, other, _color_for(owner_of(cell)))
 		for x in hex_map.width:
@@ -523,7 +523,10 @@ func border_edges() -> Array:
 	return out
 
 
-## Dashed line on the shared edge, nudged half its width into cell so both sides show.
+## Mockup M2b: border on cell's side of the edge shared with other, inset border.inset px into
+## cell so two neighboring nations show two parallel lines in their own colors (and a coast
+## border stays on the land side). A 1px keyline sits on the outer (edge) side of the 3px line.
+## Solid for visible ownership; dashed only for remembered ownership under explored fog.
 func _draw_border(cell: Vector2i, other: Vector2i, color: Color) -> void:
 	var center := hex_to_pixel(cell)
 	var d := flat_center(other) - flat_center(cell)
@@ -532,18 +535,50 @@ func _draw_border(cell: Vector2i, other: Vector2i, color: Color) -> void:
 	var i := posmod(roundi(ang / 60.0), 6)
 	var corners := _corners(center)
 	var b: Dictionary = palette.border
-	# Nudged by half the line width so the whole line sits on this cell's side (M2: 3px).
-	var inward := (-d).normalized() * maxf(1.0, float(b.width) * 0.5)
-	var from: Vector2 = corners[i] + inward
-	var to: Vector2 = corners[(i + 1) % 6] + inward
+	var width := float(b.width)
+	var inset := float(b.inset)
+	var kw := float(b.keyline_width)
+	var key := Color(Color.html(b.keyline), float(b.keyline_alpha))
+	var line := Color(color, float(b.alpha))
+	var dashed := fog_state(cell) == Fog.EXPLORED
+	var ks := _inset_edge(corners, center, i, inset - kw * 0.5)
+	var ls := _inset_edge(corners, center, i, inset + width * 0.5)
+	_border_stroke(ks[0], ks[1], key, kw, dashed)
+	_border_stroke(ls[0], ls[1], line, width, dashed)
+
+
+## A solid line, or border.dash / border.gap dashes along it.
+func _border_stroke(from: Vector2, to: Vector2, color: Color, width: float, dashed: bool) -> void:
+	if not dashed:
+		draw_line(from, to, color, width)
+		return
+	var b: Dictionary = palette.border
 	var dash := float(b.dash)
 	var gap := float(b.gap)
 	var length := from.distance_to(to)
 	var dir := (to - from) / length
 	var t := 0.0
 	while t < length:
-		draw_line(from + dir * t, from + dir * minf(t + dash, length), Color(color, float(b.alpha)), float(b.width))
+		draw_line(from + dir * t, from + dir * minf(t + dash, length), color, width)
 		t += dash + gap
+
+
+## Edge i of the face (corners i to i+1) moved k px toward center, with its ends trimmed where
+## it meets the neighboring edges moved by the same amount, so lines on adjacent edges join.
+func _inset_edge(corners: PackedVector2Array, center: Vector2, i: int, k: float) -> Array:
+	var lines := []
+	for j in [i - 1, i, i + 1]:
+		var a: Vector2 = corners[posmod(j, 6)]
+		var c: Vector2 = corners[posmod(j + 1, 6)]
+		var n := (c - a).orthogonal().normalized()
+		if n.dot(center - a) < 0.0:
+			n = -n
+		lines.append([a + n * k, c - a])
+	var from = Geometry2D.line_intersects_line(lines[0][0], lines[0][1], lines[1][0], lines[1][1])
+	var to = Geometry2D.line_intersects_line(lines[1][0], lines[1][1], lines[2][0], lines[2][1])
+	if from == null or to == null:
+		return [lines[1][0], lines[1][0] + lines[1][1]]
+	return [from, to]
 
 
 ## Mockup M3: on each edge of a water hex shared with land, a soft lighter band about
@@ -620,6 +655,7 @@ func _fungus_neighbors(cell: Vector2i) -> int:
 ## The cell's grid outline (Mockup M4). An edge to a hex with the same terrain and elevation is
 ## drawn faint (grid.alpha_match) and only once, from the later-drawn hex, so a plateau reads
 ## as one mass; edges to differing, unexplored or missing neighbors keep the full grid line.
+## An edge that carries a territory border (M2b) gets no grid line.
 ## An edge shared with another mat hex is drawn at half alpha (U2). `corners` is the closed loop.
 func _draw_grid(cell: Vector2i, corners: PackedVector2Array, is_mat: bool, full: Color, faint: Color, width: float) -> void:
 	var by_edge := {}
@@ -633,6 +669,10 @@ func _draw_grid(cell: Vector2i, corners: PackedVector2Array, is_mat: bool, full:
 		var color := full
 		if by_edge.has(i):
 			var o: Vector2i = by_edge[i]
+			var own := owner_of(cell)
+			var other_own := owner_of(o)
+			if own != other_own and (own >= 0 or other_own >= 0):
+				continue
 			if fog_state(o) != Fog.UNEXPLORED and hex_map.terrain_name(o) == hex_map.terrain_name(cell) \
 					and drawn_elevation(o) == drawn_elevation(cell):
 				if o.y > cell.y or (o.y == cell.y and o.x > cell.x):
