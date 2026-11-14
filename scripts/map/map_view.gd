@@ -43,6 +43,13 @@ const GROUND_PEBBLE := ["plains", "forest", "scorched"]
 const GROUND_CRACK := ["hills", "mountains"]
 
 
+## Mockup M10 crater pit: outer wall color -> deep center color, rim ring and lit far wall.
+const CRATER_OUTER := Color("#2A1E1E")
+const CRATER_INNER := Color("#08222E")
+const CRATER_RIM := Color("#7A5A48")
+const CRATER_STEPS := 6
+
+
 func _init() -> void:
 	var iso: Dictionary = palette.iso
 	_w = float(iso.tile_w)
@@ -137,6 +144,8 @@ func _draw() -> void:
 			var corners := _corners(hex_to_pixel(cell))
 			draw_colored_polygon(corners, terrain_color(cell))
 			_draw_ground(cell, corners)
+			if hex_map.terrain_name(cell) == "crater":
+				_draw_crater(cell)
 			var owner := owner_of(cell)
 			if owner >= 0:
 				draw_colored_polygon(corners, Color(_color_for(owner), float(palette.tint_alpha)))
@@ -287,6 +296,34 @@ func _ground_point(rng: RandomNumberGenerator, center: Vector2, corners: PackedV
 		u = 1.0 - u
 		v = 1.0 - v
 	return center + ((corners[i] - center) * u + (corners[(i + 1) % 6] - center) * v) * 0.7
+
+
+
+
+## Mockup M10: the crater top face as a pit. Concentric hexes shrink from the rim toward the
+## center, shading CRATER_OUTER to CRATER_INNER; the far (upper) inner wall catches light and a
+## lighter rim ring outlines the lip, so the pit still reads under the explored-fog dim.
+func _draw_crater(cell: Vector2i) -> void:
+	var center := hex_to_pixel(cell)
+	var cs := _corners(center)
+	for i in CRATER_STEPS:
+		var f := 0.85 - 0.6 * float(i) / float(CRATER_STEPS - 1)
+		var ring := PackedVector2Array()
+		for p in cs:
+			# Each ring sits a little lower than the last, like the floor of a bowl.
+			ring.append(center + (p - center) * f + Vector2(0, (1.0 - f) * _h * 0.12))
+		draw_colored_polygon(ring, CRATER_OUTER.lerp(CRATER_INNER, float(i) / float(CRATER_STEPS - 1)))
+	var wall := PackedVector2Array()
+	for k in [3, 4, 5, 0, 1]:
+		wall.append(center + (cs[k] - center) * 0.8)
+	for k in [1, 0, 5, 4, 3]:
+		wall.append(center + (cs[k] - center) * 0.55 + Vector2(0, _h * 0.06))
+	draw_colored_polygon(wall, Color(CRATER_RIM, 0.35))
+	var rim := PackedVector2Array()
+	for p in cs:
+		rim.append(center + (p - center) * 0.88)
+	rim.append(rim[0])
+	draw_polyline(rim, CRATER_RIM, 2.0)
 
 
 ## Arrows for the player's pending orders. Orders ending on the same hex are
