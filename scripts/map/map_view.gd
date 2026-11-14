@@ -136,13 +136,13 @@ func _draw() -> void:
 				draw_colored_polygon(corners, Color(_color_for(owner), float(palette.tint_alpha)))
 			if is_water(cell):
 				_draw_coast(cell, corners)
-			var is_mat := false
-			if hex_map.fungus_tiles.has(cell):
-				is_mat = _draw_fungus(cell, corners)
+			var is_mat := _is_mat(cell)
 			if fstate == Fog.EXPLORED:
 				draw_colored_polygon(corners, EXPLORED_DIM)
 			corners.append(corners[0])
 			_draw_grid(cell, corners, is_mat, grid_color, Color(grid_color, float(grid.alpha_match)), float(grid.width))
+			if hex_map.fungus_tiles.has(cell):
+				_draw_fungus(cell, is_mat, fstate == Fog.EXPLORED)
 		for x in hex_map.width:
 			var cell := Vector2i(x, y)
 			# Border in the nation color on edges between different owners (solid; dashed under explored fog).
@@ -659,42 +659,69 @@ func _draw_coast(cell: Vector2i, corners: PackedVector2Array) -> void:
 		draw_line(a + off, b + off, foam, float(c.foam_width))
 
 
-## Pink worm fungus on the top face (UI v2 U2): `base` at the density's alpha with density + 1
-## vein strokes; a mat (density 4, or 5+ of 6 neighbors fungus) is `base` at mat_alpha with 4 strokes.
-## Strokes are seeded from the cell, so they are identical on every redraw and after a load.
-## Returns true for a mat.
-func _draw_fungus(cell: Vector2i, corners: PackedVector2Array) -> bool:
+## Fungus trees (Mockup M11): the ground keeps its terrain color and the fungus stands on it as
+## fungus.trees_by_density[density - 1] worm-like trees (a mat gets the last entry plus a low
+## canopy of coral blobs between the trunks). Each tree is a coiled, tapering trunk ending in a
+## cluster of small coral blobs and curling tendrils; never a dome or umbrella cap. Trees stand
+## in the front half of the top face and are at most fungus.tree_height * tile_h tall, drawn
+## back to front, before this row's cities and units and every plate, so they never cover a
+## badge or plate. Seeded from the cell; dimmed like the tile under explored fog.
+func _draw_fungus(cell: Vector2i, mat: bool, dim: bool) -> void:
 	var fp: Dictionary = palette.fungus
-	var density := clampi(int(hex_map.fungus_tiles[cell]), 1, 4)
-	var mat := density >= 4 or _fungus_neighbors(cell) >= 5
-	var alpha := float(fp.mat_alpha) if mat else float(fp.alpha_by_density[density - 1])
-	draw_colored_polygon(corners, Color(Color.html(fp.base), alpha))
-	var strokes := 4 if mat else density + 1
-	var vein := Color.html(fp.vein)
-	var light := Color.html(fp.highlight)
+	var counts: Array = fp.trees_by_density
+	var density := clampi(int(hex_map.fungus_tiles[cell]), 1, counts.size() - 1)
+	var n := int(counts[counts.size() - 1]) if mat else int(counts[density - 1])
+	var fade := EXPLORED_DIM.a if dim else 0.0
+	var trunk := Color.html(fp.vein).lerp(Color.BLACK, fade)
+	var tip := Color.html(fp.base).lerp(Color.BLACK, fade)
+	var light := Color.html(fp.highlight).lerp(Color.BLACK, fade)
 	var center := hex_to_pixel(cell)
-	var rx := _w * 0.5 * 0.8
-	var ry := _h * 0.5 * 0.7
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash(cell)
-	for s in strokes:
-		var start := Vector2.from_angle(rng.randf() * TAU) * rng.randf() * 0.3
-		var dir := Vector2.from_angle(rng.randf() * TAU)
-		var side := Vector2(-dir.y, dir.x)
-		var phase := rng.randf() * TAU
-		var pts := PackedVector2Array()
-		for i in 7:
-			var t := float(i) / 6.0 - 0.5
-			var p := start + dir * t + side * (0.15 * sin(t * TAU * 1.5 + phase))
-			if p.length() > 0.95:
-				p = p.normalized() * 0.95
-			pts.append(center + Vector2(p.x * rx, p.y * ry))
-		var up := PackedVector2Array()
-		for p in pts:
-			up.append(p + Vector2(0, -1))
-		draw_polyline(pts, vein, 2.0, true)
-		draw_polyline(up, light, 1.0, true)
-	return mat
+	var bases: Array[Vector2] = []
+	for i in n:
+		var u := lerpf(-0.55, 0.55, (i + 0.5) / n) + rng.randf_range(-0.08, 0.08)
+		var v := rng.randf_range(0.05, 0.55)
+		bases.append(center + Vector2(u * _w * 0.5, v * _h * 0.5))
+	bases.sort_custom(func(a: Vector2, b: Vector2) -> bool: return a.y < b.y)
+	var max_h := float(fp.tree_height) * _h
+	if mat:
+		# Low canopy: a band of small coral blobs linking the trunks, under the tree tips.
+		for i in int(fp.canopy_blobs):
+			var p := center + Vector2(rng.randf_range(-0.6, 0.6) * _w * 0.5, rng.randf_range(0.0, 0.5) * _h * 0.5 - max_h * 0.35)
+			draw_circle(p, rng.randf_range(2.0, 3.2), tip)
+			draw_circle(p + Vector2(-0.8, -0.8), 1.0, light)
+	for base in bases:
+		_draw_fungus_tree(base, rng, max_h * rng.randf_range(0.7, 1.0), trunk, tip, light)
+
+
+## One worm-like tree: a coiled trunk tapering from 3px to 1.5px, then 3 small coral blobs and
+## two short curling tendrils with knobbed ends at the top. All sizes are small so it never reads
+## as a cap.
+func _draw_fungus_tree(base: Vector2, rng: RandomNumberGenerator, height: float, trunk: Color, tip: Color, light: Color) -> void:
+	var phase := rng.randf() * TAU
+	var amp := rng.randf_range(1.5, 3.0)
+	var prev := base
+	var top := base
+	for i in range(1, 9):
+		var t := float(i) / 8.0
+		top = base + Vector2(amp * sin(t * TAU * 1.5 + phase), -height * t)
+		draw_line(prev, top, trunk, lerpf(3.0, 1.5, t))
+		draw_line(prev + Vector2(-1, 0), top + Vector2(-1, 0), light, 0.6)
+		prev = top
+	for s: float in [-1.0, 1.0]:
+		var q := top + Vector2(0, height * 0.25)
+		var pts := PackedVector2Array([q])
+		for k in 4:
+			var a := (0.6 + 0.5 * k) * s
+			q += Vector2(sin(a) * 2.5, -cos(a) * 2.0)
+			pts.append(q)
+		draw_polyline(pts, trunk, 1.2)
+		draw_circle(q, 1.4, tip)
+	for k in 3:
+		var p := top + Vector2(rng.randf_range(-2.5, 2.5), rng.randf_range(-2.0, 1.0))
+		draw_circle(p, rng.randf_range(1.6, 2.4), tip)
+	draw_circle(top + Vector2(-0.8, -1.2), 0.9, light)
 
 
 func _fungus_neighbors(cell: Vector2i) -> int:
