@@ -296,39 +296,52 @@ func _draw_counter(d: Division) -> void:
 	if d.nation == DivisionRoster.NATIVE_NATION:
 		_draw_native(d)
 		return
+	# Mockup M5: dark shield badge with a gold frame, a faction-color stripe across the top,
+	# the NATO symbol in gold and the size number under it.
 	var k := _k()
 	var c: Dictionary = palette.counter
-	var light := Color.html(c.frame)
-	var size := Vector2(40, 28) * k
-	var center := hex_to_pixel(d.hex) + Vector2(0, -4 * k)
+	var gold := Color.html(c.badge_symbol)
+	var size := Vector2(40, 34) * k
+	var center := hex_to_pixel(d.hex) + Vector2(0, -6 * k)
 	var rect := Rect2(center - size / 2, size)
-	var fill := counter_fill(d.nation)
+	var shoulder := rect.position.y + size.y * 0.72
+	var shield := PackedVector2Array([rect.position, Vector2(rect.end.x, rect.position.y),
+			Vector2(rect.end.x, shoulder), Vector2(center.x, rect.end.y), Vector2(rect.position.x, shoulder)])
+	var fill := Color.html(c.badge)
+	var stripe_color := Color.html(c.neutral_fill)
+	if d.nation >= 0 and not hidden_nations.has(d.nation):
+		stripe_color = _color_for(d.nation)
 	if d.moves_left <= 0:
 		fill.a = spent_alpha()
-	draw_rect(rect, fill)
-	draw_rect(rect, light, false, 2.0)
-	var inner := rect.grow(-4 * k)
+		stripe_color.a = spent_alpha()
+	draw_colored_polygon(shield, fill)
+	var sh := float(c.badge_stripe) * k
+	draw_rect(Rect2(rect.position, Vector2(size.x, sh)), stripe_color)
+	var loop := shield.duplicate()
+	loop.append(shield[0])
+	draw_polyline(loop, Color.html(c.badge_frame), float(c.badge_frame_width))
+	var inner := Rect2(rect.position.x + 9 * k, rect.position.y + sh + 3 * k, size.x - 18 * k, 11 * k)
+	var sc := inner.get_center()
 	match symbol_for(d.unit_type):
 		"x":
-			draw_line(inner.position, inner.end, light, 2.0)
-			draw_line(Vector2(inner.end.x, inner.position.y), Vector2(inner.position.x, inner.end.y), light, 2.0)
+			draw_line(inner.position, inner.end, gold, 2.0)
+			draw_line(Vector2(inner.end.x, inner.position.y), Vector2(inner.position.x, inner.end.y), gold, 2.0)
 		"ellipse":
 			var pts := PackedVector2Array()
 			for i in 33:
 				var a := TAU * i / 32.0
-				pts.append(center + Vector2(cos(a) * size.x * 0.35, sin(a) * size.y * 0.25))
-			draw_polyline(pts, light, 2.0)
+				pts.append(sc + Vector2(cos(a) * inner.size.x * 0.5, sin(a) * inner.size.y * 0.5))
+			draw_polyline(pts, gold, 2.0)
 		"dot":
-			draw_circle(center, 5 * k, light)
+			draw_circle(sc, 4 * k, gold)
 		"plus":
-			draw_line(Vector2(center.x - inner.size.x / 2, center.y), Vector2(center.x + inner.size.x / 2, center.y), light, 2.0)
-			draw_line(Vector2(center.x, inner.position.y), Vector2(center.x, inner.end.y), light, 2.0)
+			draw_line(Vector2(inner.position.x, sc.y), Vector2(inner.end.x, sc.y), gold, 2.0)
+			draw_line(Vector2(sc.x, inner.position.y), Vector2(sc.x, inner.end.y), gold, 2.0)
 	var font := ThemeDB.fallback_font
-	var fs := int(round(10 * k))
+	var fs := int(round(8 * k))
 	var tw := font.get_string_size("XX", HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-	var tp := Vector2(center.x - tw / 2, rect.position.y - 2 * k)
-	draw_string_outline(font, tp, "XX", HORIZONTAL_ALIGNMENT_LEFT, -1, fs, 3, Color.html(c.size_outline))
-	draw_string(font, tp, "XX", HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color.html(c.size_text))
+	var tp := Vector2(center.x - tw / 2, inner.end.y + 2 * k + fs * 0.8)
+	draw_string(font, tp, "XX", HORIZONTAL_ALIGNMENT_LEFT, -1, fs, gold)
 	var fr := bar_fractions(d)
 	var bar := Vector2(40 * k, 3 * k)
 	var y := rect.end.y + 1 * k
