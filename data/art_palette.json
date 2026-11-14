@@ -53,8 +53,9 @@
 		"base": "#B0558F",
 		"vein": "#6E2F6B",
 		"highlight": "#E07AB8",
-		"alpha_by_density": [0.25, 0.40, 0.55, 0.70],
-		"mat_alpha": 0.85
+		"trees_by_density": [1, 2, 3, 5],
+		"tree_height": 0.38,
+		"canopy_blobs": 9
 	},
 	"highlight": {
 		"reach": "#5FD3C0",
