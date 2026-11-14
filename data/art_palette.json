@@ -76,7 +76,12 @@
 		"str": "#C9B37E",
 		"track": "#0D1614",
 		"selected": "#5FD3C0",
-		"spent_alpha": 0.55
+		"spent_alpha": 0.55,
+		"badge": "#15211E",
+		"badge_frame": "#E6B85C",
+		"badge_frame_width": 2.0,
+		"badge_symbol": "#E6B85C",
+		"badge_stripe": 6
 	},
 	"city": {
 		"fill": "#1A1A1A",
