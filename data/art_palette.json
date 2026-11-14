@@ -76,14 +76,22 @@
 		"str": "#C9B37E",
 		"track": "#0D1614",
 		"selected": "#5FD3C0",
-		"spent_alpha": 0.55
+		"spent_alpha": 0.55,
+		"badge": "#15211E",
+		"badge_frame": "#E6B85C",
+		"badge_frame_width": 2.0,
+		"badge_symbol": "#E6B85C",
+		"badge_stripe": 6
 	},
 	"city": {
 		"fill": "#1A1A1A",
 		"ring": "#E8E2D0",
 		"star": "#C9B37E",
 		"label": "#E8E2D0",
-		"plate": "#15211E"
+		"plate": "#15211E",
+		"plate_text": "#E6B85C",
+		"plate_border_width": 1.0,
+		"remembered_alpha": 0.6
 	},
 	"ui": {
 		"frame": "#070C0B",
