@@ -104,7 +104,7 @@ func _draw() -> void:
 			if not seen.is_empty():
 				city_at[cell] = {"id": seen.id, "nation": seen.nation, "cell": cell,
 						"name": hex_map.city_by_id(int(seen.id)).get("name", "City %d" % int(seen.id)),
-						"population": int(seen.get("population", 0)), "remembered": true}
+						"remembered": true}
 	var units_at := {}
 	if roster:
 		for d in roster.divisions:
