@@ -36,6 +36,11 @@ var player_nation := 0
 const ORDER_COLOR := Color(1, 1, 1, 0.9)
 const ATTACK_COLOR := Color(0.9, 0.1, 0.1, 0.95)
 const CLASH_COLOR := Color(1, 0.85, 0.0, 1.0)
+## Mockup M8 ground texture: speckle dots per top face, shade offsets from the terrain color.
+const GROUND_SPECKLE := 14
+const GROUND_SHADE := 0.10
+const GROUND_PEBBLE := ["plains", "forest", "scorched"]
+const GROUND_CRACK := ["hills", "mountains"]
 
 
 func _init() -> void:
@@ -131,6 +136,7 @@ func _draw() -> void:
 				_draw_skirt(cell, sk)
 			var corners := _corners(hex_to_pixel(cell))
 			draw_colored_polygon(corners, terrain_color(cell))
+			_draw_ground(cell, corners)
 			var owner := owner_of(cell)
 			if owner >= 0:
 				draw_colored_polygon(corners, Color(_color_for(owner), float(palette.tint_alpha)))
@@ -231,6 +237,56 @@ func _draw_skirt(cell: Vector2i, sk: Array) -> void:
 		var top := p + Vector2(0, rng.randf_range(1.0, drop * 0.3))
 		var bottom := p + Vector2(rng.randf_range(-1.0, 1.0), drop - band - rng.randf_range(0.0, drop * 0.2))
 		draw_line(top, bottom, dark if rng.randf() < 0.7 else light, 1.0)
+
+
+
+
+## Mockup M8: subtle ground texture on a land top face, seeded from the cell so it is the
+## same on every redraw and after save/load. 1-2px speckle in a slightly darker and lighter
+## shade of the terrain color; rust terrain adds pebbles, ochre and highland add short cracks.
+func _draw_ground(cell: Vector2i, corners: PackedVector2Array) -> void:
+	var tname := hex_map.terrain_name(cell)
+	if is_water(cell) or tname == "crater":
+		return
+	var base := terrain_color(cell)
+	var dark := base.darkened(GROUND_SHADE)
+	var light := base.lightened(GROUND_SHADE)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(cell) ^ 0x6d38
+	var center := hex_to_pixel(cell)
+	for i in GROUND_SPECKLE:
+		var s := 1.0 if rng.randf() < 0.6 else 2.0
+		draw_rect(Rect2(_ground_point(rng, center, corners), Vector2(s, s)), dark if rng.randf() < 0.6 else light)
+	if tname in GROUND_PEBBLE:
+		for i in 3:
+			var p := _ground_point(rng, center, corners)
+			draw_circle(p, rng.randf_range(1.5, 2.2), dark)
+			draw_rect(Rect2(p + Vector2(-1, -1), Vector2(1, 1)), light)
+	elif tname in GROUND_CRACK:
+		for i in 2:
+			var p := _ground_point(rng, center, corners)
+			var pts := PackedVector2Array([p])
+			var dir := Vector2.from_angle(rng.randf() * TAU) * Vector2(1.0, 0.5)
+			for j in 3:
+				dir = dir.rotated(rng.randf_range(-0.7, 0.7))
+				p += dir.normalized() * Vector2(1.0, 0.5) * rng.randf_range(3.0, 5.0)
+				pts.append(p)
+			var lit := PackedVector2Array()
+			for q in pts:
+				lit.append(q + Vector2(0, 1))
+			draw_polyline(lit, light, 1.0)
+			draw_polyline(pts, dark, 1.0)
+
+
+## A seeded point inside the top face, kept off the edges (70% toward a random corner pair).
+func _ground_point(rng: RandomNumberGenerator, center: Vector2, corners: PackedVector2Array) -> Vector2:
+	var i := rng.randi() % 6
+	var u := rng.randf()
+	var v := rng.randf()
+	if u + v > 1.0:
+		u = 1.0 - u
+		v = 1.0 - v
+	return center + ((corners[i] - center) * u + (corners[(i + 1) % 6] - center) * v) * 0.7
 
 
 ## Arrows for the player's pending orders. Orders ending on the same hex are
