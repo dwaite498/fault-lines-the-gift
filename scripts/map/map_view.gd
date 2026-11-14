@@ -128,7 +128,7 @@ func _draw() -> void:
 				draw_colored_polygon(black, Color.BLACK)
 				continue
 			for sk in skirt_polys(cell):
-				draw_colored_polygon(sk[0], sk[1])
+				_draw_skirt(cell, sk)
 			var corners := _corners(hex_to_pixel(cell))
 			draw_colored_polygon(corners, terrain_color(cell))
 			var owner := owner_of(cell)
@@ -178,7 +178,7 @@ func _draw() -> void:
 
 ## Skirts on the two front-facing edges of a pointy-top hex (SW and SE), down to the
 ## neighbor's height (or the lowest level at the map edge). Each is [polygon, color],
-## darkened on the left and right by palette.iso.skirt_dark.
+## darkened on the left and right by palette.iso.skirt_dark, plus the drop in px.
 func skirt_polys(cell: Vector2i) -> Array:
 	var out := []
 	if is_water(cell):
@@ -200,8 +200,37 @@ func skirt_polys(cell: Vector2i) -> Array:
 		var a: Vector2 = cs[edge[0]]
 		var b: Vector2 = cs[edge[1]]
 		out.append([PackedVector2Array([a, b, b + Vector2(0, drop), a + Vector2(0, drop)]),
-				base.darkened(float(_skirt_dark[edge[3]]))])
+				base.darkened(float(_skirt_dark[edge[3]])), drop])
 	return out
+
+
+## Draws one skirt from skirt_polys as rock (M7): a top-to-bottom dark gradient, a darker
+## base band, and vertical striations seeded from the cell and edge so they never move.
+## Steps shorter than palette.cliff.striation_min_drop levels get no striations. No top lip.
+func _draw_skirt(cell: Vector2i, sk: Array) -> void:
+	var cl: Dictionary = palette.cliff
+	var poly: PackedVector2Array = sk[0]
+	var col: Color = sk[1]
+	var drop: float = sk[2]
+	var low := col.darkened(float(cl.gradient_dark))
+	draw_polygon(poly, PackedColorArray([col, col, low, low]))
+	var band := minf(float(cl.band_px), drop * 0.3)
+	var a := poly[0]
+	var b := poly[1]
+	var dn := Vector2(0, drop - band)
+	draw_colored_polygon(PackedVector2Array([a + dn, b + dn, poly[2], poly[3]]), col.darkened(float(cl.band_dark)))
+	if drop < float(cl.striation_min_drop) * _step:
+		return
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash([cell, a.x < b.x and a.y < b.y])
+	var count := int(a.distance_to(b) / float(cl.striation_spacing))
+	var dark := col.darkened(float(cl.striation_dark))
+	var light := col.lightened(float(cl.striation_light))
+	for i in count:
+		var p := a.lerp(b, (i + rng.randf_range(0.2, 0.8)) / count)
+		var top := p + Vector2(0, rng.randf_range(1.0, drop * 0.3))
+		var bottom := p + Vector2(rng.randf_range(-1.0, 1.0), drop - band - rng.randf_range(0.0, drop * 0.2))
+		draw_line(top, bottom, dark if rng.randf() < 0.7 else light, 1.0)
 
 
 ## Arrows for the player's pending orders. Orders ending on the same hex are
