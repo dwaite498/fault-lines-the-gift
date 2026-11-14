@@ -36,6 +36,13 @@ var player_nation := 0
 const ORDER_COLOR := Color(1, 1, 1, 0.9)
 const ATTACK_COLOR := Color(0.9, 0.1, 0.1, 0.95)
 const CLASH_COLOR := Color(1, 0.85, 0.0, 1.0)
+## Mockup M8 ground texture: speckle dots per top face, shade offsets from the terrain color.
+const GROUND_SPECKLE := 14
+const GROUND_SHADE := 0.10
+const GROUND_PEBBLE := ["plains", "forest", "scorched"]
+const GROUND_CRACK := ["hills", "mountains"]
+
+
 ## Mockup M10 crater pit: outer wall color -> deep center color, rim ring and lit far wall.
 const CRATER_OUTER := Color("#2A1E1E")
 const CRATER_INNER := Color("#08222E")
@@ -133,9 +140,10 @@ func _draw() -> void:
 				draw_colored_polygon(black, Color.BLACK)
 				continue
 			for sk in skirt_polys(cell):
-				draw_colored_polygon(sk[0], sk[1])
+				_draw_skirt(cell, sk)
 			var corners := _corners(hex_to_pixel(cell))
 			draw_colored_polygon(corners, terrain_color(cell))
+			_draw_ground(cell, corners)
 			if hex_map.terrain_name(cell) == "crater":
 				_draw_crater(cell)
 			var owner := owner_of(cell)
@@ -185,7 +193,7 @@ func _draw() -> void:
 
 ## Skirts on the two front-facing edges of a pointy-top hex (SW and SE), down to the
 ## neighbor's height (or the lowest level at the map edge). Each is [polygon, color],
-## darkened on the left and right by palette.iso.skirt_dark.
+## darkened on the left and right by palette.iso.skirt_dark, plus the drop in px.
 func skirt_polys(cell: Vector2i) -> Array:
 	var out := []
 	if is_water(cell):
@@ -207,8 +215,89 @@ func skirt_polys(cell: Vector2i) -> Array:
 		var a: Vector2 = cs[edge[0]]
 		var b: Vector2 = cs[edge[1]]
 		out.append([PackedVector2Array([a, b, b + Vector2(0, drop), a + Vector2(0, drop)]),
-				base.darkened(float(_skirt_dark[edge[3]]))])
+				base.darkened(float(_skirt_dark[edge[3]])), drop])
 	return out
+
+
+## Draws one skirt from skirt_polys as rock (M7): a top-to-bottom dark gradient, a darker
+## base band, and vertical striations seeded from the cell and edge so they never move.
+## Steps shorter than palette.cliff.striation_min_drop levels get no striations. No top lip.
+func _draw_skirt(cell: Vector2i, sk: Array) -> void:
+	var cl: Dictionary = palette.cliff
+	var poly: PackedVector2Array = sk[0]
+	var col: Color = sk[1]
+	var drop: float = sk[2]
+	var low := col.darkened(float(cl.gradient_dark))
+	draw_polygon(poly, PackedColorArray([col, col, low, low]))
+	var band := minf(float(cl.band_px), drop * 0.3)
+	var a := poly[0]
+	var b := poly[1]
+	var dn := Vector2(0, drop - band)
+	draw_colored_polygon(PackedVector2Array([a + dn, b + dn, poly[2], poly[3]]), col.darkened(float(cl.band_dark)))
+	if drop < float(cl.striation_min_drop) * _step:
+		return
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash([cell, a.x < b.x and a.y < b.y])
+	var count := int(a.distance_to(b) / float(cl.striation_spacing))
+	var dark := col.darkened(float(cl.striation_dark))
+	var light := col.lightened(float(cl.striation_light))
+	for i in count:
+		var p := a.lerp(b, (i + rng.randf_range(0.2, 0.8)) / count)
+		var top := p + Vector2(0, rng.randf_range(1.0, drop * 0.3))
+		var bottom := p + Vector2(rng.randf_range(-1.0, 1.0), drop - band - rng.randf_range(0.0, drop * 0.2))
+		draw_line(top, bottom, dark if rng.randf() < 0.7 else light, 1.0)
+
+
+
+
+## Mockup M8: subtle ground texture on a land top face, seeded from the cell so it is the
+## same on every redraw and after save/load. 1-2px speckle in a slightly darker and lighter
+## shade of the terrain color; rust terrain adds pebbles, ochre and highland add short cracks.
+func _draw_ground(cell: Vector2i, corners: PackedVector2Array) -> void:
+	var tname := hex_map.terrain_name(cell)
+	if is_water(cell) or tname == "crater":
+		return
+	var base := terrain_color(cell)
+	var dark := base.darkened(GROUND_SHADE)
+	var light := base.lightened(GROUND_SHADE)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(cell) ^ 0x6d38
+	var center := hex_to_pixel(cell)
+	for i in GROUND_SPECKLE:
+		var s := 1.0 if rng.randf() < 0.6 else 2.0
+		draw_rect(Rect2(_ground_point(rng, center, corners), Vector2(s, s)), dark if rng.randf() < 0.6 else light)
+	if tname in GROUND_PEBBLE:
+		for i in 3:
+			var p := _ground_point(rng, center, corners)
+			draw_circle(p, rng.randf_range(1.5, 2.2), dark)
+			draw_rect(Rect2(p + Vector2(-1, -1), Vector2(1, 1)), light)
+	elif tname in GROUND_CRACK:
+		for i in 2:
+			var p := _ground_point(rng, center, corners)
+			var pts := PackedVector2Array([p])
+			var dir := Vector2.from_angle(rng.randf() * TAU) * Vector2(1.0, 0.5)
+			for j in 3:
+				dir = dir.rotated(rng.randf_range(-0.7, 0.7))
+				p += dir.normalized() * Vector2(1.0, 0.5) * rng.randf_range(3.0, 5.0)
+				pts.append(p)
+			var lit := PackedVector2Array()
+			for q in pts:
+				lit.append(q + Vector2(0, 1))
+			draw_polyline(lit, light, 1.0)
+			draw_polyline(pts, dark, 1.0)
+
+
+## A seeded point inside the top face, kept off the edges (70% toward a random corner pair).
+func _ground_point(rng: RandomNumberGenerator, center: Vector2, corners: PackedVector2Array) -> Vector2:
+	var i := rng.randi() % 6
+	var u := rng.randf()
+	var v := rng.randf()
+	if u + v > 1.0:
+		u = 1.0 - u
+		v = 1.0 - v
+	return center + ((corners[i] - center) * u + (corners[(i + 1) % 6] - center) * v) * 0.7
+
+
 
 
 ## Mockup M10: the crater top face as a pit. Concentric hexes shrink from the rim toward the
