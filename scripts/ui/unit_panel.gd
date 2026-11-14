@@ -36,6 +36,10 @@ var _map: HexMap
 
 func _init() -> void:
 	# Right side panel, 240 wide, full height under the 32px top bar.
+	# Mockup M9: beveled frame (theme BevelPanel: #070C0B border, light #4F6B62 top-left lip).
+	panel.theme_type_variation = &"BevelPanel"
+	panel.draw.connect(draw_bevel.bind(panel))
+	label.theme_type_variation = &"DataValue"
 	add_child(panel)
 	var col := VBoxContainer.new()
 	col.position = Vector2(8, 8)
@@ -103,10 +107,10 @@ func refresh(d: Division, hex_map: HexMap, actions: Array[String] = [], mode := 
 	var penalty := 1.0 - DivisionRoster.flank_mult_for(d.attacked_from.size(), flank_per_hex, flank_min_mult)
 	var dim: String = _pal.ui.dim
 	var lines: Array[String] = [
-		"[b]HEX[/b]  (%d,%d) %s, def x%.2f" % [d.hex.x, d.hex.y, hex_map.terrain_name(d.hex), float(hex_map.terrain_of(d.hex).defense_mult)],
+		"[b]HEX[/b]  [color=%s](%d,%d) %s, def x%.2f[/color]" % [_pal.ui.accent, d.hex.x, d.hex.y, hex_map.terrain_name(d.hex), float(hex_map.terrain_of(d.hex).defense_mult)],
 		"[color=%s]Moves %d/%d  Fortify %d/%d  Atk %.0f  Def %.0f%s[/color]" % [dim, d.moves_left, d.move,
 				d.fortify_level, max_fortify, d.attack, d.defense, ("  Flanked -%d%%" % roundi(penalty * 100.0)) if penalty > 0.0 else ""],
-		"[b]SUPPLY[/b]  " + ("OK" if d.supplied else "[color=%s]OUT[/color]" % _pal.ui.supply_out),
+		"[b]SUPPLY[/b]  " + ("[color=%s]OK[/color]" % _pal.ui.accent if d.supplied else "[color=%s]OUT[/color]" % _pal.ui.supply_out),
 	]
 	details.text = "\n".join(lines)
 	var o: Array[String] = []
@@ -129,9 +133,15 @@ func refresh(d: Division, hex_map: HexMap, actions: Array[String] = [], mode := 
 func _header(text: String) -> Label:
 	var h := Label.new()
 	h.text = text.to_upper()
-	h.add_theme_font_size_override("font_size", 13)
-	h.add_theme_color_override("font_color", Color.html(_pal.ui.accent))
+	h.theme_type_variation = &"SectionHeader"
 	return h
+
+
+## Mockup M9 bevel: the light #4F6B62 top and left edges over the BevelPanel's dark border.
+static func draw_bevel(p: Control) -> void:
+	var light := Color.html("#4F6B62")
+	p.draw_rect(Rect2(0, 0, p.size.x, 2), light)
+	p.draw_rect(Rect2(0, 0, 2, p.size.y), light)
 
 func _draw_bars() -> void:
 	if _shown == null:
@@ -145,7 +155,7 @@ func _draw_bars() -> void:
 		var track := Rect2(Vector2(32, y), Vector2(WIDTH - 16 - 32 - 40, 6))
 		bars.draw_rect(track, Color.html(c.track))
 		bars.draw_rect(Rect2(track.position, Vector2(track.size.x * fr[i], 6)), Color.html(c.org if i == 0 else c.str))
-		bars.draw_string(font, Vector2(track.end.x + 4, y + 7), "%d%%" % roundi(fr[i] * 100.0), HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color.html(_pal.ui.text))
+		bars.draw_string(font, Vector2(track.end.x + 4, y + 7), "%d%%" % roundi(fr[i] * 100.0), HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color.html(_pal.ui.accent))
 
 ## Preview of d's org and strength change at the next end turn, using the same
 ## rules as DivisionRoster.end_turn (supply drain or morale recovery) and
