@@ -1,4 +1,4 @@
-[gd_resource type="Theme" load_steps=8 format=3]
+[gd_resource type="Theme" load_steps=9 format=3]
 
 [sub_resource type="StyleBoxFlat" id="panel"]
 content_margin_left = 8.0
@@ -57,6 +57,18 @@ bg_color = Color(0.05098039, 0.08627451, 0.07843137, 1)
 border_width_bottom = 1
 border_color = Color(0.3098039, 0.4196078, 0.3843137, 1)
 
+[sub_resource type="StyleBoxFlat" id="bevel"]
+content_margin_left = 8.0
+content_margin_top = 8.0
+content_margin_right = 8.0
+content_margin_bottom = 8.0
+bg_color = Color(0.08235294, 0.1294118, 0.1176471, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.02745098, 0.04705882, 0.04313726, 1)
+
 [sub_resource type="StyleBoxLine" id="sep_h"]
 color = Color(0.372549, 0.827451, 0.7529412, 0.25)
 thickness = 1
@@ -83,5 +95,12 @@ RichTextLabel/colors/default_color = Color(0.9019608, 0.7215686, 0.3607843, 1)
 HSeparator/constants/separation = 9
 HSeparator/styles/separator = SubResource("sep_h")
 VSeparator/styles/separator = SubResource("sep_v")
+BevelPanel/base_type = &"Panel"
+BevelPanel/styles/panel = SubResource("bevel")
+SectionHeader/base_type = &"Label"
+SectionHeader/colors/font_color = Color(0.9019608, 0.7215686, 0.3607843, 1)
+SectionHeader/font_sizes/font_size = 13
+DataValue/base_type = &"Label"
+DataValue/colors/font_color = Color(0.372549, 0.827451, 0.7529412, 1)
 TopBar/base_type = &"Panel"
 TopBar/styles/panel = SubResource("bar")

@@ -7,12 +7,21 @@ var panel := Panel.new()
 var label := Label.new()
 var swatch := MapView.make_swatch()
 var factions: FactionRoster
+## Mockup M9: the faction/turn line is an amber header; below it keys (amber) and values (teal).
+var header := Label.new()
+var values := Label.new()
 
 func _init() -> void:
-	label.position = Vector2(22, 6)
+	panel.theme_type_variation = &"BevelPanel"
+	panel.draw.connect(UnitPanel.draw_bevel.bind(panel))
+	header.theme_type_variation = &"SectionHeader"
+	values.theme_type_variation = &"DataValue"
+	header.position = Vector2(22, 6)
 	swatch.position = Vector2(8, 10)
 	panel.add_child(swatch)
+	panel.add_child(header)
 	panel.add_child(label)
+	panel.add_child(values)
 	add_child(panel)
 
 static func projected_income(nation: int, hex_map: HexMap, economy: NationEconomy) -> Dictionary:
@@ -50,7 +59,19 @@ func refresh(nation: int, turn: int, hex_map: HexMap, economy: NationEconomy) ->
 		lines.append("Closest to falling: eliminated")
 	else:
 		lines.append("Closest to falling: %d %s left" % [city_count, "city" if city_count == 1 else "cities"])
-	label.text = "\n".join(lines)
+	header.text = lines[0].to_upper()
+	var keys: Array[String] = []
+	var vals: Array[String] = []
+	for line: String in lines.slice(1):
+		var cut: int = line.find(": ")
+		keys.append(line.substr(0, cut + 1) if cut >= 0 else "")
+		vals.append(line.substr(cut + 2) if cut >= 0 else line.strip_edges())
+	label.text = "\n".join(keys)
+	values.text = "\n".join(vals)
 	swatch.color = factions.color_of(nation)
-	panel.size = label.get_minimum_size() + Vector2(30, 12)
+	var top := 6.0 + header.get_minimum_size().y + 2.0
+	label.position = Vector2(8, top)
+	values.position = Vector2(8 + label.get_minimum_size().x + 6, top)
+	var body := Vector2(label.get_minimum_size().x + 6 + values.get_minimum_size().x, maxf(label.get_minimum_size().y, values.get_minimum_size().y))
+	panel.size = Vector2(maxf(22 + header.get_minimum_size().x, 8 + body.x) + 10, top + body.y + 8)
 	panel.position = Vector2(get_viewport().get_visible_rect().size.x - SIDE_WIDTH - panel.size.x - 8, 40)
