@@ -103,7 +103,8 @@ func _draw() -> void:
 			var seen: Dictionary = fog.last_seen(player_nation, cell).get("city", {})
 			if not seen.is_empty():
 				city_at[cell] = {"id": seen.id, "nation": seen.nation, "cell": cell,
-						"name": hex_map.city_by_id(int(seen.id)).get("name", "City %d" % int(seen.id))}
+						"name": hex_map.city_by_id(int(seen.id)).get("name", "City %d" % int(seen.id)),
+						"population": int(seen.get("population", 0)), "remembered": true}
 	var units_at := {}
 	if roster:
 		for d in roster.divisions:
@@ -113,7 +114,9 @@ func _draw() -> void:
 				units_at[d.hex] = []
 			units_at[d.hex].append(d)
 	# Back to front, row by row. Each row's decor is drawn right after its tiles, so a
-	# taller tile in a later row hides what stands behind it.
+	# taller tile in a later row hides what stands behind it. City nameplates (M6) hang below
+	# their hex, so each row's plates are drawn after the next row's tiles, under its units.
+	var plates := []
 	for y in hex_map.height:
 		for x in hex_map.width:
 			var cell := Vector2i(x, y)
@@ -145,13 +148,19 @@ func _draw() -> void:
 			# Dashed border in the nation color on edges between different owners.
 			for other in edges.get(cell, []):
 				_draw_border(cell, other, _color_for(owner_of(cell)))
+		for city in plates:
+			_draw_city_plate(city)
+		plates = []
 		for x in hex_map.width:
 			var cell := Vector2i(x, y)
 			if city_at.has(cell):
 				_draw_city(city_at[cell])
+				plates.append(city_at[cell])
 		for x in hex_map.width:
 			for d in units_at.get(Vector2i(x, y), []):
 				_draw_counter(d)
+	for city in plates:
+		_draw_city_plate(city)
 	var hl: Dictionary = palette.highlight
 	var reach_color := Color(Color.html(hl.reach), float(hl.reach_alpha))
 	var blocked_color := Color(Color.html(hl.blocked), float(hl.blocked_alpha))
@@ -387,18 +396,49 @@ func _draw_city(city: Dictionary) -> void:
 			var a := -PI / 2 + PI * i / 5.0
 			star.append(center + Vector2(cos(a), sin(a)) * r)
 		draw_colored_polygon(star, Color.html(c.star))
-	var label := hex_map.city_label(city).to_upper()
+
+
+## Mockup M6 nameplate: dark plate, 1px faction-color border, a faction-color glyph block on
+## the left, NAME and POP N (thousands) in two amber lines, centered under the dome.
+## A remembered (fogged) city shows its last-seen plate, dimmed.
+func _draw_city_plate(city: Dictionary) -> void:
+	var k := _k()
+	var c: Dictionary = palette.city
+	var center := hex_to_pixel(city.cell)
+	var half := 8 * k * CityArt.tier_scale(hex_map.city_rules.tiers, hex_map.tier(city))
+	var rect := Rect2(center - Vector2(half, half), Vector2(half, half) * 2)
+	var dim := float(c.remembered_alpha) if city.get("remembered", false) else 1.0
+	var faction := Color.html(c.ring)
+	if city.nation >= 0 and not hidden_nations.has(city.nation):
+		faction = _color_for(city.nation)
+	faction.a = dim
+	var text_color := Color(Color.html(c.plate_text), dim)
+	var city_name := str(city.get("name", "City %d" % int(city.id))).to_upper()
+	var pop := "POP %dk" % roundi(int(city.get("population", 0)) / 1000.0)
 	var font := ThemeDB.fallback_font
-	var fs := int(round(11 * k))
-	var sz := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs)
-	# Below the unit bars when a division stands here, so the label stays visible.
+	var fs := int(round(9 * k))
+	var fs2 := int(round(8 * k))
+	var name_w := font.get_string_size(city_name, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+	var pop_w := font.get_string_size(pop, HORIZONTAL_ALIGNMENT_LEFT, -1, fs2).x
+	var pad := 3 * k
+	var glyph_w := 5 * k
+	var text_w := maxf(name_w, pop_w)
+	var line1 := font.get_height(fs)
+	var line2 := font.get_height(fs2)
+	var size := Vector2(pad + glyph_w + pad + text_w + pad, pad + line1 + line2 + pad * 0.5)
+	# Below the unit bars when a division stands here, so the plate stays visible.
 	var top := rect.end.y + 4 * k
 	if roster and roster.division_at(city.cell):
 		top = center.y + (-4 + 14 + 8) * k + 4 * k
-	var plate := Rect2(Vector2(center.x - sz.x / 2 - 3 * k, top), Vector2(sz.x + 6 * k, sz.y))
-	draw_rect(plate, Color.html(c.plate))
-	draw_string(font, Vector2(plate.position.x + 3 * k, top + font.get_ascent(fs)), label,
-			HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color.html(c.label))
+	var plate := Rect2(Vector2(center.x - size.x / 2, top), size)
+	draw_rect(plate, Color(Color.html(c.plate), dim))
+	draw_rect(plate, faction, false, float(c.plate_border_width))
+	draw_rect(Rect2(plate.position + Vector2(pad, pad), Vector2(glyph_w, size.y - pad * 2)), faction)
+	var tx := plate.position.x + pad + glyph_w + pad
+	draw_string(font, Vector2(tx + (text_w - name_w) / 2, top + pad + font.get_ascent(fs)), city_name,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, fs, text_color)
+	draw_string(font, Vector2(tx + (text_w - pop_w) / 2, top + pad + line1 + font.get_ascent(fs2)), pop,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, fs2, text_color)
 
 
 ## The world rect the camera may show: every hex including raised faces and skirts.

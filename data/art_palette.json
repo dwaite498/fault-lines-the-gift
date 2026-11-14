@@ -79,7 +79,10 @@
 		"ring": "#E8E2D0",
 		"star": "#C9B37E",
 		"label": "#E8E2D0",
-		"plate": "#15211E"
+		"plate": "#15211E",
+		"plate_text": "#E6B85C",
+		"plate_border_width": 1.0,
+		"remembered_alpha": 0.6
 	},
 	"ui": {
 		"frame": "#070C0B",
