@@ -33,6 +33,8 @@ var highlights: Array[Vector2i] = []
 ## Attack targets blocked by the frontage cap (Task 46), drawn greyed and not clickable.
 var blocked_highlights: Array[Vector2i] = []
 var player_nation := 0
+## City sprites by CityArt key (M12), kept referenced so the canvas can draw them.
+var _city_textures := {}
 const ORDER_COLOR := Color(1, 1, 1, 0.9)
 const ATTACK_COLOR := Color(0.9, 0.1, 0.1, 0.95)
 const CLASH_COLOR := Color(1, 0.85, 0.0, 1.0)
@@ -127,7 +129,7 @@ func _draw() -> void:
 			units_at[d.hex].append(d)
 	# Back to front, row by row. Each row's decor is drawn right after its tiles, so a
 	# taller tile in a later row hides what stands behind it. City nameplates (M6) hang below
-	# their hex, so each row's plates are drawn after the next row's tiles, under its units.
+	# their hex, so each row's plates are drawn after the next row's tiles. Units are drawn last (M12b).
 	var plates := []
 	for y in hex_map.height:
 		for x in hex_map.width:
@@ -173,11 +175,14 @@ func _draw() -> void:
 			if city_at.has(cell):
 				_draw_city(city_at[cell])
 				plates.append(city_at[cell])
+	for city in plates:
+		_draw_city_plate(city)
+	# M12b: unit badges (and the selected ring) in one later pass, back to front, above every
+	# tile, peak, city sprite and nameplate, so a tall dome in front never covers a unit behind it.
+	for y in hex_map.height:
 		for x in hex_map.width:
 			for d in units_at.get(Vector2i(x, y), []):
 				_draw_counter(d)
-	for city in plates:
-		_draw_city_plate(city)
 	var hl: Dictionary = palette.highlight
 	var reach_color := Color(Color.html(hl.reach), float(hl.reach_alpha))
 	var blocked_color := Color(Color.html(hl.blocked), float(hl.blocked_alpha))
@@ -522,8 +527,13 @@ func _draw_city(city: Dictionary) -> void:
 	var rect := Rect2(center - Vector2(half, half), Vector2(half, half) * 2)
 	var key := CityArt.resolve_key(str(art.get("style", "generic")), tier)
 	if key != "":
-		var tex: Texture2D = load(CityArt.ART_DIR + key + ".png")
-		draw_texture_rect(tex, rect, false)
+		# Mockup M12: native size (sprites are pre-sized per tier), bottom-center on the footprint.
+		# Held in _city_textures: a texture loaded into a local is freed after _draw, so it drew white.
+		if not _city_textures.has(key):
+			_city_textures[key] = load(CityArt.ART_DIR + key + ".png")
+		var tex: Texture2D = _city_textures[key]
+		var size := tex.get_size()
+		draw_texture(tex, center + Vector2(-size.x * 0.5, half - size.y))
 	else:
 		_draw_dome(center, half, art.get("sea", false), c)
 	if city.nation >= 0 and is_capital(city):
