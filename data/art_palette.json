@@ -49,6 +49,12 @@
 		"halo_alpha": 0.3,
 		"halo_width": 6.0
 	},
+	"peaks": {
+		"lit": "#E8CF94",
+		"shade": "#9A7A48",
+		"ridge": "#5C4630",
+		"max_steps": 1.5
+	},
 	"fungus": {
 		"base": "#B0558F",
 		"vein": "#6E2F6B",
