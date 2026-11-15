@@ -299,7 +299,8 @@ func _draw_ledge_rims(cell: Vector2i, corners: PackedVector2Array) -> void:
 	if not hex_map.ramps_on or is_water(cell):
 		return
 	var center := hex_to_pixel(cell)
-	var color := terrain_color(cell).darkened(float(palette.cliff.band_dark))
+	var color := Color(palette.ramp.ledge_rim_color) if palette.ramp.has("ledge_rim_color") \
+			else terrain_color(cell).darkened(float(palette.cliff.band_dark))
 	var px := float(palette.ramp.ledge_rim_px)
 	for i in ledge_rim_edges(cell):
 		var a := corners[i]
