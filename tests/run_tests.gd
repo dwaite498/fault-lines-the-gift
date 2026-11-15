@@ -58,6 +58,7 @@ func _initialize() -> void:
 	test_frontage()
 	test_harrier()
 	test_ramps()
+	test_ramp_render()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -3338,3 +3339,57 @@ func test_ramps() -> void:
 	SaveGame.restore(old, g3.map, g3.roster, g3.eco)
 	ok(g3.map.ramp_edges == saved, "a save from before R1 keeps the ramps regenerated from the config")
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+
+
+## R2 (PM decisions Nov 15): ramp faces, hidden-edge ledge rims, the HEX ledge list and the
+## AI fallback around a ledge-walled city.
+func test_ramp_render() -> void:
+	ok(HexMap.edge_dir_name(Vector2i(2, 1), Vector2i(3, 0)) == "NE" and HexMap.edge_dir_name(Vector2i(2, 1), Vector2i(2, 0)) == "NW"
+			and HexMap.edge_dir_name(Vector2i(2, 2), Vector2i(2, 1)) == "NE" and HexMap.edge_dir_name(Vector2i(2, 2), Vector2i(1, 3)) == "SW"
+			and HexMap.edge_dir_name(Vector2i(2, 2), Vector2i(1, 2)) == "W", "edge compass names on odd and even rows")
+	var lm := ramp_map(2, [2, 1], 0.0)
+	ok(lm.ledge_dirs(Vector2i(0, 0)) == ["E"] and lm.ledge_dirs(Vector2i(1, 0)) == ["W"], "the HEX ledge list names the ledge edge from both sides")
+	ok(ramp_map(2, [2, 1], 1.0).ledge_dirs(Vector2i(0, 0)).is_empty(), "a ramp is not listed as a ledge")
+	var view := MapView.new()
+	view.hex_map = lm
+	ok(view.ledge_rim_edges(Vector2i(0, 0)) == [0] and view.ledge_rim_edges(Vector2i(1, 0)).is_empty(), "a same-row ledge gets a rim on the higher hex's E edge only")
+	# Back edge: the higher hex is in the front row, the lower one behind it (NE of (0,1) is (1,0)).
+	var bm := make_map(2, 2)
+	bm.elevation[Vector2i(0, 1)] = 2
+	bm.elevation_rules = terrain_cfg.elevation.duplicate()
+	bm.elevation_rules["ramp_chance"] = 0.0
+	bm.ramps_on = true
+	view.hex_map = bm
+	var back := view.ledge_rim_edges(Vector2i(0, 1))
+	ok(back.has(5) and back.has(4) and not back.has(1) and not back.has(2), "back ledges get rims on the NE/NW edges, never on the front faces (%s)" % [back])
+	# Front faces: a ramp face draws as a ramp, a ledge face keeps the rock skirt.
+	var fm := make_map(2, 2)
+	fm.elevation[Vector2i(0, 0)] = 2
+	fm.elevation_rules = terrain_cfg.elevation.duplicate()
+	fm.ramps_on = true
+	view.hex_map = fm
+	var sk: Array = view.skirt_polys(Vector2i(0, 0)).filter(func(f: Array) -> bool: return f[3] == Vector2i(0, 1))
+	fm.elevation_rules["ramp_chance"] = 1.0
+	var ramp_face := view.is_ramp_face(Vector2i(0, 0), sk[0][3])
+	fm.elevation_rules["ramp_chance"] = 0.0
+	ok(sk.size() >= 1 and ramp_face and not view.is_ramp_face(Vector2i(0, 0), sk[0][3]), "a front face is drawn as a ramp on a ramp edge and as rock on a ledge")
+	fm.ramps_on = false
+	ok(not view.is_ramp_face(Vector2i(0, 0), sk[0][3]), "maps without seeded ramps keep every face as rock")
+	ok(view.palette.has("ramp") and int(view.palette.ramp.steps) >= 3 and int(view.palette.ramp.steps) <= 4, "art_palette.json has a ramp block with 3-4 step lines")
+	view.free()
+	# AI fallback: the first target city is walled off by ledges, so the AI goes for the next one.
+	var s := attitude_setup({0: Vector2i(7, 4), 1: Vector2i(3, 4), 2: Vector2i(11, 4), 3: Vector2i(7, 8)})
+	var am: HexMap = s.map
+	var roster: DivisionRoster = s.roster
+	var me: Division = roster.spawn_division(0, Vector2i(7, 4))
+	for n in [1, 2, 3]:
+		roster.spawn_division(n, am.cities[n].cell)
+	var first: Dictionary = roster.ai_targets(me, am)[0]
+	am.elevation_rules = terrain_cfg.elevation.duplicate()
+	am.elevation_rules["ramp_chance"] = 0.0
+	am.ramps_on = true
+	for c in am.cells:
+		am.elevation[c] = 2 if HexMap.hex_distance(c, first.cell) <= 1 else 1
+	ok(roster.plan_path(me, first.cell, am).is_empty(), "the first target city (%d) is walled off by ledges" % int(first.id))
+	ok(roster._ai_target_city(me, am) and not me.order_path.is_empty() and HexMap.hex_distance(me.order_path.back(), first.cell) > 1,
+			"the AI picks the next city instead of stalling (heads for %s)" % [me.order_path.back() if not me.order_path.is_empty() else "none"])

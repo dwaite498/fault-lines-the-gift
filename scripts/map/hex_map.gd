@@ -302,6 +302,24 @@ func is_ledge(a: Vector2i, b: Vector2i) -> bool:
 	return not _picks_ramp(a, b)
 
 
+## Compass name (E, W, NE, NW, SE, SW) of neighbor b as seen from a (pointy-top, odd rows
+## shifted right).
+static func edge_dir_name(a: Vector2i, b: Vector2i) -> String:
+	var ns := "" if b.y == a.y else ("N" if b.y < a.y else "S")
+	if ns == "":
+		return "E" if b.x > a.x else "W"
+	return ns + ("E" if b.x - a.x + (0 if a.y % 2 == 1 else 1) > 0 else "W")
+
+
+## R2: compass names of cell's edges that are ledges, in neighbor order.
+func ledge_dirs(cell: Vector2i) -> Array[String]:
+	var out: Array[String] = []
+	for n in neighbors(cell):
+		if is_ledge(cell, n):
+			out.append(edge_dir_name(cell, n))
+	return out
+
+
 ## Ramp connectivity (R1): for each landmass (land ignoring elevation), flood-fill by legal
 ## steps. While it splits into more than one region, every region except the largest (the
 ## anchor) turns its boundary ledge with the lowest ramp hash into a ramp. Every city edge

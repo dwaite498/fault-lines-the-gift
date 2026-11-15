@@ -142,10 +142,14 @@ func _draw() -> void:
 				draw_colored_polygon(black, Color.BLACK)
 				continue
 			for sk in skirt_polys(cell):
-				_draw_skirt(cell, sk)
+				if is_ramp_face(cell, sk[3]):
+					_draw_ramp(cell, sk)
+				else:
+					_draw_skirt(cell, sk)
 			var corners := _corners(hex_to_pixel(cell))
 			draw_colored_polygon(corners, terrain_color(cell))
 			_draw_ground(cell, corners)
+			_draw_ledge_rims(cell, corners)
 			if hex_map.terrain_name(cell) == "crater":
 				_draw_crater(cell)
 			var owner := owner_of(cell)
@@ -195,7 +199,8 @@ func _draw() -> void:
 
 ## Skirts on the two front-facing edges of a pointy-top hex (SW and SE), down to the
 ## neighbor's height (or the lowest level at the map edge). Each is [polygon, color],
-## darkened on the left and right by palette.iso.skirt_dark, plus the drop in px.
+## darkened on the left and right by palette.iso.skirt_dark, plus the drop in px and the
+## neighbor cell (R2: ramp or ledge).
 func skirt_polys(cell: Vector2i) -> Array:
 	var out := []
 	if is_water(cell):
@@ -217,7 +222,7 @@ func skirt_polys(cell: Vector2i) -> Array:
 		var a: Vector2 = cs[edge[0]]
 		var b: Vector2 = cs[edge[1]]
 		out.append([PackedVector2Array([a, b, b + Vector2(0, drop), a + Vector2(0, drop)]),
-				base.darkened(float(_skirt_dark[edge[3]])), drop])
+				base.darkened(float(_skirt_dark[edge[3]])), drop, edge[2]])
 	return out
 
 
@@ -250,6 +255,69 @@ func _draw_skirt(cell: Vector2i, sk: Array) -> void:
 		draw_line(top, bottom, dark if rng.randf() < 0.7 else light, 1.0)
 
 
+
+
+## R2: true if the front face from cell down to neighbor n is a ramp: ramps are seeded, both
+## hexes are land, they are exactly 1 level apart and the edge is not a ledge. Ledges,
+## cliffs and coast faces keep the M7 rock skirt.
+func is_ramp_face(cell: Vector2i, n: Vector2i) -> bool:
+	if not hex_map.ramps_on or not hex_map.cells.has(n) or is_water(cell) or is_water(n):
+		return false
+	return absi(hex_map.elevation_of(cell) - hex_map.elevation_of(n)) == 1 and not hex_map.is_ledge(cell, n)
+
+
+## R2: a ramp front face as a lighter sloped wedge in the terrain color (palette.ramp): a
+## light-to-darker fill, ramp.steps step lines across it, and a darker side cheek at the
+## left end so it reads as a slope cut into the step.
+func _draw_ramp(cell: Vector2i, sk: Array) -> void:
+	var rp: Dictionary = palette.ramp
+	var poly: PackedVector2Array = sk[0]
+	var drop: float = sk[2]
+	var top := terrain_color(cell).lightened(float(rp.lighten))
+	var low := top.darkened(float(rp.bottom_dark))
+	draw_polygon(poly, PackedColorArray([top, top, low, low]))
+	var a := poly[0]
+	var b := poly[1]
+	var steps := int(rp.steps)
+	var line := top.darkened(float(rp.step_dark))
+	for i in steps:
+		var dy := Vector2(0, drop * float(i + 1) / float(steps + 1))
+		draw_line(a + dy, b + dy, line, 1.0)
+	var cheek := a.lerp(b, float(rp.cheek_frac))
+	draw_colored_polygon(PackedVector2Array([a, cheek + Vector2(0, drop), a + Vector2(0, drop)]), top.darkened(float(rp.cheek_dark)))
+
+
+## R2: ledges on edges with no visible front face (same-row and back edges) get a dark rim
+## (ramp.ledge_rim_px, the M7 cliff band color) along that edge on the higher hex's top face.
+## Front-face ledges keep the M7 rock skirt instead.
+func _draw_ledge_rims(cell: Vector2i, corners: PackedVector2Array) -> void:
+	if not hex_map.ramps_on or is_water(cell):
+		return
+	var center := hex_to_pixel(cell)
+	var color := terrain_color(cell).darkened(float(palette.cliff.band_dark))
+	var px := float(palette.ramp.ledge_rim_px)
+	for i in ledge_rim_edges(cell):
+		var a := corners[i]
+		var b := corners[(i + 1) % 6]
+		var inset := ((a + b) * 0.5).direction_to(center) * px * 0.5
+		draw_line(a + inset, b + inset, color, px)
+
+
+## R2: corner indexes i (edge i -> i+1 of _corners) of cell's hidden edges that are ledges
+## down from cell: same-row (E, W) and back (NE, NW) edges where cell is the higher hex.
+func ledge_rim_edges(cell: Vector2i) -> Array[int]:
+	var out: Array[int] = []
+	var cs := _corners(Vector2.ZERO)
+	for n in hex_map.neighbors(cell):
+		if n.y > cell.y or not hex_map.is_ledge(cell, n) or hex_map.elevation_of(n) >= hex_map.elevation_of(cell):
+			continue
+		var dir := (hex_to_pixel(n) - Vector2(0, (elevation_of(cell) - elevation_of(n)) * _step) - hex_to_pixel(cell)).normalized()
+		var best := 0
+		for i in 6:
+			if ((cs[i] + cs[(i + 1) % 6]) * 0.5).normalized().dot(dir) > ((cs[best] + cs[(best + 1) % 6]) * 0.5).normalized().dot(dir):
+				best = i
+		out.append(best)
+	return out
 
 
 ## Mockup M8: subtle ground texture on a land top face, seeded from the cell so it is the
