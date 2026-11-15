@@ -431,13 +431,14 @@ func elevation_attack_mult(attacker_hex: Vector2i, defender_hex: Vector2i, hex_m
 		return 1.0
 	var levels := maxi(hex_map.elevation_of(defender_hex) - hex_map.elevation_of(attacker_hex), 0)
 	var penalty := minf(float(combat.uphill_attack_per_level) * levels, float(combat.uphill_attack_cap))
-	return (1.0 - penalty) * ramp_attack_mult(attacker_hex, defender_hex, hex_map)
+	var ramp := ramp_attack_mult(attacker_hex, defender_hex, hex_map)
+	return ramp if ramp != 1.0 else 1.0 - penalty
 
 
 ## R3: attacking from a lower hex up across a ramp edge multiplies the attack by the
-## elevation block's ramp_uphill_attack_mult (0.75); stacks with the per-level uphill
-## penalty above. Downhill, level, cliff and ledge attacks, and maps without seeded
-## ramps, are 1.0.
+## elevation block's ramp_uphill_attack_mult (0.75), which replaces the per-level uphill
+## penalty on that edge (elevation_attack_mult). Downhill, level, cliff and ledge attacks,
+## and maps without seeded ramps, are 1.0.
 func ramp_attack_mult(attacker_hex: Vector2i, defender_hex: Vector2i, hex_map: HexMap) -> float:
 	if hex_map.elevation_of(defender_hex) <= hex_map.elevation_of(attacker_hex) or not hex_map.is_ramp(attacker_hex, defender_hex):
 		return 1.0
