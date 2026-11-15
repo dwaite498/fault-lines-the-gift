@@ -136,6 +136,14 @@ var elevation: Dictionary = {}
 var elevation_rules: Dictionary = {}
 ## Tagged ridge edges (edge_key) left as cliffs between a mountain and lower land.
 var ridge_edges: Dictionary = {}
+## Ramps/ledges (R1, RAMPS_SNOW.md): every land-to-land edge with exactly 1 level of difference
+## is a ramp (passable) or a ledge (impassable). The pick is a seeded hash (_picks_ramp), so it
+## needs no saving; ramp_edges holds only the ledges the connectivity pass turned into ramps
+## (edge_key -> true; saved with ridge_edges).
+var ramp_edges: Dictionary = {}
+## True once generate_terrain() has seeded ramps (elevation block has ramp_chance). Maps built
+## by hand (tests) keep every 1-level step open, as before R1.
+var ramps_on := false
 ## Terrain name -> {color, move_cost, defense_mult, passable} from terrain_config.json.
 var terrain_types: Dictionary = {}
 
@@ -204,13 +212,23 @@ func _assign_elevation(cfg: Dictionary) -> void:
 			e = int(cfg.get("shallows", e))
 		elevation[cell] = clampi(e, lo, hi)
 	_smooth_elevation()
+	# R1: the cliff pass runs as before, with ledges ignored; then ramps are seeded (by hash)
+	# and the ramp connectivity pass repairs split landmasses.
+	ramps_on = false
+	ramp_edges.clear()
 	ensure_reachable()
+	if cfg.has("ramp_chance"):
+		ramps_on = true
+		_ensure_ramp_connectivity()
 
 
 ## True if terrain is passable for a step from `from` to its neighbor `to`: the target
-## terrain is passable and the elevation difference is below cliff_diff (a cliff).
+## terrain is passable, the elevation difference is below cliff_diff (a cliff) and the
+## edge is not a ledge (R1).
 func can_step(from: Vector2i, to: Vector2i) -> bool:
 	if not terrain_of(to).passable:
+		return false
+	if is_ledge(from, to):
 		return false
 	return absi(elevation_of(to) - elevation_of(from)) < int(elevation_rules.get("cliff_diff", 1 << 20))
 
@@ -246,10 +264,118 @@ func is_ridge_edge(a: Vector2i, b: Vector2i) -> bool:
 ## Deterministic pick (seed plus the two cells, integer hash, no RNG) of whether the
 ## mountain-to-lowland edge a-b is a ridge. The chance is ridge_edge_chance (0..1).
 func _picks_ridge(a: Vector2i, b: Vector2i) -> bool:
+	return float(_edge_hash(a, b) % 1000) < float(elevation_rules.get("ridge_edge_chance", 0.0)) * 1000.0
+
+
+## The _picks_ridge integer hash of edge a-b (seed plus the two cells). salt 0 gives the
+## ridge hash; ramps use ramp_salt.
+func _edge_hash(a: Vector2i, b: Vector2i, salt := 0) -> int:
 	var k := edge_key(a, b)
-	var h := (k.x * 73856093) ^ (k.y * 19349663) ^ (k.z * 83492791) ^ (k.w * 2654435761) ^ (seed_value * 374761393)
-	h = (h ^ (h >> 13)) & 0x7fffffff
-	return float(h % 1000) < float(elevation_rules.get("ridge_edge_chance", 0.0)) * 1000.0
+	var h := (k.x * 73856093) ^ (k.y * 19349663) ^ (k.z * 83492791) ^ (k.w * 2654435761) ^ (seed_value * 374761393) ^ (salt * 668265263)
+	return (h ^ (h >> 13)) & 0x7fffffff
+
+
+## Seeded pick (R1): true if the 1-level edge a-b is a ramp, with chance ramp_chance.
+func _picks_ramp(a: Vector2i, b: Vector2i) -> bool:
+	return float(_ramp_hash(a, b) % 1000) < float(elevation_rules.get("ramp_chance", 1.0)) * 1000.0
+
+
+func _ramp_hash(a: Vector2i, b: Vector2i) -> int:
+	return _edge_hash(a, b, int(elevation_rules.get("ramp_salt", 0)))
+
+
+## True if a-b is a ledge (R1): both hexes passable land, exactly 1 level apart, no city
+## on either hex (checked live, so a newly founded city opens its edges), not repaired
+## into a ramp, and not picked as a ramp. Water-land and level edges are never ledges;
+## steps of 2+ levels are cliffs (see can_step).
+func is_ledge(a: Vector2i, b: Vector2i) -> bool:
+	if not ramps_on or absi(elevation_of(a) - elevation_of(b)) != 1:
+		return false
+	if cells.get(a, WATER) == WATER or cells.get(b, WATER) == WATER:
+		return false
+	if not terrain_of(a).passable or not terrain_of(b).passable:
+		return false
+	if not city_at(a).is_empty() or not city_at(b).is_empty():
+		return false
+	if ramp_edges.has(edge_key(a, b)):
+		return false
+	return not _picks_ramp(a, b)
+
+
+## Ramp connectivity (R1): for each landmass (land ignoring elevation), flood-fill by legal
+## steps. While it splits into more than one region, every region except the largest (the
+## anchor) turns its boundary ledge with the lowest ramp hash into a ramp. Every city edge
+## is already a ramp, so each city keeps all its passable land neighbors as exits (boxed-in
+## cities are left as they are). Deterministic. Returns the number of ledges turned into ramps.
+func _ensure_ramp_connectivity() -> int:
+	var flipped := 0
+	var done := {}
+	var keys: Array = cells.keys()
+	keys.sort()
+	for start in keys:
+		if done.has(start) or cells[start] == WATER or not terrain_of(start).passable:
+			continue
+		var comp := {}
+		for c in land_component(start):
+			if terrain_of(c).passable:
+				comp[c] = true
+			done[c] = true
+		var guard := 0
+		while guard < comp.size():
+			guard += 1
+			var regions := _step_regions(comp)
+			if regions.size() <= 1:
+				break
+			var anchor := 0
+			for i in regions.size():
+				if regions[i].size() > regions[anchor].size():
+					anchor = i
+			var any := false
+			for i in regions.size():
+				if i == anchor:
+					continue
+				var best := Vector4i(-1, -1, -1, -1)
+				var best_hash := 0
+				for a: Vector2i in regions[i]:
+					for b in neighbors(a):
+						if comp.has(b) and not regions[i].has(b) and is_ledge(a, b):
+							var h := _ramp_hash(a, b)
+							var k := edge_key(a, b)
+							if best.x < 0 or h < best_hash or (h == best_hash and k < best):
+								best = k
+								best_hash = h
+				if best.x >= 0 and not ramp_edges.has(best):
+					ramp_edges[best] = true
+					flipped += 1
+					any = true
+			if not any:
+				break  # split only by cliffs (a landmass with no city): left alone
+	return flipped
+
+
+## The regions of comp (cell -> true) connected by can_step, each a Dictionary of cells,
+## in the sorted order of their first cell.
+func _step_regions(comp: Dictionary) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	var seen := {}
+	var keys: Array = comp.keys()
+	keys.sort()
+	for start in keys:
+		if seen.has(start):
+			continue
+		var region := {start: true}
+		seen[start] = true
+		var queue: Array = [start]
+		var i := 0
+		while i < queue.size():
+			for n in neighbors(queue[i]):
+				if comp.has(n) and not seen.has(n) and can_step(queue[i], n):
+					seen[n] = true
+					region[n] = true
+					queue.append(n)
+			i += 1
+		out.append(region)
+	return out
 
 
 ## Makes land neighbors differ by at most smooth_max_step, everywhere except on tagged

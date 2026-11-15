@@ -57,6 +57,7 @@ func _initialize() -> void:
 	test_pressure()
 	test_frontage()
 	test_harrier()
+	test_ramps()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -250,7 +251,8 @@ func test_mountains() -> void:
 				if not m.terrain_of(n).passable or m.terrain[n] == "mountains":
 					continue
 				edges += 1
-				if m.can_step(cell, n) and m.can_step(n, cell):
+				# R1 ledges are 1-level edges, not cliffs: they count as walkable for this cliff check.
+				if (m.can_step(cell, n) and m.can_step(n, cell)) or m.is_ledge(cell, n):
 					open_edges += 1
 				else:
 					cliff_edges += 1
@@ -262,7 +264,7 @@ func test_mountains() -> void:
 	ok(lowered == 0, "every mountain stays at elevation 3 on 20 seeds (%d of %d lowered)" % [lowered, mountains])
 	ok(false_ridges == 0, "every tagged ridge edge is a real cliff (%d tagged, %d false)" % [ridges, false_ridges])
 	ok(untagged == 0, "no mountain borders a level-1 tile across a cliff unless the edge is a tagged ridge (%d untagged)" % untagged)
-	ok(float(open_edges) / float(maxi(edges, 1)) > 0.5, "most mountain edges are walkable (%d of %d); kept cliffs %d (%.1f%%)" % [open_edges, edges, cliff_edges, 100.0 * cliff_edges / maxi(edges, 1)])
+	ok(float(open_edges) / float(maxi(edges, 1)) > 0.5, "most mountain edges are walkable, ledges aside (%d of %d); kept cliffs %d (%.1f%%)" % [open_edges, edges, cliff_edges, 100.0 * cliff_edges / maxi(edges, 1)])
 	ok(foothills > 0, "mountains get hills foothills (%d)" % foothills)
 	var m1 := build(7)
 	var m2 := build(7)
@@ -3217,3 +3219,122 @@ func test_harrier() -> void:
 	ok(fortified <= still, "a fortified unit is safe from the dive")
 	# The nest is saved with the division (SaveGame stores every script variable).
 	ok(Division.new().get_property_list().any(func(p: Dictionary) -> bool: return p.name == "nest"), "the nest is a saved division property")
+
+
+## R1 ramps and ledges (RAMPS_SNOW.md section 1; PM decisions Nov 15).
+func ramp_map(w: int, elev: Array, chance: float) -> HexMap:
+	var m := make_map(w, 1)
+	for x in w:
+		m.elevation[Vector2i(x, 0)] = int(elev[x])
+	m.elevation_rules = terrain_cfg.elevation.duplicate()
+	m.elevation_rules["ramp_chance"] = chance
+	m.ramps_on = true
+	return m
+
+
+func test_ramps() -> void:
+	# Check 1: same seed, same ramps and ledges.
+	var a := build(7)
+	var b := build(7)
+	var ledges_a := {}
+	var ledges_b := {}
+	for cell in a.cells:
+		for n in a.neighbors(cell):
+			if a.is_ledge(cell, n):
+				ledges_a[HexMap.edge_key(cell, n)] = true
+			if b.is_ledge(cell, n):
+				ledges_b[HexMap.edge_key(cell, n)] = true
+	ok(not ledges_a.is_empty() and ledges_a == ledges_b and a.ramp_edges == b.ramp_edges, "same seed gives the same ledges (%d) and repaired ramps (%d)" % [ledges_a.size(), a.ramp_edges.size()])
+	# Roughly ramp_chance of the 1-level land edges stay ramps; the rest are ledges.
+	var steps := 0
+	var ledges := 0
+	var regions_ok := true
+	var exits_ok := true
+	var city_ramps_ok := true
+	var shore_ok := true
+	var where := ""
+	for seed_value in range(1, 21):
+		var m := build(seed_value)
+		for cell in m.cells:
+			for n in m.neighbors(cell):
+				var diff := absi(m.elevation_of(cell) - m.elevation_of(n))
+				if diff == 1 and m.cells[cell] != HexMap.WATER and m.cells[n] != HexMap.WATER:
+					steps += 1
+					if m.is_ledge(cell, n):
+						ledges += 1
+				if (m.cells[cell] == HexMap.WATER) != (m.cells[n] == HexMap.WATER) and m.is_ledge(cell, n):
+					shore_ok = false
+		# Check 2 (decision 6): each landmass with a city is one region by legal steps.
+		for city in m.cities:
+			var reach := m.reachable_from(city.cell)
+			for c in m.land_component(city.cell):
+				if m.terrain_of(c).passable and not reach.has(c):
+					regions_ok = false
+					where = "seed %d %s" % [seed_value, str(c)]
+			# Check 3 (decision 2): ledges never take a city exit, so a city with 2+ passable land
+			# neighbors not behind a cliff has 2+ exits (cities boxed in by cliffs stay as they are).
+			var land := 0
+			var exits := 0
+			for n in m.neighbors(city.cell):
+				if m.cells[n] != HexMap.WATER and m.terrain_of(n).passable \
+						and absi(m.elevation_of(n) - m.elevation_of(city.cell)) < int(terrain_cfg.elevation.cliff_diff):
+					land += 1
+					if m.can_step(city.cell, n) and m.can_step(n, city.cell):
+						exits += 1
+				if m.is_ledge(city.cell, n):
+					city_ramps_ok = false
+			if exits < land or (land >= 2 and exits < 2):
+				exits_ok = false
+	var share := float(ledges) / float(maxi(steps, 1))
+	ok(share > 0.3 and share < 0.6, "about half the 1-level land edges are ledges (%d of %d)" % [ledges, steps])
+	ok(regions_ok, "each landmass with a city is one reachable region on 20 seeds %s" % where)
+	ok(exits_ok, "every city with 2+ land neighbors off cliffs has 2+ exits, and ledges never take one, on 20 seeds")
+	ok(city_ramps_ok and shore_ok, "city edges and water-land edges are never ledges")
+	# Check 4 (decision 1): a ledge blocks moves both ways; attacks are unchanged (as with cliffs).
+	var w := ramp_map(2, [1, 2], 0.0)
+	var r := make_roster()
+	var lo := r.spawn_division(0, Vector2i(0, 0), "infantry")
+	var hi := r.spawn_division(1, Vector2i(1, 0), "infantry")
+	ok(w.is_ledge(Vector2i(0, 0), Vector2i(1, 0)) and not w.can_step(Vector2i(0, 0), Vector2i(1, 0)) and not w.can_step(Vector2i(1, 0), Vector2i(0, 0)), "a ledge is impassable both ways")
+	r.divisions.erase(hi)
+	ok(not r.can_move(lo, Vector2i(1, 0), w), "a unit cannot move up a ledge")
+	r.divisions.append(hi)
+	ok(r.can_attack(lo, hi, w), "a ledge does not block attacks (decision 1)")
+	# Check 5: uphill on a ramp costs the target's move_cost + climb_cost; level edges stay open.
+	var rp := ramp_map(3, [1, 2, 2], 1.0)
+	ok(rp.can_step(Vector2i(0, 0), Vector2i(1, 0)) and rp.step_cost(Vector2i(0, 0), Vector2i(1, 0)) == int(rp.terrain_of(Vector2i(1, 0)).move_cost) + int(terrain_cfg.elevation.climb_cost), "uphill on a ramp costs move_cost + 1")
+	ok(not ramp_map(3, [1, 2, 2], 0.0).is_ledge(Vector2i(1, 0), Vector2i(2, 0)), "level edges are never ledges")
+	# City edges are ramps, checked live: founding a city opens its ledges.
+	var c := ramp_map(2, [1, 2], 0.0)
+	c.cities.append({"id": 0, "nation": 0, "cell": Vector2i(1, 0)})
+	ok(not c.is_ledge(Vector2i(0, 0), Vector2i(1, 0)) and c.can_step(Vector2i(0, 0), Vector2i(1, 0)), "an edge touching a city is a ramp (live check)")
+	# Connectivity pass: three plateaus walled by ledges get joined by repaired ramps.
+	var s := ramp_map(3, [1, 2, 3], 0.0)
+	ok(s.reachable_from(Vector2i(0, 0)).size() == 1, "three 1-level plateaus start split by ledges")
+	var flips := s._ensure_ramp_connectivity()
+	ok(flips == 2 and s.ramp_edges.size() == 2 and s.reachable_from(Vector2i(0, 0)).size() == 3, "the connectivity pass turns 2 ledges into ramps and joins them (%d flips)" % flips)
+	ok(s._ensure_ramp_connectivity() == 0, "a second connectivity pass changes nothing")
+	# Hand-built maps (no seeded ramps) keep every 1-level step open, as before R1.
+	ok(make_map(2, 1, {Vector2i(1, 0): 2}).can_step(Vector2i(0, 0), Vector2i(1, 0)), "maps without seeded ramps have no ledges")
+	# Save/load round trip of the repaired ramps (decision 4).
+	var g := {}
+	for seed_value in range(1, 30):
+		g = save_game_setup(seed_value)
+		if not g.map.ramp_edges.is_empty():
+			break
+	var saved: Dictionary = g.map.ramp_edges.duplicate()
+	var extra_key := Vector4i(0, 0, 1, 0)
+	g.map.ramp_edges[extra_key] = true  # a repair the fresh map would not regenerate
+	var path := "user://test_save_r1.sav"
+	SaveGame.write(path, save_state(g, 3))
+	var read := SaveGame.read(path)
+	var g2 := save_game_setup(int(g.cfg.seed))
+	ok(not g2.map.ramp_edges.has(extra_key), "a fresh map lacks the extra repaired ramp")
+	SaveGame.restore(read, g2.map, g2.roster, g2.eco)
+	ok(not saved.is_empty() and g2.map.ramp_edges == g.map.ramp_edges, "repaired ramps survive a save and load (%d)" % g2.map.ramp_edges.size())
+	var old: Dictionary = read.duplicate(true)
+	old.map.erase("ramp_edges")
+	var g3 := save_game_setup(int(g.cfg.seed))
+	SaveGame.restore(old, g3.map, g3.roster, g3.eco)
+	ok(g3.map.ramp_edges == saved, "a save from before R1 keeps the ramps regenerated from the config")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))

@@ -41,7 +41,7 @@ static func capture(hex_map: HexMap, roster: DivisionRoster, economy: NationEcon
 		"map": {
 			"cells": hex_map.cells.duplicate(), "territory": hex_map.territory.duplicate(),
 			"terrain": hex_map.terrain.duplicate(), "elevation": hex_map.elevation.duplicate(),
-			"ridge_edges": hex_map.ridge_edges.duplicate(), "fungus_tiles": hex_map.fungus_tiles.duplicate(),
+			"ridge_edges": hex_map.ridge_edges.duplicate(), "ramp_edges": hex_map.ramp_edges.duplicate(), "fungus_tiles": hex_map.fungus_tiles.duplicate(),
 			"cities": hex_map.cities.duplicate(true), "nations": hex_map.nations.duplicate(),
 			"coastal_nations": hex_map.coastal_nations.duplicate(), "growth_mods": hex_map.growth_mods.duplicate(),
 			"seed_value": hex_map.seed_value, "width": hex_map.width, "height": hex_map.height,
@@ -70,7 +70,9 @@ static func restore(state: Dictionary, hex_map: HexMap, roster: DivisionRoster, 
 	hex_map.width = int(m.width)
 	hex_map.height = int(m.height)
 	hex_map.seed_value = int(m.seed_value)
-	for key in ["cells", "territory", "terrain", "elevation", "ridge_edges", "fungus_tiles", "growth_mods"]:
+	for key in ["cells", "territory", "terrain", "elevation", "ridge_edges", "ramp_edges", "fungus_tiles", "growth_mods"]:
+		if not m.has(key):
+			continue  # a save from before R1 has no ramp_edges: keep the ones regenerated from the config
 		var target: Dictionary = hex_map.get(key)
 		target.clear()
 		target.merge(m[key].duplicate(true))
