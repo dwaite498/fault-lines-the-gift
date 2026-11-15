@@ -33,6 +33,8 @@ var highlights: Array[Vector2i] = []
 ## Attack targets blocked by the frontage cap (Task 46), drawn greyed and not clickable.
 var blocked_highlights: Array[Vector2i] = []
 var player_nation := 0
+## City sprites by CityArt key (M12), kept referenced so the canvas can draw them.
+var _city_textures := {}
 const ORDER_COLOR := Color(1, 1, 1, 0.9)
 const ATTACK_COLOR := Color(0.9, 0.1, 0.1, 0.95)
 const CLASH_COLOR := Color(1, 0.85, 0.0, 1.0)
@@ -520,8 +522,13 @@ func _draw_city(city: Dictionary) -> void:
 	var rect := Rect2(center - Vector2(half, half), Vector2(half, half) * 2)
 	var key := CityArt.resolve_key(str(art.get("style", "generic")), tier)
 	if key != "":
-		var tex: Texture2D = load(CityArt.ART_DIR + key + ".png")
-		draw_texture_rect(tex, rect, false)
+		# Mockup M12: native size (sprites are pre-sized per tier), bottom-center on the footprint.
+		# Held in _city_textures: a texture loaded into a local is freed after _draw, so it drew white.
+		if not _city_textures.has(key):
+			_city_textures[key] = load(CityArt.ART_DIR + key + ".png")
+		var tex: Texture2D = _city_textures[key]
+		var size := tex.get_size()
+		draw_texture(tex, center + Vector2(-size.x * 0.5, half - size.y))
 	else:
 		_draw_dome(center, half, art.get("sea", false), c)
 	if city.nation >= 0 and is_capital(city):
