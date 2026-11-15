@@ -57,6 +57,7 @@ func _initialize() -> void:
 	test_pressure()
 	test_frontage()
 	test_harrier()
+	test_ground_textures()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -3217,3 +3218,21 @@ func test_harrier() -> void:
 	ok(fortified <= still, "a fortified unit is safe from the dive")
 	# The nest is saved with the division (SaveGame stores every script variable).
 	ok(Division.new().get_property_list().any(func(p: Dictionary) -> bool: return p.name == "nest"), "the nest is a saved division property")
+
+
+## G1: palette.ground maps terrains to the G0 textures; terrains without one keep the flat color.
+func test_ground_textures() -> void:
+	var view := MapView.new()
+	var gd: Dictionary = view.palette.ground
+	ok(int(gd.tile_px) == 128 and gd.has("texture_alpha"), "palette.ground has tile_px 128 and texture_alpha")
+	var want := {"plains": "lowland", "forest": "lowland", "fungus": "lowland", "hills": "plateau", "mountains": "highland",
+			"scorched": "scorched", "crater": "crater", "snow": "snow"}
+	var mapped := true
+	for k in want:
+		mapped = mapped and str(gd.textures.get(k, "")).ends_with("ground_%s.png" % want[k]) and ResourceLoader.exists(str(gd.textures[k]))
+	ok(mapped, "every terrain maps to its G0 texture and the file exists")
+	var tex := view.ground_texture("hills")
+	ok(tex is CanvasTexture and tex.texture_filter == CanvasItem.TEXTURE_FILTER_NEAREST and tex.texture_repeat == CanvasItem.TEXTURE_REPEAT_ENABLED and view.ground_texture("hills") == tex,
+			"ground textures are cached CanvasTextures with nearest filter and repeat on")
+	ok(view.ground_texture("water") == null and view.ground_texture("no_such_terrain") == null, "water and unmapped terrains have no texture (flat color)")
+	view.free()

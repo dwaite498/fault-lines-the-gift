@@ -68,6 +68,7 @@ See [docs/PIVOT.md](PIVOT.md) for the pivot brief.
 - Fix M12b, units above city sprites (map_view.gd `_draw`): unit badges and the selected ring are no longer drawn per row; one pass after the row loop and the last nameplates draws every unit back to front (row, then column), above all tiles, peaks, fungus, city domes and nameplates. A metropolis dome in front no longer covers half of the badge on the hex behind it. Draw order only; highlights and orders still draw on top.
 ## On hold
 - Rail Tasks 27 and 28
+- Ground textures (G1; map_view.gd `_draw_ground_texture`/`ground_texture`, art_palette.json `ground`, assets/terrain/ground/ from G0, approved by David 12:13 PM CT Nov 15): each land top face draws its terrain's ground texture over the flat color with world-space UVs (x, y*2)/tile_px (tile_px 128), so it tiles seamlessly across hexes. plains/forest/fungus use lowland, hills plateau, mountains highland, scorched, crater, and snow (unused until SN1). Textures are cached CanvasTextures with nearest filter and repeat on (set on the CanvasTexture, not the map node or project.godot). texture_alpha 1.0. Water and unmapped terrains keep the flat color; tint, M8 speckle, borders, grid, fog, fungus, peaks, craters and skirts are unchanged. Frame time on the 20x12 map: 78.7 ms before, 79.8 ms after (+1.4%).
 
 ## Maintenance
 Read this file at the start of every session and update it with each PR.

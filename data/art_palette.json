@@ -30,6 +30,7 @@
 		"striation_light": 0.08,
 		"striation_min_drop": 2
 	},
+  "ground": {"tile_px": 128, "texture_alpha": 1.0, "textures": {"plains": "res://assets/terrain/ground/ground_lowland.png", "forest": "res://assets/terrain/ground/ground_lowland.png", "fungus": "res://assets/terrain/ground/ground_lowland.png", "hills": "res://assets/terrain/ground/ground_plateau.png", "mountains": "res://assets/terrain/ground/ground_highland.png", "scorched": "res://assets/terrain/ground/ground_scorched.png", "crater": "res://assets/terrain/ground/ground_crater.png", "snow": "res://assets/terrain/ground/ground_snow.png"}},
 	"grid": {
 		"color": "#000000",
 		"alpha": 0.20,

@@ -35,6 +35,10 @@ var blocked_highlights: Array[Vector2i] = []
 var player_nation := 0
 ## City sprites by CityArt key (M12), kept referenced so the canvas can draw them.
 var _city_textures := {}
+## G1: terrain name -> CanvasTexture (nearest filter, repeat on) for the top-face ground
+## textures in palette.ground, or null when a terrain has none. Kept in a member like
+## _city_textures so the textures outlive _draw.
+var _ground_textures := {}
 const ORDER_COLOR := Color(1, 1, 1, 0.9)
 const ATTACK_COLOR := Color(0.9, 0.1, 0.1, 0.95)
 const CLASH_COLOR := Color(1, 0.85, 0.0, 1.0)
@@ -145,6 +149,7 @@ func _draw() -> void:
 				_draw_skirt(cell, sk)
 			var corners := _corners(hex_to_pixel(cell))
 			draw_colored_polygon(corners, terrain_color(cell))
+			_draw_ground_texture(cell, corners)
 			_draw_ground(cell, corners)
 			if hex_map.terrain_name(cell) == "crater":
 				_draw_crater(cell)
@@ -253,6 +258,38 @@ func _draw_skirt(cell: Vector2i, sk: Array) -> void:
 		draw_line(top, bottom, dark if rng.randf() < 0.7 else light, 1.0)
 
 
+
+
+## G1: the terrain's ground texture (palette.ground) on a land top face, over its flat
+## color, with world-space UVs (x, y * 2) / tile_px so the texture tiles seamlessly across
+## hexes. Water and terrains with no texture keep the flat color only.
+func _draw_ground_texture(cell: Vector2i, corners: PackedVector2Array) -> void:
+	if is_water(cell):
+		return
+	var tex := ground_texture(hex_map.terrain_name(cell))
+	if tex == null:
+		return
+	var gd: Dictionary = palette.ground
+	var px := float(gd.tile_px)
+	var uvs := PackedVector2Array()
+	for p in corners:
+		uvs.append(Vector2(p.x, p.y * 2.0) / px)
+	draw_colored_polygon(corners, Color(1, 1, 1, float(gd.texture_alpha)), uvs, tex)
+
+
+## G1: cached CanvasTexture for a terrain's ground texture (nearest filter and repeat set on
+## the CanvasTexture, so nothing else on the map changes), or null if it has none.
+func ground_texture(tname: String) -> Texture2D:
+	if not _ground_textures.has(tname):
+		var path := str(palette.get("ground", {}).get("textures", {}).get(tname, ""))
+		var ct: CanvasTexture = null
+		if path != "" and ResourceLoader.exists(path):
+			ct = CanvasTexture.new()
+			ct.diffuse_texture = load(path)
+			ct.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+			ct.texture_repeat = CanvasItem.TEXTURE_REPEAT_ENABLED
+		_ground_textures[tname] = ct
+	return _ground_textures[tname]
 
 
 ## Mockup M8: subtle ground texture on a land top face, seeded from the cell so it is the
