@@ -129,7 +129,7 @@ func _draw() -> void:
 			units_at[d.hex].append(d)
 	# Back to front, row by row. Each row's decor is drawn right after its tiles, so a
 	# taller tile in a later row hides what stands behind it. City nameplates (M6) hang below
-	# their hex, so each row's plates are drawn after the next row's tiles, under its units.
+	# their hex, so each row's plates are drawn after the next row's tiles. Units are drawn last (M12b).
 	var plates := []
 	for y in hex_map.height:
 		for x in hex_map.width:
@@ -173,11 +173,14 @@ func _draw() -> void:
 			if city_at.has(cell):
 				_draw_city(city_at[cell])
 				plates.append(city_at[cell])
+	for city in plates:
+		_draw_city_plate(city)
+	# M12b: unit badges (and the selected ring) in one later pass, back to front, above every
+	# tile, peak, city sprite and nameplate, so a tall dome in front never covers a unit behind it.
+	for y in hex_map.height:
 		for x in hex_map.width:
 			for d in units_at.get(Vector2i(x, y), []):
 				_draw_counter(d)
-	for city in plates:
-		_draw_city_plate(city)
 	var hl: Dictionary = palette.highlight
 	var reach_color := Color(Color.html(hl.reach), float(hl.reach_alpha))
 	var blocked_color := Color(Color.html(hl.blocked), float(hl.blocked_alpha))
