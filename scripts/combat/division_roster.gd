@@ -431,7 +431,18 @@ func elevation_attack_mult(attacker_hex: Vector2i, defender_hex: Vector2i, hex_m
 		return 1.0
 	var levels := maxi(hex_map.elevation_of(defender_hex) - hex_map.elevation_of(attacker_hex), 0)
 	var penalty := minf(float(combat.uphill_attack_per_level) * levels, float(combat.uphill_attack_cap))
-	return 1.0 - penalty
+	var ramp := ramp_attack_mult(attacker_hex, defender_hex, hex_map)
+	return ramp if ramp != 1.0 else 1.0 - penalty
+
+
+## R3: attacking from a lower hex up across a ramp edge multiplies the attack by the
+## elevation block's ramp_uphill_attack_mult (0.75), which replaces the per-level uphill
+## penalty on that edge (elevation_attack_mult). Downhill, level, cliff and ledge attacks,
+## and maps without seeded ramps, are 1.0.
+func ramp_attack_mult(attacker_hex: Vector2i, defender_hex: Vector2i, hex_map: HexMap) -> float:
+	if hex_map.elevation_of(defender_hex) <= hex_map.elevation_of(attacker_hex) or not hex_map.is_ramp(attacker_hex, defender_hex):
+		return 1.0
+	return float(hex_map.elevation_rules.get("ramp_uphill_attack_mult", 1.0))
 
 
 ## d's attack with its faction's attack_mult (and naval_attack_mult for naval divisions).
@@ -482,7 +493,7 @@ func attack(attacker: Division, defender: Division, hex_map: HexMap) -> Dictiona
 	defender.in_combat = true
 	_battle_pressure(attacker, defender, hex_map)
 	return {
-		"defender_defense": def_defense, "flank_mult": flank_mult(defender), "uphill_mult": uphill, "attacker_defense": atk_defense,
+		"defender_defense": def_defense, "flank_mult": flank_mult(defender), "uphill_mult": uphill, "ramp_mult": ramp_attack_mult(attacker.hex, defender.hex, hex_map), "attacker_defense": atk_defense,
 		"damage_to_defender": dmg_to_defender, "damage_to_attacker": dmg_to_attacker,
 		"defender_org_loss": taken_by_defender.org, "defender_strength_loss": taken_by_defender.strength,
 		"attacker_org_loss": taken_by_attacker.org, "attacker_strength_loss": taken_by_attacker.strength,
