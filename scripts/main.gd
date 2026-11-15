@@ -114,6 +114,7 @@ func _ready() -> void:
 	_city_panel.factions = factions
 	_panel.economy = _economy
 	_panel.action_pressed.connect(do_action)
+	_panel.icon_pressed.connect(_on_icon_pressed)
 	add_child(_city_panel)
 	_nation_panel = NationPanel.new()
 	_nation_panel.factions = factions
@@ -161,6 +162,30 @@ func _capture_state() -> Dictionary:
 
 func _on_save_pressed() -> void:
 	_pause_menu.status.text = "Game saved" if SaveGame.write(SaveGame.SLOT_PATH, _capture_state()) else "Could not save"
+
+
+## Mockup M13 icon row. Each button runs an action that already exists: end turn and
+## recruit go through the Space and R key handling (same guards), the menu button opens
+## the pause menu, save is the pause menu's Save Game.
+func _on_icon_pressed(id: String) -> void:
+	match id:
+		"end_turn":
+			_press_key(KEY_SPACE)
+		"recruit":
+			_press_key(KEY_R)
+		"menu":
+			if not _pause_menu.is_open():
+				_pause_menu.open()
+		"save":
+			_on_save_pressed()
+			message.text = _pause_menu.status.text
+
+
+func _press_key(keycode: Key) -> void:
+	var ev := InputEventKey.new()
+	ev.keycode = keycode
+	ev.pressed = true
+	_unhandled_input(ev)
 
 
 func _on_game_over_new_game() -> void:

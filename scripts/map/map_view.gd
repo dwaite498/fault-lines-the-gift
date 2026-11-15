@@ -129,7 +129,7 @@ func _draw() -> void:
 			units_at[d.hex].append(d)
 	# Back to front, row by row. Each row's decor is drawn right after its tiles, so a
 	# taller tile in a later row hides what stands behind it. City nameplates (M6) hang below
-	# their hex, so each row's plates are drawn after the next row's tiles, under its units.
+	# their hex, so each row's plates are drawn after the next row's tiles. Units are drawn last (M12b).
 	var plates := []
 	for y in hex_map.height:
 		for x in hex_map.width:
@@ -162,6 +162,8 @@ func _draw() -> void:
 				draw_colored_polygon(corners, EXPLORED_DIM)
 			corners.append(corners[0])
 			_draw_grid(cell, corners, is_mat, grid_color, Color(grid_color, float(grid.alpha_match)), float(grid.width))
+			if hex_map.terrain_name(cell) == "mountains":
+				_draw_peaks(cell, fstate == Fog.EXPLORED)
 			if hex_map.fungus_tiles.has(cell):
 				_draw_fungus(cell, is_mat, fstate == Fog.EXPLORED)
 		for x in hex_map.width:
@@ -177,11 +179,14 @@ func _draw() -> void:
 			if city_at.has(cell):
 				_draw_city(city_at[cell])
 				plates.append(city_at[cell])
+	for city in plates:
+		_draw_city_plate(city)
+	# M12b: unit badges (and the selected ring) in one later pass, back to front, above every
+	# tile, peak, city sprite and nameplate, so a tall dome in front never covers a unit behind it.
+	for y in hex_map.height:
 		for x in hex_map.width:
 			for d in units_at.get(Vector2i(x, y), []):
 				_draw_counter(d)
-	for city in plates:
-		_draw_city_plate(city)
 	var hl: Dictionary = palette.highlight
 	var reach_color := Color(Color.html(hl.reach), float(hl.reach_alpha))
 	var blocked_color := Color(Color.html(hl.blocked), float(hl.blocked_alpha))
@@ -919,6 +924,40 @@ func _draw_fungus_tree(base: Vector2, rng: RandomNumberGenerator, height: float,
 		var p := top + Vector2(rng.randf_range(-2.5, 2.5), rng.randf_range(-2.0, 1.0))
 		draw_circle(p, rng.randf_range(1.6, 2.4), tip)
 	draw_circle(top + Vector2(-0.8, -1.2), 0.9, light)
+
+
+## Mountain peaks (S1): 2 or 3 jagged peaks on a mountain top face, seeded from the cell like the
+## M11 fungus trees. Each has a lit left face and a shaded right face (palette.peaks) and a
+## notched ridge; at most peaks.max_steps elevation steps tall. They stand in the front half of the
+## face, sorted back to front, and are drawn in the tile pass before borders, cities, plates and
+## units, so all of those stay on top. Darkened like the tile under explored fog. No snow.
+func _draw_peaks(cell: Vector2i, dim: bool) -> void:
+	var pk: Dictionary = palette.peaks
+	var fade := EXPLORED_DIM.a if dim else 0.0
+	var lit := Color.html(pk.lit).lerp(Color.BLACK, fade)
+	var shade := Color.html(pk.shade).lerp(Color.BLACK, fade)
+	var ridge := Color.html(pk.ridge).lerp(Color.BLACK, fade)
+	var center := hex_to_pixel(cell)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(cell) ^ 0x5eed
+	var n := 2 + rng.randi() % 2
+	var max_h := float(pk.max_steps) * _step
+	var bases: Array[Vector2] = []
+	for i in n:
+		var u := lerpf(-0.4, 0.4, (i + 0.5) / n) + rng.randf_range(-0.06, 0.06)
+		bases.append(center + Vector2(u * _w * 0.5, rng.randf_range(0.05, 0.45) * _h * 0.5))
+	bases.sort_custom(func(a: Vector2, b: Vector2) -> bool: return a.y < b.y)
+	for base in bases:
+		var h := max_h * rng.randf_range(0.7, 1.0)
+		var hw := _w * rng.randf_range(0.10, 0.14)
+		var apex := base + Vector2(rng.randf_range(-0.2, 0.2) * hw, -h)
+		var foot := base + Vector2(rng.randf_range(-0.15, 0.15) * hw, 0)
+		# A notch on each ridge makes the outline jagged.
+		var ln := base.lerp(apex, 0.55) + Vector2(-hw * rng.randf_range(0.45, 0.6), 0)
+		var rn := base.lerp(apex, 0.45) + Vector2(hw * rng.randf_range(0.4, 0.55), rng.randf_range(-2.0, 1.0))
+		draw_colored_polygon(PackedVector2Array([base + Vector2(-hw, 0), ln, apex, foot]), lit)
+		draw_colored_polygon(PackedVector2Array([foot, apex, rn, base + Vector2(hw, 0)]), shade)
+		draw_polyline(PackedVector2Array([base + Vector2(-hw, 0), ln, apex, rn, base + Vector2(hw, 0)]), ridge, 1.0)
 
 
 func _fungus_neighbors(cell: Vector2i) -> int:
