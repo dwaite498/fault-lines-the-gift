@@ -30,7 +30,7 @@
 		"striation_light": 0.08,
 		"striation_min_drop": 2
 	},
-  "ramp": {"lighten": 0.18, "bottom_dark": 0.12, "steps": 4, "step_dark": 0.22, "cheek_frac": 0.2, "cheek_dark": 0.3, "ledge_rim_px": 2},
+  "ramp": {"lighten": 0.18, "bottom_dark": 0.12, "steps": 4, "step_dark": 0.22, "cheek_frac": 0.2, "cheek_dark": 0.3, "ledge_rim_px": 3},
 	"grid": {
 		"color": "#000000",
 		"alpha": 0.20,
