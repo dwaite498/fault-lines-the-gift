@@ -2625,7 +2625,7 @@ func test_city_tiers() -> void:
 	ok(CityArt.resolve_key("assembly", "city", has.call(["base_assembly_city", "base_generic_city"])) == "base_assembly_city", "the exact faction key wins")
 	ok(CityArt.resolve_key("assembly", "city", has.call(["base_generic_city", "base_generic_base"])) == "base_generic_city", "falls back to the generic tier dome")
 	ok(CityArt.resolve_key("free_tide", "metropolis", has.call(["base_generic_base"])) == "base_generic_base", "falls back to the generic base dome")
-	ok(CityArt.resolve_key("assembly", "city", has.call([])) == "" and CityArt.resolve_key("assembly", "city") == "", "with no art at all it returns '' (the placeholder dome is drawn) and does not error")
+	ok(CityArt.resolve_key("assembly", "city", has.call([])) == "" and CityArt.resolve_key("assembly", "city") == "base_generic_city", "with no art at all it returns '' (the placeholder dome is drawn); by default it finds the shipped generic city dome")
 	ok(CityArt.tier_scale(m.city_rules.tiers, "outpost") == 0.6 and CityArt.tier_scale(m.city_rules.tiers, "base") == 0.8 and CityArt.tier_scale(m.city_rules.tiers, "city") == 1.0 and CityArt.tier_scale(m.city_rules.tiers, "metropolis") == 1.2, "placeholder scales: Outpost 0.6, Base 0.8, City 1.0, Metropolis 1.2")
 	var rows := FactionRoster.load_all()
 	m.load_faction_views(rows)
