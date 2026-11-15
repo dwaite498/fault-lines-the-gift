@@ -443,6 +443,8 @@ func _on_hex_clicked(hex: Vector2i) -> void:
 			else:
 				roster.set_order(selected, hex, _view.hex_map)
 				message.text = roster.order_message
+		elif selected and _mode == "move" and _view.hex_map.is_ledge(selected.hex, hex):
+			message.text = "Ledge: impassable"  # R2: a move refused at a ledge
 		_set_mode("")
 		_refresh_panels()
 		return

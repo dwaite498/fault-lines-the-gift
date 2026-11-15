@@ -150,6 +150,9 @@ func refresh(d: Division, hex_map: HexMap, actions: Array[String] = [], mode := 
 				d.fortify_level, max_fortify, d.attack, d.defense, ("  Flanked -%d%%" % roundi(penalty * 100.0)) if penalty > 0.0 else ""],
 		"[b]SUPPLY[/b]  " + ("[color=%s]OK[/color]" % _pal.ui.accent if d.supplied else "[color=%s]OUT[/color]" % _pal.ui.supply_out),
 	]
+	var ledges := hex_map.ledge_dirs(d.hex)
+	if not ledges.is_empty():  # R2: ledge edges of the unit's hex, under the HEX line
+		lines.insert(1, "[color=%s]Ledge: impassable to %s[/color]" % [dim, ", ".join(ledges)])
 	details.text = "\n".join(lines)
 	var o: Array[String] = []
 	if not d.order_path.is_empty():
