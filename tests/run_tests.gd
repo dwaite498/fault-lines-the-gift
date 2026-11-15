@@ -58,6 +58,7 @@ func _initialize() -> void:
 	test_frontage()
 	test_harrier()
 	test_ramps()
+	test_ramp_uphill_attack()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -3338,3 +3339,43 @@ func test_ramps() -> void:
 	SaveGame.restore(old, g3.map, g3.roster, g3.eco)
 	ok(g3.map.ramp_edges == saved, "a save from before R1 keeps the ramps regenerated from the config")
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+
+
+## R3: an attack up across a ramp has its attack multiplied by ramp_uphill_attack_mult (0.75),
+## replacing the per-level uphill penalty (PM, Nov 15). Downhill, level and ramps-off attacks are unchanged.
+func ramp_attack(elev: Array, chance: float, ramps: bool) -> Dictionary:
+	var m := ramp_map(2, elev, chance)
+	m.ramps_on = ramps
+	var r := make_roster()
+	var a := r.spawn_division(0, Vector2i(0, 0), "infantry")
+	var t := r.spawn_division(1, Vector2i(1, 0), "infantry")
+	r.rng.seed = 77
+	var res := r.attack(a, t, m)
+	res["expected_elev"] = r.elevation_attack_mult(Vector2i(0, 0), Vector2i(1, 0), make_map(2, 1, {Vector2i(0, 0): int(elev[0]), Vector2i(1, 0): int(elev[1])}))
+	return res
+
+
+func test_ramp_uphill_attack() -> void:
+	var mult := float(terrain_cfg.elevation.ramp_uphill_attack_mult)
+	ok(is_equal_approx(mult, 0.75), "terrain_config elevation has ramp_uphill_attack_mult 0.75")
+	var base := ramp_attack([1, 1], 1.0, true)
+	var up := ramp_attack([1, 2], 1.0, true)
+	ok(not up.is_empty() and is_equal_approx(float(up.ramp_mult), mult) and is_equal_approx(float(up.uphill_mult), mult),
+			"uphill across a ramp: attack x0.75, replacing the per-level 0.85 (%.4f)" % float(up.uphill_mult))
+	ok(is_equal_approx(float(up.damage_to_defender), float(base.damage_to_defender) * mult),
+			"uphill ramp damage = level damage x 0.75 (%.3f vs %.3f)" % [up.damage_to_defender, base.damage_to_defender])
+	ok(is_equal_approx(float(up.damage_to_attacker), float(base.damage_to_attacker)), "the defender's counter-damage is unchanged")
+	var down := ramp_attack([2, 1], 1.0, true)
+	ok(is_equal_approx(float(down.ramp_mult), 1.0) and is_equal_approx(float(down.damage_to_defender), float(base.damage_to_defender)), "downhill across a ramp is unchanged")
+	ok(is_equal_approx(float(base.ramp_mult), 1.0) and is_equal_approx(float(base.uphill_mult), 1.0), "a level attack is unchanged")
+	var off := ramp_attack([1, 2], 1.0, false)
+	ok(is_equal_approx(float(off.ramp_mult), 1.0) and is_equal_approx(float(off.uphill_mult), float(off.expected_elev)), "with ramps off (hand-built map) only the per-level penalty applies")
+	var ledge := ramp_attack([1, 2], 0.0, true)
+	ok(not ledge.is_empty() and is_equal_approx(float(ledge.ramp_mult), 1.0), "an attack up a ledge is still allowed and gets no ramp penalty")
+	var sh := ramp_map(2, [0, 1], 0.0)
+	sh.cells[Vector2i(0, 0)] = HexMap.WATER
+	sh.terrain[Vector2i(0, 0)] = "water"
+	ok(sh.is_ramp(Vector2i(0, 0), Vector2i(1, 0)) and is_equal_approx(make_roster().ramp_attack_mult(Vector2i(0, 0), Vector2i(1, 0), sh), mult),
+			"an attack from shallows up onto land is across a ramp and gets x0.75")
+	var cliff := ramp_attack([1, 3], 1.0, true)
+	ok(not cliff.is_empty() and is_equal_approx(float(cliff.ramp_mult), 1.0), "an attack up a cliff is still allowed and gets no ramp penalty")

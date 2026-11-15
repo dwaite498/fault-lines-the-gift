@@ -302,6 +302,17 @@ func is_ledge(a: Vector2i, b: Vector2i) -> bool:
 	return not _picks_ramp(a, b)
 
 
+## True if a-b is a ramp (R1 edges, R3): ramps are seeded, the hexes differ by exactly 1
+## level, the edge is not between two water hexes, and it is not a ledge. City and
+## water-land edges are always ramps.
+func is_ramp(a: Vector2i, b: Vector2i) -> bool:
+	if not ramps_on or absi(elevation_of(a) - elevation_of(b)) != 1:
+		return false
+	if cells.get(a, WATER) == WATER and cells.get(b, WATER) == WATER:
+		return false
+	return not is_ledge(a, b)
+
+
 ## Ramp connectivity (R1): for each landmass (land ignoring elevation), flood-fill by legal
 ## steps. While it splits into more than one region, every region except the largest (the
 ## anchor) turns its boundary ledge with the lowest ramp hash into a ramp. Every city edge
