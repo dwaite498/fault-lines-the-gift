@@ -58,6 +58,9 @@ func _initialize() -> void:
 	test_frontage()
 	test_harrier()
 	test_ground_textures()
+	test_ramps()
+	test_ramp_render()
+	test_ramp_uphill_attack()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -251,7 +254,8 @@ func test_mountains() -> void:
 				if not m.terrain_of(n).passable or m.terrain[n] == "mountains":
 					continue
 				edges += 1
-				if m.can_step(cell, n) and m.can_step(n, cell):
+				# R1 ledges are 1-level edges, not cliffs: they count as walkable for this cliff check.
+				if (m.can_step(cell, n) and m.can_step(n, cell)) or m.is_ledge(cell, n):
 					open_edges += 1
 				else:
 					cliff_edges += 1
@@ -263,7 +267,7 @@ func test_mountains() -> void:
 	ok(lowered == 0, "every mountain stays at elevation 3 on 20 seeds (%d of %d lowered)" % [lowered, mountains])
 	ok(false_ridges == 0, "every tagged ridge edge is a real cliff (%d tagged, %d false)" % [ridges, false_ridges])
 	ok(untagged == 0, "no mountain borders a level-1 tile across a cliff unless the edge is a tagged ridge (%d untagged)" % untagged)
-	ok(float(open_edges) / float(maxi(edges, 1)) > 0.5, "most mountain edges are walkable (%d of %d); kept cliffs %d (%.1f%%)" % [open_edges, edges, cliff_edges, 100.0 * cliff_edges / maxi(edges, 1)])
+	ok(float(open_edges) / float(maxi(edges, 1)) > 0.5, "most mountain edges are walkable, ledges aside (%d of %d); kept cliffs %d (%.1f%%)" % [open_edges, edges, cliff_edges, 100.0 * cliff_edges / maxi(edges, 1)])
 	ok(foothills > 0, "mountains get hills foothills (%d)" % foothills)
 	var m1 := build(7)
 	var m2 := build(7)
@@ -3225,7 +3229,7 @@ func test_ground_textures() -> void:
 	var view := MapView.new()
 	var gd: Dictionary = view.palette.ground
 	ok(int(gd.tile_px) == 128 and gd.has("texture_alpha"), "palette.ground has tile_px 128 and texture_alpha")
-	var want := {"plains": "lowland", "forest": "lowland", "fungus": "lowland", "hills": "plateau", "mountains": "highland",
+	var want := {"plains": "lowland", "forest": "lowland", "hills": "plateau", "mountains": "highland",
 			"scorched": "scorched", "crater": "crater", "snow": "snow"}
 	var mapped := true
 	for k in want:
@@ -3236,3 +3240,216 @@ func test_ground_textures() -> void:
 			"ground textures are cached CanvasTextures with nearest filter and repeat on")
 	ok(view.ground_texture("water") == null and view.ground_texture("no_such_terrain") == null, "water and unmapped terrains have no texture (flat color)")
 	view.free()
+
+
+## R1 ramps and ledges (RAMPS_SNOW.md section 1; PM decisions Nov 15).
+func ramp_map(w: int, elev: Array, chance: float) -> HexMap:
+	var m := make_map(w, 1)
+	for x in w:
+		m.elevation[Vector2i(x, 0)] = int(elev[x])
+	m.elevation_rules = terrain_cfg.elevation.duplicate()
+	m.elevation_rules["ramp_chance"] = chance
+	m.ramps_on = true
+	return m
+
+
+func test_ramps() -> void:
+	# Check 1: same seed, same ramps and ledges.
+	var a := build(7)
+	var b := build(7)
+	var ledges_a := {}
+	var ledges_b := {}
+	for cell in a.cells:
+		for n in a.neighbors(cell):
+			if a.is_ledge(cell, n):
+				ledges_a[HexMap.edge_key(cell, n)] = true
+			if b.is_ledge(cell, n):
+				ledges_b[HexMap.edge_key(cell, n)] = true
+	ok(not ledges_a.is_empty() and ledges_a == ledges_b and a.ramp_edges == b.ramp_edges, "same seed gives the same ledges (%d) and repaired ramps (%d)" % [ledges_a.size(), a.ramp_edges.size()])
+	# Roughly ramp_chance of the 1-level land edges stay ramps; the rest are ledges.
+	var steps := 0
+	var ledges := 0
+	var regions_ok := true
+	var exits_ok := true
+	var city_ramps_ok := true
+	var shore_ok := true
+	var where := ""
+	for seed_value in range(1, 21):
+		var m := build(seed_value)
+		for cell in m.cells:
+			for n in m.neighbors(cell):
+				var diff := absi(m.elevation_of(cell) - m.elevation_of(n))
+				if diff == 1 and m.cells[cell] != HexMap.WATER and m.cells[n] != HexMap.WATER:
+					steps += 1
+					if m.is_ledge(cell, n):
+						ledges += 1
+				if (m.cells[cell] == HexMap.WATER) != (m.cells[n] == HexMap.WATER) and m.is_ledge(cell, n):
+					shore_ok = false
+		# Check 2 (decision 6): each landmass with a city is one region by legal steps.
+		for city in m.cities:
+			var reach := m.reachable_from(city.cell)
+			for c in m.land_component(city.cell):
+				if m.terrain_of(c).passable and not reach.has(c):
+					regions_ok = false
+					where = "seed %d %s" % [seed_value, str(c)]
+			# Check 3 (decision 2): ledges never take a city exit, so a city with 2+ passable land
+			# neighbors not behind a cliff has 2+ exits (cities boxed in by cliffs stay as they are).
+			var land := 0
+			var exits := 0
+			for n in m.neighbors(city.cell):
+				if m.cells[n] != HexMap.WATER and m.terrain_of(n).passable \
+						and absi(m.elevation_of(n) - m.elevation_of(city.cell)) < int(terrain_cfg.elevation.cliff_diff):
+					land += 1
+					if m.can_step(city.cell, n) and m.can_step(n, city.cell):
+						exits += 1
+				if m.is_ledge(city.cell, n):
+					city_ramps_ok = false
+			if exits < land or (land >= 2 and exits < 2):
+				exits_ok = false
+	var share := float(ledges) / float(maxi(steps, 1))
+	ok(share > 0.3 and share < 0.6, "about half the 1-level land edges are ledges (%d of %d)" % [ledges, steps])
+	ok(regions_ok, "each landmass with a city is one reachable region on 20 seeds %s" % where)
+	ok(exits_ok, "every city with 2+ land neighbors off cliffs has 2+ exits, and ledges never take one, on 20 seeds")
+	ok(city_ramps_ok and shore_ok, "city edges and water-land edges are never ledges")
+	# Check 4 (decision 1): a ledge blocks moves both ways; attacks are unchanged (as with cliffs).
+	var w := ramp_map(2, [1, 2], 0.0)
+	var r := make_roster()
+	var lo := r.spawn_division(0, Vector2i(0, 0), "infantry")
+	var hi := r.spawn_division(1, Vector2i(1, 0), "infantry")
+	ok(w.is_ledge(Vector2i(0, 0), Vector2i(1, 0)) and not w.can_step(Vector2i(0, 0), Vector2i(1, 0)) and not w.can_step(Vector2i(1, 0), Vector2i(0, 0)), "a ledge is impassable both ways")
+	r.divisions.erase(hi)
+	ok(not r.can_move(lo, Vector2i(1, 0), w), "a unit cannot move up a ledge")
+	r.divisions.append(hi)
+	ok(r.can_attack(lo, hi, w), "a ledge does not block attacks (decision 1)")
+	# Check 5: uphill on a ramp costs the target's move_cost + climb_cost; level edges stay open.
+	var rp := ramp_map(3, [1, 2, 2], 1.0)
+	ok(rp.can_step(Vector2i(0, 0), Vector2i(1, 0)) and rp.step_cost(Vector2i(0, 0), Vector2i(1, 0)) == int(rp.terrain_of(Vector2i(1, 0)).move_cost) + int(terrain_cfg.elevation.climb_cost), "uphill on a ramp costs move_cost + 1")
+	ok(not ramp_map(3, [1, 2, 2], 0.0).is_ledge(Vector2i(1, 0), Vector2i(2, 0)), "level edges are never ledges")
+	# City edges are ramps, checked live: founding a city opens its ledges.
+	var c := ramp_map(2, [1, 2], 0.0)
+	c.cities.append({"id": 0, "nation": 0, "cell": Vector2i(1, 0)})
+	ok(not c.is_ledge(Vector2i(0, 0), Vector2i(1, 0)) and c.can_step(Vector2i(0, 0), Vector2i(1, 0)), "an edge touching a city is a ramp (live check)")
+	# Connectivity pass: three plateaus walled by ledges get joined by repaired ramps.
+	var s := ramp_map(3, [1, 2, 3], 0.0)
+	ok(s.reachable_from(Vector2i(0, 0)).size() == 1, "three 1-level plateaus start split by ledges")
+	var flips := s._ensure_ramp_connectivity()
+	ok(flips == 2 and s.ramp_edges.size() == 2 and s.reachable_from(Vector2i(0, 0)).size() == 3, "the connectivity pass turns 2 ledges into ramps and joins them (%d flips)" % flips)
+	ok(s._ensure_ramp_connectivity() == 0, "a second connectivity pass changes nothing")
+	# Hand-built maps (no seeded ramps) keep every 1-level step open, as before R1.
+	ok(make_map(2, 1, {Vector2i(1, 0): 2}).can_step(Vector2i(0, 0), Vector2i(1, 0)), "maps without seeded ramps have no ledges")
+	# Save/load round trip of the repaired ramps (decision 4).
+	var g := {}
+	for seed_value in range(1, 30):
+		g = save_game_setup(seed_value)
+		if not g.map.ramp_edges.is_empty():
+			break
+	var saved: Dictionary = g.map.ramp_edges.duplicate()
+	var extra_key := Vector4i(0, 0, 1, 0)
+	g.map.ramp_edges[extra_key] = true  # a repair the fresh map would not regenerate
+	var path := "user://test_save_r1.sav"
+	SaveGame.write(path, save_state(g, 3))
+	var read := SaveGame.read(path)
+	var g2 := save_game_setup(int(g.cfg.seed))
+	ok(not g2.map.ramp_edges.has(extra_key), "a fresh map lacks the extra repaired ramp")
+	SaveGame.restore(read, g2.map, g2.roster, g2.eco)
+	ok(not saved.is_empty() and g2.map.ramp_edges == g.map.ramp_edges, "repaired ramps survive a save and load (%d)" % g2.map.ramp_edges.size())
+	var old: Dictionary = read.duplicate(true)
+	old.map.erase("ramp_edges")
+	var g3 := save_game_setup(int(g.cfg.seed))
+	SaveGame.restore(old, g3.map, g3.roster, g3.eco)
+	ok(g3.map.ramp_edges == saved, "a save from before R1 keeps the ramps regenerated from the config")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+
+
+## R2 (PM decisions Nov 15): ramp faces, hidden-edge ledge rims, the HEX ledge list and the
+## AI fallback around a ledge-walled city.
+func test_ramp_render() -> void:
+	ok(HexMap.edge_dir_name(Vector2i(2, 1), Vector2i(3, 0)) == "NE" and HexMap.edge_dir_name(Vector2i(2, 1), Vector2i(2, 0)) == "NW"
+			and HexMap.edge_dir_name(Vector2i(2, 2), Vector2i(2, 1)) == "NE" and HexMap.edge_dir_name(Vector2i(2, 2), Vector2i(1, 3)) == "SW"
+			and HexMap.edge_dir_name(Vector2i(2, 2), Vector2i(1, 2)) == "W", "edge compass names on odd and even rows")
+	var lm := ramp_map(2, [2, 1], 0.0)
+	ok(lm.ledge_dirs(Vector2i(0, 0)) == ["E"] and lm.ledge_dirs(Vector2i(1, 0)) == ["W"], "the HEX ledge list names the ledge edge from both sides")
+	ok(ramp_map(2, [2, 1], 1.0).ledge_dirs(Vector2i(0, 0)).is_empty(), "a ramp is not listed as a ledge")
+	var view := MapView.new()
+	view.hex_map = lm
+	ok(view.ledge_rim_edges(Vector2i(0, 0)) == [0] and view.ledge_rim_edges(Vector2i(1, 0)).is_empty(), "a same-row ledge gets a rim on the higher hex's E edge only")
+	# Back edge: the higher hex is in the front row, the lower one behind it (NE of (0,1) is (1,0)).
+	var bm := make_map(2, 2)
+	bm.elevation[Vector2i(0, 1)] = 2
+	bm.elevation_rules = terrain_cfg.elevation.duplicate()
+	bm.elevation_rules["ramp_chance"] = 0.0
+	bm.ramps_on = true
+	view.hex_map = bm
+	var back := view.ledge_rim_edges(Vector2i(0, 1))
+	ok(back.has(5) and back.has(4) and not back.has(1) and not back.has(2), "back ledges get rims on the NE/NW edges, never on the front faces (%s)" % [back])
+	# Front faces: a ramp face draws as a ramp, a ledge face keeps the rock skirt.
+	var fm := make_map(2, 2)
+	fm.elevation[Vector2i(0, 0)] = 2
+	fm.elevation_rules = terrain_cfg.elevation.duplicate()
+	fm.ramps_on = true
+	view.hex_map = fm
+	var sk: Array = view.skirt_polys(Vector2i(0, 0)).filter(func(f: Array) -> bool: return f[3] == Vector2i(0, 1))
+	fm.elevation_rules["ramp_chance"] = 1.0
+	var ramp_face := view.is_ramp_face(Vector2i(0, 0), sk[0][3])
+	fm.elevation_rules["ramp_chance"] = 0.0
+	ok(sk.size() >= 1 and ramp_face and not view.is_ramp_face(Vector2i(0, 0), sk[0][3]), "a front face is drawn as a ramp on a ramp edge and as rock on a ledge")
+	fm.ramps_on = false
+	ok(not view.is_ramp_face(Vector2i(0, 0), sk[0][3]), "maps without seeded ramps keep every face as rock")
+	ok(view.palette.has("ramp") and int(view.palette.ramp.steps) >= 3 and int(view.palette.ramp.steps) <= 4, "art_palette.json has a ramp block with 3-4 step lines")
+	view.free()
+	# AI fallback: the first target city is walled off by ledges, so the AI goes for the next one.
+	var s := attitude_setup({0: Vector2i(7, 4), 1: Vector2i(3, 4), 2: Vector2i(11, 4), 3: Vector2i(7, 8)})
+	var am: HexMap = s.map
+	var roster: DivisionRoster = s.roster
+	var me: Division = roster.spawn_division(0, Vector2i(7, 4))
+	for n in [1, 2, 3]:
+		roster.spawn_division(n, am.cities[n].cell)
+	var first: Dictionary = roster.ai_targets(me, am)[0]
+	am.elevation_rules = terrain_cfg.elevation.duplicate()
+	am.elevation_rules["ramp_chance"] = 0.0
+	am.ramps_on = true
+	for c in am.cells:
+		am.elevation[c] = 2 if HexMap.hex_distance(c, first.cell) <= 1 else 1
+	ok(roster.plan_path(me, first.cell, am).is_empty(), "the first target city (%d) is walled off by ledges" % int(first.id))
+	ok(roster._ai_target_city(me, am) and not me.order_path.is_empty() and HexMap.hex_distance(me.order_path.back(), first.cell) > 1,
+			"the AI picks the next city instead of stalling (heads for %s)" % [me.order_path.back() if not me.order_path.is_empty() else "none"])
+
+
+## R3: an attack up across a ramp has its attack multiplied by ramp_uphill_attack_mult (0.75),
+## replacing the per-level uphill penalty (PM, Nov 15). Downhill, level and ramps-off attacks are unchanged.
+func ramp_attack(elev: Array, chance: float, ramps: bool) -> Dictionary:
+	var m := ramp_map(2, elev, chance)
+	m.ramps_on = ramps
+	var r := make_roster()
+	var a := r.spawn_division(0, Vector2i(0, 0), "infantry")
+	var t := r.spawn_division(1, Vector2i(1, 0), "infantry")
+	r.rng.seed = 77
+	var res := r.attack(a, t, m)
+	res["expected_elev"] = r.elevation_attack_mult(Vector2i(0, 0), Vector2i(1, 0), make_map(2, 1, {Vector2i(0, 0): int(elev[0]), Vector2i(1, 0): int(elev[1])}))
+	return res
+
+
+func test_ramp_uphill_attack() -> void:
+	var mult := float(terrain_cfg.elevation.ramp_uphill_attack_mult)
+	ok(is_equal_approx(mult, 0.75), "terrain_config elevation has ramp_uphill_attack_mult 0.75")
+	var base := ramp_attack([1, 1], 1.0, true)
+	var up := ramp_attack([1, 2], 1.0, true)
+	ok(not up.is_empty() and is_equal_approx(float(up.ramp_mult), mult) and is_equal_approx(float(up.uphill_mult), mult),
+			"uphill across a ramp: attack x0.75, replacing the per-level 0.85 (%.4f)" % float(up.uphill_mult))
+	ok(is_equal_approx(float(up.damage_to_defender), float(base.damage_to_defender) * mult),
+			"uphill ramp damage = level damage x 0.75 (%.3f vs %.3f)" % [up.damage_to_defender, base.damage_to_defender])
+	ok(is_equal_approx(float(up.damage_to_attacker), float(base.damage_to_attacker)), "the defender's counter-damage is unchanged")
+	var down := ramp_attack([2, 1], 1.0, true)
+	ok(is_equal_approx(float(down.ramp_mult), 1.0) and is_equal_approx(float(down.damage_to_defender), float(base.damage_to_defender)), "downhill across a ramp is unchanged")
+	ok(is_equal_approx(float(base.ramp_mult), 1.0) and is_equal_approx(float(base.uphill_mult), 1.0), "a level attack is unchanged")
+	var off := ramp_attack([1, 2], 1.0, false)
+	ok(is_equal_approx(float(off.ramp_mult), 1.0) and is_equal_approx(float(off.uphill_mult), float(off.expected_elev)), "with ramps off (hand-built map) only the per-level penalty applies")
+	var ledge := ramp_attack([1, 2], 0.0, true)
+	ok(not ledge.is_empty() and is_equal_approx(float(ledge.ramp_mult), 1.0), "an attack up a ledge is still allowed and gets no ramp penalty")
+	var sh := ramp_map(2, [0, 1], 0.0)
+	sh.cells[Vector2i(0, 0)] = HexMap.WATER
+	sh.terrain[Vector2i(0, 0)] = "water"
+	ok(sh.is_ramp(Vector2i(0, 0), Vector2i(1, 0)) and is_equal_approx(make_roster().ramp_attack_mult(Vector2i(0, 0), Vector2i(1, 0), sh), mult),
+			"an attack from shallows up onto land is across a ramp and gets x0.75")
+	var cliff := ramp_attack([1, 3], 1.0, true)
+	ok(not cliff.is_empty() and is_equal_approx(float(cliff.ramp_mult), 1.0), "an attack up a cliff is still allowed and gets no ramp penalty")

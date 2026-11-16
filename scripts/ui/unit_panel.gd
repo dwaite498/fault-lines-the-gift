@@ -4,6 +4,8 @@ extends CanvasLayer
 ## Simple on-screen info panel for the selected division. Hidden when nothing is selected.
 
 signal action_pressed(action: String)
+## Mockup M13: an icon button in the bottom row was clicked (id is a key of ICON_BUTTONS).
+signal icon_pressed(id: String)
 
 const ACTION_LABELS := {"move": "Move (M)", "attack": "Attack (A)", "dig_in": "Dig in (D)", "found": "Found city (B)",
 		"follow": "Follow/Swap (F)", "cancel": "Cancel order (Esc)"}
@@ -24,6 +26,13 @@ var details := RichTextLabel.new()
 ## Order, recovery and reinforcing lines under the action buttons.
 var orders := RichTextLabel.new()
 var _shown: Division
+## Mockup M13: framed 32px icon buttons along the bottom, each bound to an action that
+## already exists (key or menu button). Icons: assets/ui/icons/icon_<id>[_active].png.
+const ICON_BUTTONS := {"end_turn": "End turn (Space)", "recruit": "Recruit at the selected city (R)",
+		"save": "Save game", "menu": "Pause menu (Esc)"}
+const ICON_SIZE := 32.0
+var icon_row := HBoxContainer.new()
+var icon_buttons := {}
 var _pal: Dictionary = MapView.load_palette()
 var max_fortify := 3
 var flank_per_hex := 0.15
@@ -71,8 +80,36 @@ func _init() -> void:
 		b.visible = false
 		_box.add_child(b)
 		buttons[a] = b
+	panel.add_child(icon_row)
+	for id: String in ICON_BUTTONS:
+		var b := Button.new()
+		b.focus_mode = Control.FOCUS_NONE
+		b.custom_minimum_size = Vector2(ICON_SIZE, ICON_SIZE)
+		b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		b.vertical_icon_alignment = VERTICAL_ALIGNMENT_CENTER
+		b.expand_icon = false
+		b.tooltip_text = ICON_BUTTONS[id]
+		var normal: Texture2D = load("res://assets/ui/icons/icon_%s.png" % id)
+		var active: Texture2D = load("res://assets/ui/icons/icon_%s_active.png" % id)
+		b.set_meta("active", active)
+		b.icon = normal
+		# The _active icon on hover and press; the U3 theme draws the button frame states.
+		b.mouse_entered.connect(func() -> void: b.icon = active)
+		b.mouse_exited.connect(func() -> void: b.icon = normal)
+		b.button_down.connect(func() -> void: b.icon = active)
+		b.pressed.connect(func() -> void: icon_pressed.emit(id))
+		icon_row.add_child(b)
+		icon_buttons[id] = b
 
 func _ready() -> void:
+	# M13: the theme's 8px side padding would make a 40px button; keep each icon button a
+	# 32px square with the 24px icon centered (same frame styles, 4px padding).
+	for b: Button in icon_buttons.values():
+		for st: String in ["normal", "hover", "pressed", "disabled", "focus"]:
+			var sb := b.get_theme_stylebox(st).duplicate() as StyleBox
+			for side: Side in [SIDE_LEFT, SIDE_TOP, SIDE_RIGHT, SIDE_BOTTOM]:
+				sb.set_content_margin(side, (ICON_SIZE - 24.0) / 2.0)
+			b.add_theme_stylebox_override(st, sb)
 	_layout()
 	get_viewport().size_changed.connect(_layout)
 
@@ -80,6 +117,7 @@ func _layout() -> void:
 	var vs := get_viewport().get_visible_rect().size
 	panel.position = Vector2(vs.x - WIDTH, 32)
 	panel.size = Vector2(WIDTH, vs.y - 32)
+	icon_row.position = Vector2(8, panel.size.y - ICON_SIZE - 8)
 
 ## Shows d's current stats, or hides the panel when d is null.
 ## `disabled` maps an action to the reason it is shown greyed out instead of hidden.
@@ -112,6 +150,9 @@ func refresh(d: Division, hex_map: HexMap, actions: Array[String] = [], mode := 
 				d.fortify_level, max_fortify, d.attack, d.defense, ("  Flanked -%d%%" % roundi(penalty * 100.0)) if penalty > 0.0 else ""],
 		"[b]SUPPLY[/b]  " + ("[color=%s]OK[/color]" % _pal.ui.accent if d.supplied else "[color=%s]OUT[/color]" % _pal.ui.supply_out),
 	]
+	var ledges := hex_map.ledge_dirs(d.hex)
+	if not ledges.is_empty():  # R2: ledge edges of the unit's hex, under the HEX line
+		lines.insert(1, "[color=%s]Ledge: impassable to %s[/color]" % [dim, ", ".join(ledges)])
 	details.text = "\n".join(lines)
 	var o: Array[String] = []
 	if not d.order_path.is_empty():
