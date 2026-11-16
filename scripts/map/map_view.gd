@@ -1025,6 +1025,9 @@ func _draw_peaks(cell: Vector2i, dim: bool) -> void:
 	var lit := Color.html(pk.lit).lerp(Color.BLACK, fade)
 	var shade := Color.html(pk.shade).lerp(Color.BLACK, fade)
 	var ridge := Color.html(pk.ridge).lerp(Color.BLACK, fade)
+	var snowcap := hex_map.is_snowcap(cell)
+	var cap_lit := Color.html(pk.snowcap_lit).lerp(Color.BLACK, fade)
+	var cap_shade := Color.html(pk.snowcap_shade).lerp(Color.BLACK, fade)
 	var center := hex_to_pixel(cell)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash(cell) ^ 0x5eed
@@ -1045,7 +1048,20 @@ func _draw_peaks(cell: Vector2i, dim: bool) -> void:
 		var rn := base.lerp(apex, 0.45) + Vector2(hw * rng.randf_range(0.4, 0.55), rng.randf_range(-2.0, 1.0))
 		draw_colored_polygon(PackedVector2Array([base + Vector2(-hw, 0), ln, apex, foot]), lit)
 		draw_colored_polygon(PackedVector2Array([foot, apex, rn, base + Vector2(hw, 0)]), shade)
+		if snowcap:
+			_draw_snowcap(base + Vector2(-hw, 0), ln, apex, foot, rn, base + Vector2(hw, 0), cap_lit, cap_shade, float(pk.snowcap_frac))
 		draw_polyline(PackedVector2Array([base + Vector2(-hw, 0), ln, apex, rn, base + Vector2(hw, 0)]), ridge, 1.0)
+
+
+## SN2: snow on the top snowcap_frac of a peak: the lit (left) and shaded (right) faces get
+## a cap in snowcap_lit / snowcap_shade, cut along each ridge toward the peak's center line.
+func _draw_snowcap(left: Vector2, ln: Vector2, apex: Vector2, foot: Vector2, rn: Vector2, right: Vector2,
+		lit: Color, shade: Color, frac: float) -> void:
+	var mid := apex.lerp(foot, frac)
+	var l := apex.lerp(ln, minf(frac / 0.45, 1.0))
+	var r := apex.lerp(rn, minf(frac / 0.55, 1.0))
+	draw_colored_polygon(PackedVector2Array([l, apex, mid + Vector2(-1.5, 1.0)]), lit)
+	draw_colored_polygon(PackedVector2Array([apex, r, mid + Vector2(1.5, -1.0)]), shade)
 
 
 func _fungus_neighbors(cell: Vector2i) -> int:
