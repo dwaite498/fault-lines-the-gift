@@ -63,6 +63,7 @@ func _initialize() -> void:
 	test_ramp_render()
 	test_ramp_uphill_attack()
 	test_icon_next_unit()
+	test_snow()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -770,7 +771,7 @@ func test_growth_tuning() -> void:
 	ok(fm.fungus_adjacent(city) == 3 and is_equal_approx(fm.terrain_growth_mult(city), 0.857375), "acceptance 4: 3 adjacent fungus tiles give 0.95^3 = 0.857")
 	fm.city_rules.fungus_adjacent_growth_mult = 0.8
 	ok(is_equal_approx(fm.terrain_growth_mult(city), 0.7), "the fungus multiplier never goes below 0.7 (0.8^3 = 0.512 -> 0.7)")
-	ok(fm.city_rules.terrain_growth_mult.size() == 6 and is_equal_approx(fm.city_rules.fungus_growth_min_mult, 0.7), "terrain table and fungus minimum are in config")
+	ok(fm.city_rules.terrain_growth_mult.size() == 7 and is_equal_approx(fm.city_rules.fungus_growth_min_mult, 0.7), "terrain table and fungus minimum are in config")
 
 
 ## A generated map with a roster whose divisions sit on the city hexes and an economy.
@@ -3494,3 +3495,74 @@ func test_ground_g2() -> void:
 	ok(lines.size() == v.skirt_polys(Vector2i(0, 0)).size() and lines.size() > 0 and v.edge_dark_lines(Vector2i(1, 0)).is_empty(),
 			"edge darkening runs along each top-face edge above a skirt, and nowhere else")
 	v.free()
+
+
+## SN1 snow (RAMPS_SNOW.md section 2; PM decisions Nov 16).
+func test_snow() -> void:
+	var st: Dictionary = terrain_cfg.types.snow
+	ok(int(st.move_cost) == 2 and is_equal_approx(float(st.defense_mult), 1.1) and int(st.food) == 0 and int(st.labor) == 0 and bool(st.passable),
+			"types.snow: move 2, defense x1.1, food 0, labor 0, passable")
+	var cc: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://data/cities_config.json"))
+	ok(is_equal_approx(float(cc.terrain_growth_mult.snow), 0.7), "a city on snow grows at x0.7 (cities_config terrain_growth_mult.snow)")
+	# Check 1: same seed, same snow; only polar rows, only from plains/forest/hills, never at or next to a start.
+	var a := build(7)
+	var b := build(7)
+	ok(a.terrain == b.terrain, "the same seed gives the same snow")
+	var polar_ok := true
+	var start_ok := true
+	var snow := 0
+	var land := 0
+	var cand := 0
+	for seed_value in range(1, 11):
+		var m := build(seed_value)
+		var plain := HexMap.new()
+		plain.generate(20, 12, seed_value, 0.6, 4, 2, 3)
+		var cfg: Dictionary = terrain_cfg.duplicate(true)
+		cfg.erase("snow")
+		plain.generate_terrain(cfg)
+		var near := {}
+		for city in m.cities:
+			near[city.cell] = true
+			for n in m.neighbors(city.cell):
+				near[n] = true
+		for cell in m.terrain:
+			if m.cells[cell] == HexMap.WATER:
+				continue
+			land += 1
+			var polar: bool = cell.y < 2 or cell.y >= m.height - 2
+			if polar and not near.has(cell) and ["plains", "forest", "hills"].has(plain.terrain[cell]):
+				cand += 1
+			if m.terrain[cell] == "snow":
+				snow += 1
+				if not polar or not ["plains", "forest", "hills"].has(plain.terrain[cell]) or m.elevation[cell] != plain.elevation[cell]:
+					polar_ok = false
+				if near.has(cell):
+					start_ok = false
+			elif m.terrain[cell] != plain.terrain[cell]:
+				polar_ok = false
+	ok(polar_ok, "snow only replaces plains/forest/hills in the 2 polar rows, keeps their elevation, and changes nothing else")
+	ok(start_ok and snow > 0, "no city hex or hex next to a starting city is snow (%d snow tiles)" % snow)
+	var share := float(snow) / float(maxi(cand, 1))
+	ok(share > 0.6 and share < 0.8, "about 70%% of eligible polar hexes turn to snow (%.2f; %.0f%% of land)" % [share, 100.0 * snow / land])
+	# Check 3: cold attrition -3 org outside own territory; none at home, none for natives.
+	var w := nat_world()
+	var m2: HexMap = w.map
+	var r: DivisionRoster = w.roster
+	m2.snow_rules = terrain_cfg.snow
+	m2.terrain_types = terrain_cfg.types
+	var out_cell := Vector2i(6, 4)
+	var home_cell := Vector2i(2, 4)
+	m2.terrain[out_cell] = "snow"
+	m2.terrain[home_cell] = "snow"
+	m2.cells[out_cell] = HexMap.UNCLAIMED
+	m2.cells[home_cell] = 0
+	var cold := r.spawn_division(0, out_cell, "infantry")
+	var home := r.spawn_division(0, home_cell, "infantry")
+	var worm := r.spawn_division(-2, out_cell, "tendril_worm")
+	cold.hex = out_cell
+	worm.hex = out_cell
+	var before_w := worm.org
+	r._cold_attrition(m2)
+	ok(is_equal_approx(cold.org, cold.max_org - 3.0) and is_equal_approx(cold.strength, cold.max_strength), "a unit on snow outside its territory loses 3 org (no strength)")
+	ok(is_equal_approx(home.org, home.max_org) and is_equal_approx(worm.org, before_w), "no cold attrition in its own territory or for natives")
+	ok(m2.step_cost(Vector2i(5, 4), out_cell, 0) >= 2, "entering snow costs 2 move points")
