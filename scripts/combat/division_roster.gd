@@ -324,6 +324,20 @@ func _fungus_attrition(hex_map: HexMap) -> void:
 		d.strength = maxf(d.strength - float(rules.strength) * scale, minf(float(rules.min_strength), d.strength))
 
 
+## SN1 cold attrition (terrain_config.json snow.cold_attrition_org): a division ending the turn
+## on snow outside its own nation's territory (unclaimed counts as outside) loses that much org,
+## scaled by HexMap.cold_scale (natives exempt). No strength loss.
+func _cold_attrition(hex_map: HexMap) -> void:
+	if hex_map == null or hex_map.snow_rules.is_empty():
+		return
+	for d in divisions:
+		if hex_map.terrain_name(d.hex) != "snow" or int(hex_map.cells.get(d.hex, HexMap.WATER)) == d.nation:
+			continue
+		var scale := hex_map.cold_scale(d.nation)
+		if scale > 0.0:
+			d.org = maxf(d.org - float(hex_map.snow_rules.cold_attrition_org) * scale, 0.0)
+
+
 ## Highest fortify level d can reach: combat.max_fortify plus the faction's max_fortify_mod.
 func max_fortify_for(d: Division) -> int:
 	var mod := int(traits.mod(d.nation, "max_fortify_mod", 0)) if traits != null else 0
@@ -1193,6 +1207,7 @@ func end_turn(hex_map: HexMap = null) -> void:
 	if hex_map:
 		update_supply(hex_map)
 	_fungus_attrition(hex_map)
+	_cold_attrition(hex_map)
 	var rate: float = combat.org_recovery_per_morale
 	for d in divisions:
 		if not d.supplied:

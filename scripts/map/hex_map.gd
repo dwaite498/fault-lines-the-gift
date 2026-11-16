@@ -44,7 +44,7 @@ var city_rules := {
 	"housing_per_infra": 3000, "people_per_labor_point": 2000,
 	"base_growth": 0.005, "growth_labor_max_bonus": 0.01, "min_growth": 0.001,
 	"terrain_growth_mult": {"plains": 1.0, "coast": 1.1, "forest": 0.9, "hills": 0.9,
-			"mountains": 0.7, "shallow_ocean": 1.0},
+			"mountains": 0.7, "snow": 0.7, "shallow_ocean": 1.0},
 	"fungus_adjacent_growth_mult": 0.95, "fungus_growth_min_mult": 0.7,
 	"division_people_cost": 1000, "pool_fill_rate": 0.005,
 	"pool_cap": 0.15, "capital_start_pool": 1000, "colony_start_pool": 0,
@@ -146,6 +146,9 @@ var ramp_edges: Dictionary = {}
 var ramps_on := false
 ## Terrain name -> {color, move_cost, defense_mult, passable} from terrain_config.json.
 var terrain_types: Dictionary = {}
+## SN1: terrain_config.json `snow` block (polar_rows, polar_chance, polar_from, salt,
+## cold_attrition_org); empty disables polar snow and cold attrition.
+var snow_rules: Dictionary = {}
 
 
 ## Builds a map from the map config (width, height, seed, land_ratio, nation_count)
@@ -198,6 +201,40 @@ func generate_terrain(config: Dictionary) -> void:
 	for city in cities:
 		terrain[city.cell] = "plains"
 	_assign_elevation(config.get("elevation", {}))
+	snow_rules = config.get("snow", {})
+	_apply_polar_snow()
+
+
+## SN1 (RAMPS_SNOW.md section 2): in the top and bottom polar_rows rows, land whose terrain is in
+## polar_from (plains, forest, hills) turns to snow with polar_chance, by a per-cell hash of the
+## seed and salt (deterministic, nothing extra to save). Runs after the elevation pass, so snow
+## keeps the elevation of the terrain it replaced. City hexes and every hex next to a starting
+## city are skipped (PM, Nov 16), so starts never touch snow and city spots don't move.
+func _apply_polar_snow() -> void:
+	if snow_rules.is_empty() or not terrain_types.has("snow"):
+		return
+	var rows := int(snow_rules.polar_rows)
+	var from: Array = snow_rules.polar_from
+	var near_city := {}
+	for city in cities:
+		near_city[city.cell] = true
+		for n in neighbors(city.cell):
+			near_city[n] = true
+	for cell in terrain:
+		if (cell.y >= rows and cell.y < height - rows) or near_city.has(cell) or not from.has(terrain[cell]):
+			continue
+		var rng := RandomNumberGenerator.new()
+		rng.seed = hash([seed_value, cell, int(snow_rules.salt)])
+		if rng.randf() < float(snow_rules.polar_chance):
+			terrain[cell] = "snow"
+
+
+## SN1: cold attrition scale for a nation: 0 for natives or without snow rules, else the
+## faction's cold_attrition_mult trait (1.0 for every faction today).
+func cold_scale(nation: int) -> float:
+	if snow_rules.is_empty() or nation == int(natives_config.get("native_nation", -2)):
+		return 0.0
+	return float(traits.mod(nation, "cold_attrition_mult", 1.0)) if traits != null else 1.0
 
 
 func _assign_elevation(cfg: Dictionary) -> void:
