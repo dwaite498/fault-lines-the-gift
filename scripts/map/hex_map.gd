@@ -229,12 +229,15 @@ func _apply_polar_snow() -> void:
 			terrain[cell] = "snow"
 
 
-## SN2: a snowcap is a mountain hex at the top elevation (elevation.max, 4), on maps with snow
-## rules. Checked live from terrain and elevation, so there is nothing extra to save. It keeps
-## mountain stats and adds cold attrition.
+## SN2: a snowcap is a mountain hex in the polar rows (snow.polar_rows, 2), on maps with snow
+## rules (PM, Nov 16: generated mountains never reach elevation 4, so the polar rows stand in for
+## "highest"; about 3.4% of land). Checked live from terrain and row, so there is nothing extra to
+## save. It keeps mountain stats and adds cold attrition.
 func is_snowcap(cell: Vector2i) -> bool:
-	return not snow_rules.is_empty() and terrain_name(cell) == "mountains" \
-			and elevation_of(cell) >= int(elevation_rules.get("max", 4))
+	if snow_rules.is_empty() or terrain_name(cell) != "mountains":
+		return false
+	var rows := int(snow_rules.polar_rows)
+	return cell.y < rows or cell.y >= height - rows
 
 
 ## SN2: cold terrain for attrition: snow or a snowcap.

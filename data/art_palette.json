@@ -55,7 +55,7 @@
 	"peaks": {
 		"snowcap_lit": "#F2F5F4",
 		"snowcap_shade": "#AEBCC2",
-		"snowcap_frac": 0.4,
+		"snowcap_frac": 0.55,
 		"lit": "#E8CF94",
 		"shade": "#9A7A48",
 		"ridge": "#5C4630",
