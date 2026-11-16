@@ -58,6 +58,7 @@ func _initialize() -> void:
 	test_frontage()
 	test_harrier()
 	test_ground_textures()
+	test_ground_g2()
 	test_ramps()
 	test_ramp_render()
 	test_ramp_uphill_attack()
@@ -3463,3 +3464,33 @@ func test_icon_next_unit() -> void:
 			"the next_unit icon button exists with the 'Next unit (Tab)' tooltip; nation stays unused")
 	var src := FileAccess.get_file_as_string("res://scripts/main.gd")
 	ok(src.contains("\"next_unit\":\n\t\t\t_press_key(KEY_TAB)"), "clicking next_unit feeds the existing Tab key handling")
+
+
+## G2: no M8 speckle on textured terrain, accents behind ground.accents_on, and the top-face
+## edge darkening above skirts.
+func test_ground_g2() -> void:
+	var view := MapView.new()
+	var gd: Dictionary = view.palette.ground
+	ok(not bool(gd.accents_on) and int(gd.accent_pebbles) <= 2 and int(gd.accent_cracks) <= 2 and bool(gd.edge_dark_on)
+			and int(gd.edge_dark_px) >= 2 and int(gd.edge_dark_px) <= 3 and gd.has("edge_dark_color"),
+			"palette.ground has accents off by default at low counts, and a 2-3px edge darkening")
+	ok(view.ground_speckle_count("plains") == 0 and view.ground_speckle_count("hills") == 0
+			and view.ground_accent_count("plains") == 0 and view.ground_accent_count("mountains") == 0,
+			"textured terrains draw no speckle and no accents by default")
+	gd.accents_on = true
+	ok(view.ground_accent_count("scorched") == int(gd.accent_pebbles) and view.ground_accent_count("hills") == int(gd.accent_cracks),
+			"with accents_on, textured terrains draw the low accent counts")
+	gd.accents_on = false
+	gd.textures.erase("plains")
+	view._ground_textures.clear()
+	ok(view.ground_speckle_count("plains") == MapView.GROUND_SPECKLE and view.ground_accent_count("plains") == 3,
+			"an untextured terrain keeps the M8 speckle and accents")
+	view.free()
+	var m := make_map(2, 2)
+	m.elevation[Vector2i(0, 0)] = 2
+	var v := MapView.new()
+	v.hex_map = m
+	var lines := v.edge_dark_lines(Vector2i(0, 0))
+	ok(lines.size() == v.skirt_polys(Vector2i(0, 0)).size() and lines.size() > 0 and v.edge_dark_lines(Vector2i(1, 0)).is_empty(),
+			"edge darkening runs along each top-face edge above a skirt, and nowhere else")
+	v.free()

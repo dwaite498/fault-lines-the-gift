@@ -154,6 +154,7 @@ func _draw() -> void:
 			draw_colored_polygon(corners, terrain_color(cell))
 			_draw_ground_texture(cell, corners)
 			_draw_ground(cell, corners)
+			_draw_edge_dark(cell)
 			_draw_ledge_rims(cell, corners)
 			if hex_map.terrain_name(cell) == "crater":
 				_draw_crater(cell)
@@ -366,9 +367,14 @@ func ledge_rim_edges(cell: Vector2i) -> Array[int]:
 ## Mockup M8: subtle ground texture on a land top face, seeded from the cell so it is the
 ## same on every redraw and after save/load. 1-2px speckle in a slightly darker and lighter
 ## shade of the terrain color; rust terrain adds pebbles, ochre and highland add short cracks.
+## G2: textured terrains (palette.ground) skip the speckle, and draw the pebbles and cracks
+## only when ground.accents_on is set, at ground.accent_pebbles / accent_cracks counts.
 func _draw_ground(cell: Vector2i, corners: PackedVector2Array) -> void:
 	var tname := hex_map.terrain_name(cell)
 	if is_water(cell) or tname == "crater":
+		return
+	var accents := ground_accent_count(tname)
+	if ground_speckle_count(tname) == 0 and accents == 0:
 		return
 	var base := terrain_color(cell)
 	var dark := base.darkened(GROUND_SHADE)
@@ -376,16 +382,16 @@ func _draw_ground(cell: Vector2i, corners: PackedVector2Array) -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash(cell) ^ 0x6d38
 	var center := hex_to_pixel(cell)
-	for i in GROUND_SPECKLE:
+	for i in ground_speckle_count(tname):
 		var s := 1.0 if rng.randf() < 0.6 else 2.0
 		draw_rect(Rect2(_ground_point(rng, center, corners), Vector2(s, s)), dark if rng.randf() < 0.6 else light)
 	if tname in GROUND_PEBBLE:
-		for i in 3:
+		for i in accents:
 			var p := _ground_point(rng, center, corners)
 			draw_circle(p, rng.randf_range(1.5, 2.2), dark)
 			draw_rect(Rect2(p + Vector2(-1, -1), Vector2(1, 1)), light)
 	elif tname in GROUND_CRACK:
-		for i in 2:
+		for i in accents:
 			var p := _ground_point(rng, center, corners)
 			var pts := PackedVector2Array([p])
 			var dir := Vector2.from_angle(rng.randf() * TAU) * Vector2(1.0, 0.5)
@@ -398,6 +404,50 @@ func _draw_ground(cell: Vector2i, corners: PackedVector2Array) -> void:
 				lit.append(q + Vector2(0, 1))
 			draw_polyline(lit, light, 1.0)
 			draw_polyline(pts, dark, 1.0)
+
+
+## G2: M8 speckle dots on a top face: none on a terrain with a ground texture.
+func ground_speckle_count(tname: String) -> int:
+	return 0 if ground_texture(tname) != null else GROUND_SPECKLE
+
+
+## G2: M8 pebble/crack accents on a top face (0 for terrains with neither). Untextured
+## terrains keep M8 (3 pebbles, 2 cracks); textured ones get ground.accent_pebbles /
+## accent_cracks only when ground.accents_on is set.
+func ground_accent_count(tname: String) -> int:
+	if not (tname in GROUND_PEBBLE or tname in GROUND_CRACK):
+		return 0
+	var pebble := tname in GROUND_PEBBLE
+	if ground_texture(tname) == null:
+		return 3 if pebble else 2
+	var gd: Dictionary = palette.ground
+	if not bool(gd.get("accents_on", false)):
+		return 0
+	return int(gd.accent_pebbles if pebble else gd.accent_cracks)
+
+
+## G2: a thin dark band (ground.edge_dark_px, edge_dark_color) just inside each top-face
+## edge that sits above a skirt (rock or ramp), so the drop reads at the lip. Off when
+## ground.edge_dark_on is false.
+func _draw_edge_dark(cell: Vector2i) -> void:
+	var gd: Dictionary = palette.ground
+	if not bool(gd.get("edge_dark_on", false)):
+		return
+	var center := hex_to_pixel(cell)
+	var px := float(gd.edge_dark_px)
+	var color := Color(gd.edge_dark_color)
+	for e in edge_dark_lines(cell):
+		var inset: Vector2 = ((e[0] + e[1]) * 0.5).direction_to(center) * px * 0.5
+		draw_line(e[0] + inset, e[1] + inset, color, px)
+
+
+## G2: the top-face edges [a, b] of cell that sit above a skirt.
+func edge_dark_lines(cell: Vector2i) -> Array:
+	var out := []
+	for sk in skirt_polys(cell):
+		var poly: PackedVector2Array = sk[0]
+		out.append([poly[0], poly[1]])
+	return out
 
 
 ## A seeded point inside the top face, kept off the edges (70% toward a random corner pair).
