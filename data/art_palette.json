@@ -30,6 +30,7 @@
 		"striation_light": 0.08,
 		"striation_min_drop": 2
 	},
+  "ground": {"tile_px": 128, "texture_alpha": 1.0, "textures": {"plains": "res://assets/terrain/ground/ground_lowland.png", "forest": "res://assets/terrain/ground/ground_lowland.png", "hills": "res://assets/terrain/ground/ground_plateau.png", "mountains": "res://assets/terrain/ground/ground_highland.png", "scorched": "res://assets/terrain/ground/ground_scorched.png", "crater": "res://assets/terrain/ground/ground_crater.png", "snow": "res://assets/terrain/ground/ground_snow.png"}},
   "ramp": {"lighten": 0.18, "bottom_dark": 0.12, "steps": 4, "step_dark": 0.22, "cheek_frac": 0.2, "cheek_dark": 0.3, "ledge_rim_px": 3, "ledge_rim_color": "#070C0BCC"},
 	"grid": {
 		"color": "#000000",
