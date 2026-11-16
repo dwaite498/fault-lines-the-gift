@@ -28,7 +28,7 @@ var orders := RichTextLabel.new()
 var _shown: Division
 ## Mockup M13: framed 32px icon buttons along the bottom, each bound to an action that
 ## already exists (key or menu button). Icons: assets/ui/icons/icon_<id>[_active].png.
-const ICON_BUTTONS := {"end_turn": "End turn (Space)", "recruit": "Recruit at the selected city (R)",
+const ICON_BUTTONS := {"end_turn": "End turn (Space)", "next_unit": "Next unit (Tab)", "recruit": "Recruit at the selected city (R)",
 		"save": "Save game", "menu": "Pause menu (Esc)"}
 const ICON_SIZE := 32.0
 var icon_row := HBoxContainer.new()
