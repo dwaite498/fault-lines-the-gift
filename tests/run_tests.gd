@@ -61,6 +61,7 @@ func _initialize() -> void:
 	test_ramps()
 	test_ramp_render()
 	test_ramp_uphill_attack()
+	test_icon_next_unit()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -3453,3 +3454,12 @@ func test_ramp_uphill_attack() -> void:
 			"an attack from shallows up onto land is across a ramp and gets x0.75")
 	var cliff := ramp_attack([1, 3], 1.0, true)
 	ok(not cliff.is_empty() and is_equal_approx(float(cliff.ramp_mult), 1.0), "an attack up a cliff is still allowed and gets no ramp penalty")
+
+
+## M13 follow-up: the next_unit icon is bound to the Tab action; nation stays unused.
+func test_icon_next_unit() -> void:
+	ok(str(UnitPanel.ICON_BUTTONS.get("next_unit", "")) == "Next unit (Tab)" and not UnitPanel.ICON_BUTTONS.has("nation")
+			and ResourceLoader.exists("res://assets/ui/icons/icon_next_unit.png") and ResourceLoader.exists("res://assets/ui/icons/icon_next_unit_active.png"),
+			"the next_unit icon button exists with the 'Next unit (Tab)' tooltip; nation stays unused")
+	var src := FileAccess.get_file_as_string("res://scripts/main.gd")
+	ok(src.contains("\"next_unit\":\n\t\t\t_press_key(KEY_TAB)"), "clicking next_unit feeds the existing Tab key handling")

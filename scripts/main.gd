@@ -164,13 +164,15 @@ func _on_save_pressed() -> void:
 	_pause_menu.status.text = "Game saved" if SaveGame.write(SaveGame.SLOT_PATH, _capture_state()) else "Could not save"
 
 
-## Mockup M13 icon row. Each button runs an action that already exists: end turn and
-## recruit go through the Space and R key handling (same guards), the menu button opens
+## Mockup M13 icon row. Each button runs an action that already exists: end turn, next unit
+## and recruit go through the Space, Tab and R key handling (same guards), the menu button opens
 ## the pause menu, save is the pause menu's Save Game.
 func _on_icon_pressed(id: String) -> void:
 	match id:
 		"end_turn":
 			_press_key(KEY_SPACE)
+		"next_unit":
+			_press_key(KEY_TAB)
 		"recruit":
 			_press_key(KEY_R)
 		"menu":
