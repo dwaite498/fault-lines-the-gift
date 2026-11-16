@@ -63,6 +63,7 @@ func _initialize() -> void:
 	test_ramp_render()
 	test_ramp_uphill_attack()
 	test_snow()
+	test_snowcap()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -3556,3 +3557,40 @@ func test_snow() -> void:
 	ok(is_equal_approx(cold.org, cold.max_org - 3.0) and is_equal_approx(cold.strength, cold.max_strength), "a unit on snow outside its territory loses 3 org (no strength)")
 	ok(is_equal_approx(home.org, home.max_org) and is_equal_approx(worm.org, before_w), "no cold attrition in its own territory or for natives")
 	ok(m2.step_cost(Vector2i(5, 4), out_cell, 0) >= 2, "entering snow costs 2 move points")
+
+
+## SN2-lite (RAMPS_SNOW.md section 2; PM decisions Nov 16): snowcaps are mountains in the polar
+## rows, fungus placement skips snow, and snowcaps take cold attrition.
+func test_snowcap() -> void:
+	var w := nat_world()
+	var m: HexMap = w.map
+	var r: DivisionRoster = w.roster
+	m.terrain_types = terrain_cfg.types
+	m.terrain[Vector2i(4, 0)] = "mountains"
+	m.terrain[Vector2i(4, 8)] = "mountains"
+	m.terrain[Vector2i(4, 4)] = "mountains"
+	m.terrain[Vector2i(5, 0)] = "snow"
+	ok(not m.is_snowcap(Vector2i(4, 0)), "no snowcaps without snow rules")
+	m.snow_rules = terrain_cfg.snow
+	ok(m.is_snowcap(Vector2i(4, 0)) and m.is_snowcap(Vector2i(4, 8)) and not m.is_snowcap(Vector2i(4, 4)) and not m.is_snowcap(Vector2i(5, 0)),
+			"a snowcap is a mountain in the 2 polar rows (top or bottom), nothing else")
+	ok(not m.can_host_fungus(Vector2i(5, 0)) and m.can_host_fungus(Vector2i(4, 0)) and m.can_host_fungus(Vector2i(6, 4)),
+			"can_host_fungus: not on snow; snowcaps and other land can host fungus")
+	var d := r.spawn_division(0, Vector2i(4, 0), "infantry")
+	d.hex = Vector2i(4, 0)
+	m.cells[Vector2i(4, 0)] = HexMap.UNCLAIMED
+	r._cold_attrition(m)
+	ok(is_equal_approx(d.org, d.max_org - 3.0), "a unit on a snowcap outside its territory loses 3 org")
+	# Fungus placement: an all-snow map gets none; the same map as plains gets some.
+	var fw := nat_world()
+	var fm: HexMap = fw.map
+	fm.terrain_types = terrain_cfg.types
+	for cell in fm.cells:
+		fm.terrain[cell] = "snow"
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 5
+	var none := fm.place_fungus(rng)
+	for cell in fm.cells:
+		fm.terrain[cell] = "plains"
+	rng.seed = 5
+	ok(none == 0 and fm.fungus_tiles.is_empty() and fm.place_fungus(rng) > 0, "initial fungus placement skips snow tiles")
