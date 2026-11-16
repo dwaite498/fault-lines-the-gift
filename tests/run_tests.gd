@@ -63,6 +63,7 @@ func _initialize() -> void:
 	test_ramp_render()
 	test_ramp_uphill_attack()
 	test_icon_next_unit()
+	test_top_bar_m14()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -3494,3 +3495,23 @@ func test_ground_g2() -> void:
 	ok(lines.size() == v.skirt_polys(Vector2i(0, 0)).size() and lines.size() > 0 and v.edge_dark_lines(Vector2i(1, 0)).is_empty(),
 			"edge darkening runs along each top-face edge above a skirt, and nowhere else")
 	v.free()
+
+
+## M14: top bar has the faction emblem, one WEEK N title (no Turn N), and the save/menu icon
+## buttons on the right; the panel row keeps end turn, next unit and recruit (no duplicates).
+func test_top_bar_m14() -> void:
+	var bar := TopBar.new()
+	bar.refresh("Aurora", 7, Color.RED)
+	ok(bar.week.text == "WEEK 7" and bar.emblem.tooltip_text == "Aurora" and bar.emblem.color == Color.RED and not "turn_label" in bar,
+			"the top bar shows the emblem (faction tooltip, faction color) and one WEEK N title, with no Turn N")
+	ok(bar.icon_buttons.keys() == ["save", "menu"] and bar.icon_buttons.save.icon != null, "save and menu are framed icon buttons on the right of the top bar")
+	var ids: Array = []
+	bar.icon_pressed.connect(func(id: String) -> void: ids.append(id))
+	bar.icon_buttons.menu.pressed.emit()
+	ok(ids == ["menu"], "a top bar button emits icon_pressed with its id (main.gd runs it like the M13 buttons)")
+	var shared := false
+	for id in UnitPanel.ICON_BUTTONS:
+		shared = shared or TopBar.ICON_BUTTONS.has(id)
+	ok(not shared and UnitPanel.ICON_BUTTONS.has("end_turn") and UnitPanel.ICON_BUTTONS.has("next_unit") and UnitPanel.ICON_BUTTONS.has("recruit"),
+			"no button appears in both rows")
+	bar.free()

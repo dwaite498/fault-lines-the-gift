@@ -104,3 +104,6 @@ DataValue/base_type = &"Label"
 DataValue/colors/font_color = Color(0.372549, 0.827451, 0.7529412, 1)
 TopBar/base_type = &"Panel"
 TopBar/styles/panel = SubResource("bar")
+TopBarTitle/base_type = &"Label"
+TopBarTitle/colors/font_color = Color(0.9019608, 0.7215686, 0.3607843, 1)
+TopBarTitle/font_sizes/font_size = 16
