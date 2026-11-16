@@ -229,6 +229,28 @@ func _apply_polar_snow() -> void:
 			terrain[cell] = "snow"
 
 
+## SN2: a snowcap is a mountain hex in the polar rows (snow.polar_rows, 2), on maps with snow
+## rules (PM, Nov 16: generated mountains never reach elevation 4, so the polar rows stand in for
+## "highest"; about 3.4% of land). Checked live from terrain and row, so there is nothing extra to
+## save. It keeps mountain stats and adds cold attrition.
+func is_snowcap(cell: Vector2i) -> bool:
+	if snow_rules.is_empty() or terrain_name(cell) != "mountains":
+		return false
+	var rows := int(snow_rules.polar_rows)
+	return cell.y < rows or cell.y >= height - rows
+
+
+## SN2: cold terrain for attrition: snow or a snowcap.
+func is_cold(cell: Vector2i) -> bool:
+	return terrain_name(cell) == "snow" or is_snowcap(cell)
+
+
+## SN2: fungus can't grow on snow (the cold kills it). place_fungus skips these tiles; any later
+## fungus spread should check this too.
+func can_host_fungus(cell: Vector2i) -> bool:
+	return terrain_name(cell) != "snow"
+
+
 ## SN1: cold attrition scale for a nation: 0 for natives or without snow rules, else the
 ## faction's cold_attrition_mult trait (1.0 for every faction today).
 func cold_scale(nation: int) -> float:
@@ -760,14 +782,14 @@ func is_fungus(cell: Vector2i) -> bool:
 
 ## Places `fungus.patches` patches of fungus (seeded by `rng`) at least `fungus.min_city_distance`
 ## from every city: density max_density at the centre, one less per ring, minimum 1. There is no
-## fungus growth or spread yet. Returns the number of tiles placed.
+## fungus growth or spread yet. Snow tiles get none (SN2). Returns the number of tiles placed.
 func place_fungus(rng: RandomNumberGenerator) -> int:
 	var rules: Dictionary = natives_config.get("fungus", {})
 	if rules.is_empty():
 		return 0
 	var land: Array[Vector2i] = []
 	for cell in cells:
-		if cells[cell] != WATER and terrain_name(cell) != "water" and city_at(cell).is_empty():
+		if cells[cell] != WATER and terrain_name(cell) != "water" and city_at(cell).is_empty() and can_host_fungus(cell):
 			land.append(cell)
 	land.sort()
 	var placed := 0

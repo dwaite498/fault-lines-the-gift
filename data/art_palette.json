@@ -9,7 +9,8 @@
 		"crater": "#2A1E1E",
 		"scorched": "#5C3A2C",
 		"shallow_ocean": "#2F9C9A",
-		"fungus": "#7A3E2A"
+		"fungus": "#7A3E2A",
+		"snow": "#C9D3D6"
 	},
 	"iso": {
 		"tile_w": 96,
@@ -52,6 +53,9 @@
 		"halo_width": 6.0
 	},
 	"peaks": {
+		"snowcap_lit": "#F2F5F4",
+		"snowcap_shade": "#AEBCC2",
+		"snowcap_frac": 0.55,
 		"lit": "#E8CF94",
 		"shade": "#9A7A48",
 		"ridge": "#5C4630",
