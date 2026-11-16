@@ -4,6 +4,7 @@
 		"forest": {"color": "#3f7a3a", "move_cost": 2, "defense_mult": 1.25, "passable": true},
 		"hills": {"color": "#b09060", "move_cost": 2, "defense_mult": 1.5, "passable": true},
 		"mountains": {"color": "#8a8580", "move_cost": 3, "defense_mult": 2.0, "passable": true},
+		"snow": {"color": "#dfe6ea", "move_cost": 2, "defense_mult": 1.1, "passable": true, "food": 0, "labor": 0},
 		"water": {"color": "#29528c", "move_cost": 1, "defense_mult": 1.0, "passable": false}
 	},
 	"elevation": {
@@ -16,7 +17,8 @@
 		"ridge_terrain": ["mountains"],
 		"foothill_terrain": "hills",
 		"ridge_edge_chance": 0.25, "ramp_chance": 0.5, "ramp_salt": 7331, "ramp_uphill_attack_mult": 0.75,
-		"by_terrain": {"water": -1, "plains": 1, "forest": 1, "hills": 2, "mountains": 3, "crater": 0, "scorched": 1}
+		"by_terrain": {"water": -1, "plains": 1, "forest": 1, "hills": 2, "mountains": 3, "crater": 0, "scorched": 1, "snow": 1}
 	},
-	"land_weights": {"plains": 50, "forest": 25, "hills": 15, "mountains": 10}
+	"land_weights": {"plains": 50, "forest": 25, "hills": 15, "mountains": 10},
+	"snow": {"polar_rows": 2, "polar_chance": 0.7, "polar_from": ["plains", "forest", "hills"], "salt": 4111, "cold_attrition_org": 3}
 }

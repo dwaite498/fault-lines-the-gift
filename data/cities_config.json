@@ -16,7 +16,7 @@
 	"base_growth": 0.005,
 	"growth_labor_max_bonus": 0.01,
 	"min_growth": 0.001,
-	"terrain_growth_mult": {"plains": 1.0, "coast": 1.1, "forest": 0.9, "hills": 0.9, "mountains": 0.7, "shallow_ocean": 1.0},
+	"terrain_growth_mult": {"plains": 1.0, "coast": 1.1, "forest": 0.9, "hills": 0.9, "mountains": 0.7, "snow": 0.7, "shallow_ocean": 1.0},
 	"fungus_adjacent_growth_mult": 0.95,
 	"fungus_growth_min_mult": 0.7,
 	"division_people_cost": 1000,
