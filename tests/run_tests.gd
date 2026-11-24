@@ -68,7 +68,11 @@ func _initialize() -> void:
 	test_snowcap()
 	test_path_preview()
 	test_cliff_attacks()
+
+	# --- T1b recruit friction (own block to avoid merge collisions) ---
 	test_t1b_recruit()
+	# --- end T1b ---
+
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
