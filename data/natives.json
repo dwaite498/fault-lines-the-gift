@@ -32,7 +32,7 @@
 	"fungus": {"patches": 4, "patch_radius": 2, "min_city_distance": 3, "max_density": 4},
 	"pressure": {
 		"max": 100,
-		"events": {"infra": 0.5, "city_founded": 2, "big_city_per_turn": 1, "battle": 1, "raze": 5, "enslave": 3},
+		"events": {"infra": 0.5, "city_founded": 2, "big_city_per_turn": 1, "battle": 1, "raze": 5, "enslave": 3, "spore_bloom": 1},
 		"big_city_population": 30000,
 		"faction_pressure_mult": {"verdant_accord": 0.5, "syndicate": 1.25, "deepwater_guild": 1.25},
 		"default_pressure_mult": 1.0,

@@ -22,6 +22,9 @@ var stocks: Dictionary = {}
 ## city id -> {"nation": int, "turns_left": int}. One pending recruit per city.
 ## turns_left 0 means trained and waiting for the city hex to be free.
 var pending: Dictionary = {}
+## T1b: city id -> colony pod entry (same shape as pending) when colonization.uses_training_slot
+## is false, so a queued pod does not block the city's recruit queue.
+var pods: Dictionary = {}
 ## nation index -> true if that nation paid its upkeep on the last end_turn.
 var upkeep_paid: Dictionary = {}
 ## T1: "recruit_block_reason: nation N city C: reason" lines from the last run_ai.
@@ -49,6 +52,7 @@ func setup(hex_map: HexMap) -> void:
 	city_rules = hex_map.city_rules
 	stocks.clear()
 	pending.clear()
+	pods.clear()
 	upkeep_paid.clear()
 	unpaid_divisions.clear()
 	pows.clear()
@@ -466,14 +470,20 @@ func colony_rules() -> Dictionary:
 	return city_rules.colonization
 
 
+## The queue colony pods go in: the shared training queue (pending) if colonization.uses_training_slot,
+## else their own (pods). Either way they are fed by the city's Training labor.
+func pod_queue() -> Dictionary:
+	return pending if bool(colony_rules().get("uses_training_slot", true)) else pods
+
+
 ## Why the city cannot queue a colony pod for nation, or "" if it can. A pod shares the
 ## city's one training queue, needs no cash or capacity, and may be queued while a division
 ## stands on the city hex (it waits to appear). The city must keep colonization.min_remaining_population people.
 func colony_block_reason(city: Dictionary, nation: int) -> String:
 	if city.is_empty() or city.nation != nation:
 		return "not your city"
-	if pending.has(city.id):
-		return "already recruiting"
+	if pod_queue().has(city.id):
+		return "already recruiting" if pod_queue() == pending else "already building a pod"
 	var blocked := training_blocked(city)
 	if blocked != "":
 		return "cannot train: city is %s" % blocked
@@ -492,7 +502,7 @@ func queue_colony_pod(city: Dictionary, nation: int) -> bool:
 	var rules := colony_rules()
 	city.population = int(city.population) - int(rules.population_cost)
 	city.pool = mini(int(city.get("pool", 0)), int(floor(float(city.population) * float(city_rules.pool_cap))))
-	pending[city.id] = {"nation": nation, "kind": POD_KIND, "turns_left": 0, "labor": 0, "cost": int(rules.labor_turns)}
+	pod_queue()[city.id] = {"nation": nation, "kind": POD_KIND, "turns_left": 0, "labor": 0, "cost": int(rules.labor_turns)}
 	auto_training(city)
 	return true
 
@@ -503,9 +513,10 @@ func pod_count(nation: int, roster: DivisionRoster) -> int:
 	for d in roster.divisions:
 		if d.nation == nation and roster.is_colonizer(d):
 			count += 1
-	for id in pending:
-		if pending[id].nation == nation and pending[id].get("kind", "") == POD_KIND:
-			count += 1
+	for q in [pending, pods]:
+		for id in q:
+			if q[id].nation == nation and q[id].get("kind", "") == POD_KIND:
+				count += 1
 	return count
 
 
@@ -523,17 +534,23 @@ func ai_wants_pod(city: Dictionary, hex_map: HexMap, roster: DivisionRoster) -> 
 ## Ticks training. A trained recruit spawns on its city hex, or waits there if
 ## the hex is occupied. If the city changed owner, the recruit is lost.
 func spawn_pending(hex_map: HexMap, roster: DivisionRoster) -> void:
-	var ids := pending.keys()
+	_tick_queue(pending, pods, hex_map, roster)
+	_tick_queue(pods, pending, hex_map, roster)  # after recruits, so a division ready the same turn takes the hex first
+
+
+## Ticks one queue; Training goes back to default only if the city has nothing left in `other`.
+func _tick_queue(queue: Dictionary, other: Dictionary, hex_map: HexMap, roster: DivisionRoster) -> void:
+	var ids := queue.keys()
 	ids.sort()
 	for id in ids:
-		var entry: Dictionary = pending[id]
+		var entry: Dictionary = queue[id]
 		var city := {}
 		for c in hex_map.cities:
 			if c.id == id:
 				city = c
 		if city.is_empty() or city.nation != entry.nation:
-			pending.erase(id)
-			if not city.is_empty():
+			queue.erase(id)
+			if not city.is_empty() and not other.has(id):
 				end_auto_training(city)
 			continue
 		# No training progress while besieged, starving, enslaved, occupied or locked out: the queue waits.
@@ -546,8 +563,9 @@ func spawn_pending(hex_map: HexMap, roster: DivisionRoster) -> void:
 			var kind: String = entry.get("kind", "")
 			var template: String = kind if kind == POD_KIND or kind == SCOUT_KIND else str(config.recruit_template)
 			roster.spawn_division(entry.nation, city.cell, template, int(city.id))
-			pending.erase(id)
-			end_auto_training(city)
+			queue.erase(id)
+			if not other.has(id):
+				end_auto_training(city)
 
 
 ## True if the city has a recruit queued, no Training labor to feed it, and the recruit

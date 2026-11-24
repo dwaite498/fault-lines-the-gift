@@ -21,6 +21,8 @@ var _nation_panel: NationPanel
 var _military_panel: MilitaryPanel
 var _capture_popup := CapturePopup.new()
 var _pause_menu := PauseMenu.new()
+## Combat feedback juice (visual only).
+var _fx := CombatFx.new()
 var _fog: Fog
 var _game_over := GameOverScreen.new()
 ## Share of nation-owned cities that wins by domination (map_config.json "victory").
@@ -35,6 +37,8 @@ var message := Label.new()
 var turn := 1
 ## Active target mode: "", "move", "attack" or "follow".
 var _mode := ""
+## T2 planet events.
+var _events := PlanetEvents.new()
 
 
 func _ready() -> void:
@@ -72,6 +76,10 @@ func _ready() -> void:
 	_view.fog = _fog
 	_view.player_nation = PLAYER_NATION
 	add_child(_view)
+	_fx.view = _view
+	_fx.camera = _camera
+	_fx.reduce_motion = GameSettings.reduce_motion()
+	_view.add_child(_fx)
 	_camera.configure(map_cfg.get("camera", {}))
 	add_child(_camera)
 	_camera.fit_to(_view.world_bounds())
@@ -79,6 +87,7 @@ func _ready() -> void:
 	_economy = NationEconomy.new()
 	_economy.setup(_view.hex_map)
 	_view.roster.economy = _economy
+	_events.setup(PlanetEvents.load_config(), _view.hex_map.seed_value, PLAYER_NATION)
 	_panel = UnitPanel.new()
 	_panel.max_fortify = int(_view.roster.combat.max_fortify)
 	_panel.flank_per_hex = float(_view.roster.combat.flank_penalty_per_hex)
@@ -134,6 +143,8 @@ func _ready() -> void:
 	_pause_menu.save_pressed.connect(_on_save_pressed)
 	_pause_menu.main_menu_pressed.connect(_on_main_menu_pressed)
 	_pause_menu.quit_pressed.connect(func() -> void: get_tree().quit())
+	_pause_menu.reduce_motion_check.set_pressed_no_signal(_fx.reduce_motion)
+	_pause_menu.reduce_motion_toggled.connect(_on_reduce_motion_toggled)
 	add_child(_pause_menu)
 	_domination_share = float(map_cfg.get("victory", {}).get("domination_share", Victory.DEFAULT_SHARE))
 	_game_over.new_game_pressed.connect(_on_game_over_new_game)
@@ -143,6 +154,7 @@ func _ready() -> void:
 		turn = SaveGame.restore(saved, _view.hex_map, _view.roster, _economy)
 		_fog.restore(saved.extras.get("fog", {}))
 		_view.hex_map.pressure.restore(saved.extras.get("pressure", {}))
+		_events.restore(saved.extras.get("planet_events", {}), _view.hex_map)
 		_loaded = true
 		print("Loaded the saved game at turn %d" % turn)
 	else:
@@ -158,7 +170,15 @@ func _capture_state() -> Dictionary:
 	var ids: Array = []
 	for i in _view.factions.assigned.size():
 		ids.append(_view.factions.id_of(i))
-	return SaveGame.capture(_view.hex_map, _view.roster, _economy, turn, _map_cfg, ids, {"fog": _fog.capture(), "pressure": _view.hex_map.pressure.capture()})
+	return SaveGame.capture(_view.hex_map, _view.roster, _economy, turn, _map_cfg, ids, {"fog": _fog.capture(), "pressure": _view.hex_map.pressure.capture(),
+			"planet_events": _events.capture()})
+
+
+func _on_reduce_motion_toggled(on: bool) -> void:
+	_fx.reduce_motion = on
+	if on:
+		_fx.clear()
+	GameSettings.set_reduce_motion(on)
 
 
 func _on_save_pressed() -> void:
@@ -251,6 +271,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		_set_mode("")
 		_economy.run_ai(PLAYER_NATION, _view.hex_map, roster)
 		roster.execute_orders(_view.hex_map)
+		_fx.play(roster.fx_events, roster.pending_captures)
 		_resolve_captures()
 	elif ACTION_KEYS.has(key.keycode):
 		do_action(ACTION_KEYS[key.keycode])
@@ -338,6 +359,9 @@ func _finish_turn() -> void:
 		message.text = ". ".join(world_events)
 	NativeSpawner.run(_view.hex_map, roster, turn)
 	NativeAI.raid_step(_view.hex_map, roster, turn)
+	var planet := _events.end_turn(_view.hex_map, roster, _economy, turn)
+	if not planet.is_empty():
+		message.text = ". ".join(planet)
 	var stalled := _economy.stalled_cities(PLAYER_NATION, _view.hex_map)
 	if not stalled.is_empty():
 		message.text = "Recruit stalled in city %s: assign Training labor" % ", ".join(stalled.map(func(i: int) -> String: return str(i)))

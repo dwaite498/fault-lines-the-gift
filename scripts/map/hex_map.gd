@@ -46,8 +46,8 @@ var city_rules := {
 	"terrain_growth_mult": {"plains": 1.0, "coast": 1.1, "forest": 0.9, "hills": 0.9,
 			"mountains": 0.7, "snow": 0.7, "shallow_ocean": 1.0},
 	"fungus_adjacent_growth_mult": 0.95, "fungus_growth_min_mult": 0.7,
-	"division_people_cost": 1000, "pool_fill_rate": 0.005,
-	"pool_cap": 0.15, "capital_start_pool": 1000, "colony_start_pool": 0,
+	"division_people_cost": 1000, "pool_fill_rate": 0.01,
+	"pool_cap": 0.15, "capital_start_pool": 1500, "colony_start_pool": 450,
 	"train_min_city_pop": 5000,
 	# T1 (PACING_TUNING_577a022.md): 0 = off, so hand-built maps keep the old rules.
 	"min_enemy_start_distance": 0, "min_enemy_start_distance_fallback": 0, "early_capture_grace_turns": 0,
@@ -57,7 +57,7 @@ var city_rules := {
 	"colonization": {
 		"labor_turns": 15, "population_cost": 3000, "min_remaining_population": 5000,
 		"outpost_population": 3000, "outpost_infrastructure": 10, "min_city_distance": 3,
-		"ai_build_pods": true, "ai_max_pods": 1,
+		"ai_build_pods": true, "ai_max_pods": 1, "uses_training_slot": false,
 	},
 	"capture": {
 		"order": ["annex", "occupy", "plunder", "reduce", "raze", "enslave"],
@@ -151,6 +151,9 @@ var terrain_types: Dictionary = {}
 ## SN1: terrain_config.json `snow` block (polar_rows, polar_chance, polar_from, salt,
 ## cold_attrition_org); empty disables polar snow and cold attrition.
 var snow_rules: Dictionary = {}
+## T2 Blizzard (PlanetEvents): cold attrition multiplier and extra move cost on snow while it lasts.
+var cold_event_mult := 1.0
+var snow_extra_move := 0
 
 
 ## Builds a map from the map config (width, height, seed, land_ratio, nation_count)
@@ -258,7 +261,7 @@ func can_host_fungus(cell: Vector2i) -> bool:
 func cold_scale(nation: int) -> float:
 	if snow_rules.is_empty() or nation == int(natives_config.get("native_nation", -2)):
 		return 0.0
-	return float(traits.mod(nation, "cold_attrition_mult", 1.0)) if traits != null else 1.0
+	return (float(traits.mod(nation, "cold_attrition_mult", 1.0)) if traits != null else 1.0) * cold_event_mult
 
 
 func _assign_elevation(cfg: Dictionary) -> void:
@@ -309,6 +312,8 @@ func attack_edge_blocked(a: Vector2i, b: Vector2i) -> bool:
 ## when it is one or more levels higher. Downhill and level steps cost the normal amount.
 func step_cost(from: Vector2i, to: Vector2i, nation := -1) -> int:
 	var cost := int(terrain_of(to).move_cost) + fungus_extra_cost(to, nation)
+	if snow_extra_move != 0 and is_cold(to):
+		cost += snow_extra_move  # T2 Blizzard: snow and snowcaps (same set as cold attrition)
 	if elevation_of(to) > elevation_of(from):
 		var free: Array = traits.mod(nation, "no_uphill_penalty_terrain", []) if nation >= 0 else []
 		if not free.has(terrain_name(to)):

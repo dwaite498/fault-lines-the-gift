@@ -70,6 +70,18 @@ func _initialize() -> void:
 	test_cliff_attacks()
 	test_next_unit_camera()
 	test_t1_pacing()
+	test_planet_events()
+
+	# --- T2 follow-up: blizzard +1 move on snowcaps (own block to avoid merge collisions) ---
+	test_blizzard_snowcap_move()
+	# --- end T2 snowcap tweak ---
+
+	test_combat_fx()
+
+	# --- T1b recruit friction (own block to avoid merge collisions) ---
+	test_t1b_recruit()
+	# --- end T1b ---
+
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -604,7 +616,7 @@ func test_labor_sinks() -> void:
 	ok(turns_to_division(0) == -1, "0 Training points: the queue never finishes")
 	var s := sink_setup(4, 0)
 	var eco: NationEconomy = s.eco
-	ok(eco.recruit(s.city, 0, s.roster) and eco.stocks[0].capacity == 85.0 and s.city.pool == 0 and s.city.population == 9000, "recruiting pays 15 capacity and draws 1,000 people from the city pool (and its population)")
+	ok(eco.recruit(s.city, 0, s.roster) and eco.stocks[0].capacity == 85.0 and s.city.pool == 500 and s.city.population == 9000, "recruiting pays 15 capacity and draws 1,000 people from the city pool (1,500 -> 500) and its population")
 	eco.spawn_pending(s.map, s.roster)
 	ok(eco.pending[s.city.id].labor == 4 and eco.pending[s.city.id].turns_left == 2, "one turn adds 4 labor and ticks the timer")
 	ok(NationEconomy.queue_text(eco.pending[s.city.id]) == "Division 4/15 labor, 2 turns left", "queue text shows labor progress and turns")
@@ -719,8 +731,8 @@ func test_growth_tuning() -> void:
 	var m := pop_map()
 	var r := m.city_rules
 	ok(is_equal_approx(r.base_growth, 0.005) and is_equal_approx(r.growth_labor_max_bonus, 0.01) and is_equal_approx(r.min_growth, 0.001), "config: base_growth 0.005, growth_labor_max_bonus 0.010, min_growth 0.001")
-	ok(r.division_people_cost == 1000 and not r.has("people_per_strength") and is_equal_approx(r.pool_fill_rate, 0.005) and is_equal_approx(r.pool_cap, 0.15), "config: division 1,000 people, fill 0.5%, cap 15% (people_per_strength moved to the division type)")
-	ok(r.capital_start_pool == 1000 and r.colony_start_pool == 0 and r.train_min_city_pop == 5000, "config: capital pool 1,000, colony pool 0, training floor 5,000")
+	ok(r.division_people_cost == 1000 and not r.has("people_per_strength") and is_equal_approx(r.pool_fill_rate, 0.01) and is_equal_approx(r.pool_cap, 0.15), "config: division 1,000 people, fill 1% (T1b), cap 15% (people_per_strength moved to the division type)")
+	ok(r.capital_start_pool == 1500 and r.colony_start_pool == 450 and r.train_min_city_pop == 5000, "config: capital pool 1,500, colony pool 450 (T1b), training floor 5,000")
 	ok(not r.has("growth_rate_per_labor_point") and not r.has("growth_base_rate"), "growth_per_labor_point is removed")
 	# Turn counts from POPULATION_TUNING.md (floor rounding makes them a turn or two slower).
 	var table := [
@@ -808,11 +820,11 @@ func test_recruit_pool() -> void:
 	# Starting pools: the capital (a nation's first city) has 1,000, a colony 0.
 	var cap := m.capital_of(0)
 	var colony := nation_cities(m, 0)[1]
-	ok(cap.pool == 1000 and colony.pool == 0, "acceptance 6: a capital starts with a pool of 1,000, a colony with 0")
-	ok(m.cities.all(func(c: Dictionary) -> bool: return m.pool_of(c) == (1000 if c == m.capital_of(c.nation) else 0)), "every nation's first city is its capital with the starting pool")
+	ok(cap.pool == 1500 and colony.pool == 450, "acceptance 6 (T1b): a capital starts with a pool of 1,500, a colony with 450")
+	ok(m.cities.all(func(c: Dictionary) -> bool: return m.pool_of(c) == (1500 if c == m.capital_of(c.nation) else 450)), "every nation's first city is its capital with the starting pool")
 	# Fill and cap.
 	var c10 := {"id": 0, "nation": 0, "population": 10000, "infrastructure": 10, "pool": 1000}
-	ok(m.pool_fill(c10) == 50 and m.pool_cap(c10) == 1500, "a 10k city fills 50 a turn and caps at 1,500 (0.5% / 15%)")
+	ok(m.pool_fill(c10) == 100 and m.pool_cap(c10) == 1500, "a 10k city fills 100 a turn and caps at 1,500 (1% / 15%)")
 	ok(m.advance_preview(c10).pool > 1000, "the pool grows each end turn")
 	var c3 := {"id": 1, "nation": 0, "population": 3000, "infrastructure": 10, "pool": 0}
 	var top := 0
@@ -831,8 +843,8 @@ func test_recruit_pool() -> void:
 	ok(eco.recruit_block_reason(cap, 0, roster) == "city hex occupied", "(a division stands on the city hex)")
 	roster.divisions.assign(roster.divisions.filter(func(d: Division) -> bool: return d.hex != cap.cell))
 	eco.stocks[0].capacity = 100.0
-	ok(eco.recruit_block_reason(cap, 0, roster) == "", "the capital's starting pool allows exactly one recruit")
-	ok(eco.recruit(cap, 0, roster) and cap.pool == 0 and cap.population == 9000, "acceptance 5: recruiting removes 1,000 people (pool 1,000 -> 0, population 10,000 -> 9,000)")
+	ok(eco.recruit_block_reason(cap, 0, roster) == "", "the capital's starting pool allows a recruit")
+	ok(eco.recruit(cap, 0, roster) and cap.pool == 500 and cap.population == 9000, "acceptance 5: recruiting removes 1,000 people (pool 1,500 -> 500, population 10,000 -> 9,000)")
 	eco.pending.clear()
 	cap.pool = 999
 	ok(eco.recruit_block_reason(cap, 0, roster) == "recruit pool too small", "a pool under 1,000 cannot recruit")
@@ -892,14 +904,14 @@ func test_recruit_pool() -> void:
 	d4.strength = 50.0
 	var pop4 := int(home4.population)
 	s4.eco.reinforce(s4.roster, s4.map)
-	ok(d4.strength == 60.0 and home4.pool == 900 and home4.population == pop4 - 100 and s4.eco.reinforce_spent[0] == 100.0, "acceptance 5: reinforcing 10 strength costs 100 people (home pool 1,000 -> 900, population -100)")
+	ok(d4.strength == 60.0 and home4.pool == 1400 and home4.population == pop4 - 100 and s4.eco.reinforce_spent[0] == 100.0, "acceptance 5: reinforcing 10 strength costs 100 people (home pool 1,500 -> 1,400, population -100)")
 	ok(not s4.eco.stocks[0].has("manpower"), "reinforcement no longer touches a nation manpower stock")
 	# Preview matches the real thing.
 	var s5 := pool_setup()
 	var d5: Division = s5.roster.divisions.filter(func(d: Division) -> bool: return d.nation == 0)[0]
 	d5.strength = 50.0
 	var plan: Dictionary = s5.eco.reinforce_plan(s5.roster, s5.map, s5.eco.current_pools(s5.map), 0)
-	ok(plan.gains[d5.id] == 10.0 and s5.map.pool_of(s5.map.city_by_id(d5.home_city_id)) == 1000, "reinforce_plan previews without changing anything")
+	ok(plan.gains[d5.id] == 10.0 and s5.map.pool_of(s5.map.city_by_id(d5.home_city_id)) == 1500, "reinforce_plan previews without changing anything")
 	# Empty home pool: fall back to the nearest owned city's pool, and partial pools are combined.
 	var s6 := pool_setup()
 	var d6: Division = s6.roster.divisions.filter(func(d: Division) -> bool: return d.nation == 0)[0]
@@ -1672,7 +1684,9 @@ func test_save_load() -> void:
 	marked.attacked_from.append(m.neighbors(marked.hex)[1])
 	for t in 6:
 		save_play_turn(g)
-	var turn_n := 11
+	# Must match map.current_turn (20) so restore leaves T1 grace / min_attack_turn off;
+	# a lower saved turn would re-lock captures and the two games would diverge.
+	var turn_n := 20
 	var state := save_state(g, turn_n)
 	var h1 := SaveGame.state_hash(state)
 	ok(state.map.reputation.size() >= 1 and state.economy.stocks.size() == m.nations.size() and state.roster.divisions.size() > 0, "the state holds reputation events, stocks and divisions")
@@ -1812,19 +1826,19 @@ func test_colonizers() -> void:
 	var cap_before := float(eco.stocks[0].capacity)
 	ok(eco.colony_block_reason(city, 0) == "", "a 10,000-person city can queue a colony pod")
 	ok(eco.queue_colony_pod(city, 0), "the pod is queued")
-	var entry: Dictionary = eco.pending[city.id]
+	var entry: Dictionary = eco.pods[city.id]
 	ok(city.population == 7000 and entry.kind == "colony_pod" and entry.cost == 15 and entry.turns_left == 0, "3,000 people drawn at queue time; a 15 labor-turn pod entry")
 	ok(float(eco.stocks[0].cash) == cash_before and float(eco.stocks[0].capacity) == cap_before, "a pod costs no cash or capacity")
 	ok(city.pool <= int(floor(7000 * 0.15)), "the recruit pool is held under the smaller city's cap")
-	ok(eco.colony_block_reason(city, 0) == "already recruiting" and not eco.recruit(city, 0, roster), "one queue per city: a pod blocks a second pod and a division")
+	ok(eco.colony_block_reason(city, 0) == "already building a pod" and not eco.pending.has(city.id), "one pod at a time per city; the pod has its own queue (T1b)")
 	ok(NationEconomy.queue_text(entry).begins_with("Colony pod 0/15 labor"), "the queue text names the pod")
 	# Labor gating: 5 Training points per turn needs 3 turns.
 	city.labor.training = 5
 	eco.spawn_pending(m, roster)
 	eco.spawn_pending(m, roster)
-	ok(roster.divisions.is_empty() and eco.pending[city.id].labor == 10, "after 2 turns of 5 labor the pod is not ready (10/15)")
+	ok(roster.divisions.is_empty() and eco.pods[city.id].labor == 10, "after 2 turns of 5 labor the pod is not ready (10/15)")
 	eco.spawn_pending(m, roster)
-	ok(roster.divisions.size() == 1 and not eco.pending.has(city.id), "after 3 turns (15 labor-turns) the pod appears on the city hex")
+	ok(roster.divisions.size() == 1 and not eco.pods.has(city.id), "after 3 turns (15 labor-turns) the pod appears on the city hex")
 	var pod: Division = roster.divisions[0]
 	ok(pod.unit_type == "colony_pod" and pod.hex == city.cell and pod.move == 2 and roster.is_colonizer(pod) and roster.upkeep_of(pod).is_empty(), "the pod stands on the city hex, moves 2, no upkeep")
 	# The 5,000 floor: 7,999 is blocked, 8,000 is allowed.
@@ -1903,9 +1917,9 @@ func test_colonizers() -> void:
 	groster.templates.scout.recruit.ai_count = 0  # the scout would take the capital's one queue first
 	geco.run_ai(0, gm, groster)
 	var queued := {}
-	for id in geco.pending:
-		if geco.pending[id].kind == "colony_pod":
-			queued[geco.pending[id].nation] = int(queued.get(geco.pending[id].nation, 0)) + 1
+	for id in geco.pods:
+		if geco.pods[id].kind == "colony_pod":
+			queued[geco.pods[id].nation] = int(queued.get(geco.pods[id].nation, 0)) + 1
 	ok(not queued.is_empty() and queued.values().all(func(n: int) -> bool: return n == 1) and not queued.has(0), "each AI nation with a valid site queues one pod; the player's nations do not")
 	var no_site := pool_setup()
 	no_site.map.city_rules.colonization.min_city_distance = 99
@@ -3716,6 +3730,7 @@ func test_cliff_attacks() -> void:
 	wm.terrain[Vector2i(1, 0)] = "water"
 	ok(not wm.attack_edge_blocked(Vector2i(0, 0), Vector2i(1, 0)) and not wm.attack_edge_blocked(Vector2i(1, 0), Vector2i(0, 0)), "edges to or from water are never blocked by this rule")
 	# AI: the only adjacent enemy sits across a cliff, so the AI does not order an attack on it.
+	# Do not check moves_left after the cliff case: if the AI fortifies, that legitimately zeroes them.
 	var w := nat_world()
 	var m: HexMap = w.map
 	var ro: DivisionRoster = w.roster
@@ -3723,13 +3738,15 @@ func test_cliff_attacks() -> void:
 	var me := ro.spawn_division(0, Vector2i(8, 4), "infantry")
 	ro.run_ai(0, m)
 	var level_attack := ai.order_attack and ai.order_path == [me.hex]
+	ok(level_attack, "the AI attacks the enemy on level ground")
 	ro.clear_order(ai)
 	m.elevation[me.hex] = 3
 	ai.moves_left = ai.move
 	ai.has_moved = false
+	var hp_cliff := me.strength
 	ro.run_ai(0, m)
-	var ai_moves := ai.moves_left > 0
-	ok(level_attack and ai_moves and not (ai.order_attack and ai.order_path.has(me.hex)), "the AI attacks the enemy on level ground but not across a cliff")
+	ok(not (ai.order_attack and ai.order_path.has(me.hex)) and is_equal_approx(me.strength, hp_cliff),
+			"the AI does not order an attack across a cliff, and the enemy takes no damage")
 	# Resolution: an attack order whose target ends up across a cliff does not fight.
 	m.elevation[me.hex] = 1
 	ro.clear_order(ai)
@@ -3852,3 +3869,326 @@ func test_t1_pacing() -> void:
 	ok(not fe.recruit_block_log.is_empty() and fe.recruit_block_log.all(func(l: String) -> bool: return l.begins_with("recruit_block_reason: nation "))
 			and fe.recruit_block_log.any(func(l: String) -> bool: return l.ends_with(": not enough capacity")),
 			"AI cities that cannot recruit log 'recruit_block_reason: nation N city C: <reason>' (%d lines)" % fe.recruit_block_log.size())
+
+## T2 planet events (PACING_TUNING_577a022.md section 3; PM rulings): one global seeded schedule,
+## data-driven effects, text only, saved in the save extras.
+func events_setup(seed_value: int) -> Dictionary:
+	var g := save_game_setup(seed_value)
+	g.map.load_natives_config(NativeSpawner.load_config())
+	g.map.place_fungus(g.roster.rng)
+	var ev := PlanetEvents.new()
+	ev.setup(PlanetEvents.load_config(), g.map.seed_value, 0)
+	g["ev"] = ev
+	return g
+
+
+func event_schedule(seed_value: int, turns: int) -> Array:
+	var ev := PlanetEvents.new()
+	ev.setup(PlanetEvents.load_config(), seed_value, 0)
+	var out: Array = []
+	for t in range(1, turns + 1):
+		if t >= ev.next_turn:
+			var k := ev.pick_event()
+			if k == "survivor_landing":
+				ev.survivor_count += 1
+			ev.last_event = k
+			out.append([t, k])
+			ev.next_turn = t + ev.rng.randi_range(int(ev.cfg.interval_min), int(ev.cfg.interval_max))
+	return out
+
+
+func test_planet_events() -> void:
+	var cfg := PlanetEvents.load_config()
+	var e: Dictionary = cfg.events
+	ok(int(cfg.first_turn) == 45 and int(cfg.interval_min) == 8 and int(cfg.interval_max) == 12, "planet_events.json: first event turn 45, then every 8-12 turns")
+	ok(int(e.survivor_landing.weight) == 25 and int(e.native_migration.weight) == 25 and int(e.blizzard.weight) == 15
+			and int(e.spore_bloom.weight) == 15 and int(e.supply_cache.weight) == 20, "weights: Survivor 25, Migration 25, Blizzard 15, Spore 15, Cache 20")
+	# Schedule: deterministic per seed, first on 45, gaps 8-12, no repeats, Survivor at most twice.
+	var a := event_schedule(11, 2000)
+	ok(a == event_schedule(11, 2000) and a != event_schedule(12, 2000), "the same seed gives the same event schedule; another seed differs")
+	var gaps_ok := int(a[0][0]) == 45
+	var repeat_ok := true
+	var survivors := 0
+	var counts := {}
+	for i in a.size():
+		counts[a[i][1]] = int(counts.get(a[i][1], 0)) + 1
+		if a[i][1] == "survivor_landing":
+			survivors += 1
+		if i > 0:
+			var gap := int(a[i][0]) - int(a[i - 1][0])
+			gaps_ok = gaps_ok and gap >= 8 and gap <= 12
+			repeat_ok = repeat_ok and a[i][1] != a[i - 1][1]
+	ok(gaps_ok, "the first event fires on turn 45 and the next ones 8-12 turns apart (%d events)" % a.size())
+	ok(repeat_ok, "the same event never fires twice in a row")
+	ok(survivors <= 2 and survivors > 0, "Survivor Landing fires at most twice per game (%d)" % survivors)
+	ok(counts.size() == 5 and int(counts.native_migration) > int(counts.blizzard), "every other event fires, weighted (%s)" % str(counts))
+	# end_turn: nothing before turn 45, an event on 45.
+	var g := events_setup(3)
+	var m: HexMap = g.map
+	var r: DivisionRoster = g.roster
+	var ev: PlanetEvents = g.ev
+	ok(ev.end_turn(m, r, g.eco, 44).is_empty() and ev.planet_event_log.is_empty(), "no planet event before turn 45")
+	var lines := ev.end_turn(m, r, g.eco, 45)
+	ok(lines.size() == 1 and ev.planet_event_log.size() == 1 and int(ev.planet_event_log[0].turn) == 45 and ev.next_turn >= 53 and ev.next_turn <= 57,
+			"an event fires on turn 45, is logged as text, and the next is due 8-12 turns later")
+	# Survivor Landing: a free colony pod beside the largest player city.
+	g = events_setup(3)
+	m = g.map
+	r = g.roster
+	ev = g.ev
+	var big: Dictionary = {}
+	for c in m.cities:
+		if int(c.nation) == 0 and (big.is_empty() or int(c.population) > int(big.population)):
+			big = c
+	var pods := r.divisions.filter(func(d: Division) -> bool: return d.unit_type == "colony_pod").size()
+	var cash0 := float(g.eco.stocks[0].cash)
+	ev.fire("survivor_landing", m, r, g.eco)
+	var new_pod: Division = r.divisions.back()
+	ok(new_pod.unit_type == "colony_pod" and new_pod.nation == 0 and HexMap.hex_distance(new_pod.hex, big.cell) == 1
+			and r.divisions.filter(func(d: Division) -> bool: return d.unit_type == "colony_pod").size() == pods + 1
+			and is_equal_approx(float(g.eco.stocks[0].cash), cash0) and ev.survivor_count == 1,
+			"Survivor Landing: a free colony pod lands beside the player's largest city")
+	# Supply Cache: +40 cash or +20 capacity, by a seeded roll.
+	var got_cash := false
+	var got_cap := false
+	for s in range(1, 9):
+		g = events_setup(s)
+		var c0 := float(g.eco.stocks[0].cash)
+		var k0 := float(g.eco.stocks[0].capacity)
+		var text: String = g.ev.fire("supply_cache", g.map, g.roster, g.eco)
+		var dc := float(g.eco.stocks[0].cash) - c0
+		var dk := float(g.eco.stocks[0].capacity) - k0
+		got_cash = got_cash or (is_equal_approx(dc, 40.0) and is_zero_approx(dk) and text.contains("cash"))
+		got_cap = got_cap or (is_equal_approx(dk, 20.0) and is_zero_approx(dc) and text.contains("capacity"))
+	ok(got_cash and got_cap, "Supply Cache: instant +40 cash or +20 capacity, a seeded 50/50 roll")
+	# Native Migration: 2 natives 3-4 hexes from a player city, the right type for the terrain.
+	g = events_setup(4)
+	m = g.map
+	r = g.roster
+	ev = g.ev
+	var before := r.divisions.size()
+	ev.fire("native_migration", m, r, g.eco)
+	var arrived: Array = r.divisions.slice(before)
+	var mig_ok := arrived.size() == 2 and ev.bounty_ids.size() == 2
+	for d in arrived:
+		var near := false
+		for c in m.cities:
+			var dist := HexMap.hex_distance(d.hex, c.cell)
+			near = near or (int(c.nation) == 0 and dist >= 3 and dist <= 4)
+		mig_ok = mig_ok and r.is_native(d) and near and d.unit_type == PlanetEvents.native_type_for(d.hex, m, e.native_migration.native_by_terrain)
+	ok(mig_ok, "Native Migration: 2 natives of the terrain's normal type, 3-4 hexes from a player border city")
+	# Bounty: +15 cash only when the player kills a tagged native.
+	var cash1 := float(g.eco.stocks[0].cash)
+	var cash_ai := float(g.eco.stocks[1].cash)
+	r.destroyed_natives = [{"id": arrived[0].id, "by": 1}]
+	ev.end_turn(m, r, g.eco, 2)
+	ok(is_equal_approx(float(g.eco.stocks[0].cash), cash1) and is_equal_approx(float(g.eco.stocks[1].cash), cash_ai), "no bounty when an AI kills a migration native")
+	r.destroyed_natives = [{"id": arrived[1].id, "by": 0}, {"id": 999, "by": 0}]
+	ev.end_turn(m, r, g.eco, 3)
+	ok(is_equal_approx(float(g.eco.stocks[0].cash), cash1 + 15.0) and ev.bounty_ids.is_empty(), "+15 cash to the player for a tagged migration native only")
+	var victim: Division = arrived[1]
+	victim.strength = 0.0
+	r._after_combat(victim, m, 0)
+	ok(r.destroyed_natives.size() == 1 and int(r.destroyed_natives[0].by) == 0, "a native destroyed in combat is recorded with its killer")
+	# Spore Bloom: the patch nearest the claim grows by 2 tiles; Pressure +1 when it touches the claim.
+	g = events_setup(5)
+	m = g.map
+	ev = g.ev
+	var tiles0 := m.fungus_tiles.size()
+	var p0 := m.pressure.score
+	var text2 := ev.fire("spore_bloom", m, g.roster, g.eco)
+	var grown_ok := m.fungus_tiles.size() == tiles0 + 2
+	for cell in m.fungus_tiles:
+		grown_ok = grown_ok and m.can_host_fungus(cell)
+	ok(grown_ok, "Spore Bloom: the patch grows by 2 tiles that can host fungus (%s)" % text2)
+	ok(text2.contains("Pressure") == (m.pressure.score > p0) and int(m.natives_config.pressure.events.spore_bloom) == 1, "Pressure +1 (spore_bloom) only when the bloom touches the player's claim")
+	g = events_setup(5)
+	m = g.map
+	for cell in m.cells:
+		if m.cells[cell] != HexMap.WATER and not m.is_fungus(cell):
+			m.cells[cell] = 0
+	p0 = m.pressure.score
+	var text3: String = g.ev.fire("spore_bloom", m, g.roster, g.eco)
+	ok(text3.contains("Pressure") and is_equal_approx(m.pressure.score - p0, m.pressure.mult("")), "a bloom touching the player's claim adds Pressure +1 under spore_bloom (%s, %.2f)" % [text3, m.pressure.score - p0])
+	# Blizzard: 3 turns of doubled cold attrition and snow +1 move, then it clears.
+	g = events_setup(6)
+	m = g.map
+	r = g.roster
+	ev = g.ev
+	var base_scale := m.cold_scale(0)
+	var snow_cell := Vector2i(-1, -1)
+	for cell in m.terrain:
+		if m.terrain[cell] == "snow":
+			snow_cell = cell
+			break
+	var base_cost := m.step_cost(m.neighbors(snow_cell)[0], snow_cell, 0)
+	ev.fire("blizzard", m, r, g.eco)
+	ok(is_equal_approx(m.cold_scale(0), base_scale * 2.0) and m.step_cost(m.neighbors(snow_cell)[0], snow_cell, 0) == base_cost + 1,
+			"Blizzard doubles cold attrition and snow costs +1 move")
+	ev.next_turn = 999
+	ev.end_turn(m, r, g.eco, 2)
+	ev.end_turn(m, r, g.eco, 3)
+	var still := is_equal_approx(m.cold_scale(0), base_scale * 2.0)
+	ev.end_turn(m, r, g.eco, 4)
+	ok(still and is_equal_approx(m.cold_scale(0), base_scale) and m.step_cost(m.neighbors(snow_cell)[0], snow_cell, 0) == base_cost,
+			"the blizzard lasts 3 end turns, then cold and snow return to normal")
+	# Save/load: the scheduler state round-trips and the next events match.
+	g = events_setup(7)
+	m = g.map
+	ev = g.ev
+	ev.next_turn = 1
+	ev.end_turn(m, g.roster, g.eco, 1)
+	ev.fire("blizzard", m, g.roster, g.eco)
+	var saved: Dictionary = JSON.parse_string(JSON.stringify(ev.capture()))
+	var ev2 := PlanetEvents.new()
+	ev2.setup(cfg, 12345, 0)
+	m.cold_event_mult = 1.0
+	ev2.restore(saved, m)
+	ok(ev2.next_turn == ev.next_turn and ev2.last_event == ev.last_event and ev2.blizzard_left == 3 and ev2.planet_event_log.size() == 1
+			and is_equal_approx(m.cold_event_mult, 2.0), "save/load restores the schedule, log, and an active blizzard")
+	var seq_a: Array = []
+	var seq_b: Array = []
+	for i in 6:
+		seq_a.append(ev.pick_event())
+		seq_b.append(ev2.pick_event())
+	ok(seq_a == seq_b, "after a load the event rolls continue exactly as before")
+	var cap := SaveGame.capture(m, g.roster, g.eco, 5, g.cfg, [], {"planet_events": ev.capture()})
+	ok(not cap.extras.get("planet_events", {}).is_empty(), "the scheduler state rides in the save extras")
+
+## T2 follow-up (PM): the Blizzard +1 move cost applies on snowcaps as well as snow,
+## matching HexMap.is_cold / cold attrition.
+func test_blizzard_snowcap_move() -> void:
+	var m := make_map(3, 3)
+	m.snow_rules = {"polar_rows": 1}
+	var cap := Vector2i(1, 0)
+	var snow := Vector2i(2, 0)
+	var plains := Vector2i(1, 1)
+	m.terrain[cap] = "mountains"
+	m.terrain[snow] = "snow"
+	ok(m.is_snowcap(cap) and m.is_cold(cap) and m.is_cold(snow) and not m.is_snowcap(snow) and not m.is_cold(plains),
+			"a polar mountain is a snowcap; snow is cold; plains are not")
+	var base_cap := m.step_cost(m.neighbors(cap)[0], cap, 0)
+	var base_snow := m.step_cost(m.neighbors(snow)[0], snow, 0)
+	var base_plains := m.step_cost(m.neighbors(plains)[0], plains, 0)
+	m.snow_extra_move = 1
+	ok(m.step_cost(m.neighbors(cap)[0], cap, 0) == base_cap + 1, "blizzard +1 move applies on a snowcap")
+	ok(m.step_cost(m.neighbors(snow)[0], snow, 0) == base_snow + 1, "blizzard +1 move still applies on snow")
+	ok(m.step_cost(m.neighbors(plains)[0], plains, 0) == base_plains, "blizzard does not add move on plains")
+	m.snow_extra_move = 0
+	ok(m.step_cost(m.neighbors(cap)[0], cap, 0) == base_cap and m.step_cost(m.neighbors(snow)[0], snow, 0) == base_snow,
+			"clearing the blizzard extra returns snowcap and snow to their normal costs")
+
+
+## Combat FX (Art Director spec via PM, Nov 23): visual only, fire-and-forget, all off with reduce motion.
+func fx_battle() -> Dictionary:
+	var w := nat_world()
+	var m: HexMap = w.map
+	var r: DivisionRoster = w.roster
+	var a := r.spawn_division(0, Vector2i(5, 4), "infantry")
+	var weak := r.spawn_division(DivisionRoster.NATIVE_NATION, Vector2i(6, 4), "rust_strider")
+	weak.strength = 0.5
+	var b := r.spawn_division(0, Vector2i(5, 6), "infantry")
+	var foe := r.spawn_division(1, Vector2i(6, 6), "infantry")
+	r.set_order(a, weak.hex, m)
+	r.set_order(b, foe.hex, m)
+	r.execute_orders(m)
+	return {"map": m, "roster": r, "weak": weak}
+
+
+func fx_state(r: DivisionRoster) -> Array:
+	return r.divisions.map(func(d: Division) -> Array: return [d.id, d.nation, d.hex, snappedf(d.strength, 0.0001), snappedf(d.org, 0.0001)])
+
+
+func fx_node(g: Dictionary, reduce: bool) -> CombatFx:
+	var view := MapView.new()
+	view.hex_map = g.map
+	view.roster = g.roster
+	var fx := CombatFx.new()
+	fx.view = view
+	fx.camera = Camera2D.new()
+	fx.reduce_motion = reduce
+	root.add_child(fx)
+	return fx
+
+
+func test_combat_fx() -> void:
+	ok(CombatFx.LUNGE_PX == 6.0 and CombatFx.LUNGE_TIME == 0.15 and CombatFx.SHAKE_PX == 3.0 and CombatFx.FLASH_FRAMES == 1,
+			"FX helper: lunge 6px out and back in 0.15s, shake 3px, white flash 1 frame")
+	ok(CombatFx.FLOAT_TIME == 0.8 and CombatFx.DAMAGE_COLOR == Color("#E0583A") and CombatFx.OUTCOME_COLOR == Color("#E6B85C"),
+			"floating numbers rise and fade over 0.8s: damage #E0583A, routed/captured #E6B85C")
+	var on := fx_battle()
+	var r: DivisionRoster = on.roster
+	var hits: Array = r.fx_events.filter(func(e: Dictionary) -> bool: return e.kind == "hit")
+	var deaths: Array = r.fx_events.filter(func(e: Dictionary) -> bool: return e.kind == "outcome" and e.outcome == "destroyed")
+	ok(hits.size() == 2 and float(hits[0].to_defender) > 0.0 and deaths.size() == 1 and int(deaths[0].id) == on.weak.id and deaths[0].hex == Vector2i(6, 4),
+			"execute_orders records each exchange and the destroyed native for the FX (%s)" % str(r.fx_events))
+	ok(not r.divisions.has(on.weak), "the destroyed unit is still removed from the roster at once (the FX only draws a ghost)")
+	var fx := fx_node(on, false)
+	fx.play(r.fx_events)
+	var ghosts := fx.get_children().filter(func(n: Node) -> bool: return n is CombatFx.Ghost)
+	var texts := fx.get_children().filter(func(n: Node) -> bool: return n is CombatFx.FloatText)
+	ok(fx.tweens_created > 0 and ghosts.size() == 1 and texts.size() == 4 and texts.all(func(n: Node) -> bool: return n.color == CombatFx.DAMAGE_COLOR),
+			"FX on: lunges, shakes, 4 damage numbers and a fading ghost for the destroyed unit (%d tweens, %d texts)" % [fx.tweens_created, texts.size()])
+	var outcome := fx_node(on, false)
+	outcome.play([{"kind": "outcome", "id": 99, "outcome": "retreated", "hex": Vector2i(3, 3), "nation": 1, "unit_type": "infantry"}],
+			[{"city_id": 1}])
+	var amber := outcome.get_children().filter(func(n: Node) -> bool: return n is CombatFx.FloatText and n.color == CombatFx.OUTCOME_COLOR)
+	ok(amber.size() == 2 and amber[0].text == "Routed" and amber[1].text == "Captured" and outcome.tweens_created == 3,
+			"routed and captured show amber words; a city capture adds the screen shake")
+	var off := fx_battle()
+	var fx_off := fx_node(off, true)
+	fx_off.play(off.roster.fx_events, [{"city_id": 1}])
+	ok(fx_off.tweens_created == 0 and fx_off.get_child_count() == 0 and fx_off.view.unit_offset.is_empty() and fx_off.view.flash_until.is_empty(),
+			"reduce motion turns every effect off: no tweens, no nodes, no offsets")
+	ok(fx_state(on.roster) == fx_state(off.roster), "combat results are identical with FX on and off")
+	fx.view.unit_offset[1] = Vector2(3, 0)
+	fx.camera.offset = Vector2(2, 0)
+	fx.clear()
+	ok(fx.view.unit_offset.is_empty() and fx.camera.offset == Vector2.ZERO, "switching reduce motion on mid-animation clears the effects")
+	var path := "user://test_settings.cfg"
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	var was := GameSettings.reduce_motion(path)
+	GameSettings.set_reduce_motion(true, path)
+	ok(not was and GameSettings.reduce_motion(path), "the Reduce motion setting defaults off and persists in a user:// settings file")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	for n in [fx, outcome, fx_off]:
+		n.clear()
+		n.view.free()
+		n.camera.free()
+		n.free()
+
+
+## T1b recruit friction (Designer, approved by PM): pods have their own queue, bigger and faster pools.
+func test_t1b_recruit() -> void:
+	var cc: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://data/cities_config.json"))
+	ok(cc.colonization.uses_training_slot == false and cc.capital_start_pool == 1500 and cc.colony_start_pool == 450 and is_equal_approx(cc.pool_fill_rate, 0.01),
+			"cities_config: colonization.uses_training_slot false, capital pool 1,500, colony pool 450, fill 1%")
+	ok(is_equal_approx(cc.pool_cap, 0.15) and cc.division_people_cost == 1000 and cc.train_min_city_pop == 5000, "unchanged: pool cap 15%, 1,000 people a division, 5,000 training floor")
+	var s := pool_setup()
+	var m: HexMap = s.map
+	var eco: NationEconomy = s.eco
+	var roster: DivisionRoster = s.roster
+	var cap := m.capital_of(0)
+	ok(cap.pool == 1500 and nation_cities(m, 0)[1].pool == 450 and m.pool_fill({"nation": 0, "population": 10000}) == 100, "pools start at 1,500 (capital) and 450 (colony) and fill 1% a turn")
+	roster.divisions.assign(roster.divisions.filter(func(d: Division) -> bool: return d.hex != cap.cell))
+	eco.stocks[0].capacity = 100.0
+	ok(eco.queue_colony_pod(cap, 0) and eco.pods.has(cap.id) and not eco.pending.has(cap.id), "a queued pod goes in its own queue, not the training slot")
+	ok(eco.recruit_block_reason(cap, 0, roster) == "" and eco.recruit(cap, 0, roster) and eco.pending.has(cap.id),
+			"a city with a pod queued can still train a division the same turn")
+	cap.labor.training = 15
+	eco.spawn_pending(m, roster)
+	var pod := roster.division_at(cap.cell)
+	ok(pod != null and pod.unit_type == "colony_pod" and eco.pods.is_empty() and eco.pending.has(cap.id) and int(eco.pending[cap.id].labor) == 15,
+			"both queues take the city's Training labor; the pod (no turn timer) appears first while the division keeps training")
+	roster.divisions.erase(pod)
+	eco.spawn_pending(m, roster)
+	eco.spawn_pending(m, roster)
+	ok(roster.division_at(cap.cell) != null and roster.division_at(cap.cell).unit_type == "infantry" and eco.pending.is_empty(), "the division appears after its 3 training turns")
+	# Save/load keeps the pod queue.
+	var g := save_game_setup(5)
+	var gcap: Dictionary = g.map.capital_of(1)
+	g.eco.queue_colony_pod(gcap, 1)
+	var state: Dictionary = save_state(g, 3)
+	var g2 := save_game_setup(5)
+	SaveGame.restore(state, g2.map, g2.roster, g2.eco)
+	ok(g2.eco.pods.has(gcap.id) and g2.eco.pods[gcap.id].kind == "colony_pod", "the pod queue is saved and restored")
