@@ -737,6 +737,33 @@ func turn_split(d: Division, path: Array[Vector2i], hex_map: HexMap) -> Array[in
 	return out
 
 
+## P1 move path preview (UI only, read-only; changes no order). For a move to dest:
+## "path" is the route set_order would store (plan_path), "costs" each step's move cost
+## (step_cost_for), "step_turns" the turn each step lands in (1 = the unit's next moving turn,
+## same counting as turns_to_arrive) and "turns" the turns to arrive. "blocked" is true when
+## dest is passable land next to d but can_step refuses the direct step (a ledge or a cliff) and
+## no detour exists; then path is empty (water and other impassable terrain show nothing). Returns {} when there is nothing to show.
+func path_preview(d: Division, dest: Vector2i, hex_map: HexMap) -> Dictionary:
+	if d == null or dest == d.hex or not hex_map.cells.has(dest):
+		return {}
+	var path := plan_path(d, dest, hex_map)
+	if path.is_empty():
+		if dest in hex_map.neighbors(d.hex) and hex_map.terrain_of(dest).passable and not hex_map.can_step(d.hex, dest):
+			return {"dest": dest, "blocked": true, "path": [], "costs": [], "step_turns": [], "turns": 0}
+		return {}
+	var costs: Array[int] = []
+	for i in path.size():
+		costs.append(step_cost_for(d, path[i - 1] if i > 0 else d.hex, path[i], hex_map))
+	var split := turn_split(d, path, hex_map)
+	if split.size() > 1 and split[0] == 0:
+		split.remove_at(0)
+	var step_turns: Array[int] = []
+	for t in split.size():
+		for s in split[t]:
+			step_turns.append(t + 1)
+	return {"dest": dest, "blocked": false, "path": path, "costs": costs, "step_turns": step_turns, "turns": split.size()}
+
+
 ## Steps of d's order it will take this turn (0 if none or an attack order counts as 1).
 func steps_this_turn(d: Division, hex_map: HexMap) -> int:
 	if d.order_path.is_empty():
