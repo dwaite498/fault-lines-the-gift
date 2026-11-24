@@ -131,11 +131,12 @@ static func _city_name(city: Dictionary) -> String:
 
 
 ## The report lines for `player`, in this order: cities, new units, raids, sightings, Pressure,
-## planet events. new_divisions are the player's divisions that appeared in the economy step;
-## raided and spawned are the NativeAI.raid_step and NativeSpawner.run returns; is_visible(cell)
-## says whether the player sees a hex; radius is natives.json sighting_report_radius.
+## planet events, charter completions. new_divisions are the player's divisions that appeared in the
+## economy step; raided and spawned are the NativeAI.raid_step and NativeSpawner.run returns;
+## is_visible(cell) says whether the player sees a hex; radius is natives.json sighting_report_radius;
+## charter_lines are {"text", "cell"} entries from ColonyCharter.end_turn.
 static func collect(hex_map: HexMap, player: int, new_divisions: Array, raided: Array, spawned: Array,
-		is_visible: Callable, radius: int, pressure_lines: Array, planet_lines: Array) -> Array:
+		is_visible: Callable, radius: int, pressure_lines: Array, planet_lines: Array, charter_lines: Array = []) -> Array:
 	var out: Array = []
 	for change in hex_map.tier_changes:
 		if int(change.nation) != player:
@@ -163,4 +164,6 @@ static func collect(hex_map: HexMap, player: int, new_divisions: Array, raided: 
 		out.append(_line(str(text)))
 	for text in planet_lines:
 		out.append(_line(str(text)))
+	for line in charter_lines:
+		out.append(_line(str(line.text), line.get("cell", NO_CELL)))
 	return out
