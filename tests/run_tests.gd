@@ -3708,6 +3708,7 @@ func test_cliff_attacks() -> void:
 	wm.terrain[Vector2i(1, 0)] = "water"
 	ok(not wm.attack_edge_blocked(Vector2i(0, 0), Vector2i(1, 0)) and not wm.attack_edge_blocked(Vector2i(1, 0), Vector2i(0, 0)), "edges to or from water are never blocked by this rule")
 	# AI: the only adjacent enemy sits across a cliff, so the AI does not order an attack on it.
+	# Do not check moves_left after the cliff case: if the AI fortifies, that legitimately zeroes them.
 	var w := nat_world()
 	var m: HexMap = w.map
 	var ro: DivisionRoster = w.roster
@@ -3715,13 +3716,15 @@ func test_cliff_attacks() -> void:
 	var me := ro.spawn_division(0, Vector2i(8, 4), "infantry")
 	ro.run_ai(0, m)
 	var level_attack := ai.order_attack and ai.order_path == [me.hex]
+	ok(level_attack, "the AI attacks the enemy on level ground")
 	ro.clear_order(ai)
 	m.elevation[me.hex] = 3
 	ai.moves_left = ai.move
 	ai.has_moved = false
+	var hp_cliff := me.strength
 	ro.run_ai(0, m)
-	var ai_moves := ai.moves_left > 0
-	ok(level_attack and ai_moves and not (ai.order_attack and ai.order_path.has(me.hex)), "the AI attacks the enemy on level ground but not across a cliff")
+	ok(not (ai.order_attack and ai.order_path.has(me.hex)) and is_equal_approx(me.strength, hp_cliff),
+			"the AI does not order an attack across a cliff, and the enemy takes no damage")
 	# Resolution: an attack order whose target ends up across a cliff does not fight.
 	m.elevation[me.hex] = 1
 	ro.clear_order(ai)
