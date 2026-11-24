@@ -1,0 +1,14 @@
+{
+	"first_turn": 45,
+	"interval_min": 8,
+	"interval_max": 12,
+	"salt": 4517,
+	"events": {
+		"survivor_landing": {"weight": 25, "max_per_game": 2, "template": "colony_pod"},
+		"native_migration": {"weight": 25, "count": 2, "min_distance": 3, "max_distance": 4, "bounty_cash": 15,
+				"native_by_terrain": {"fungus": "tendril_worm", "mountains": "crag_harrier", "plains": "rust_strider", "hills": "rust_strider"}},
+		"blizzard": {"weight": 15, "turns": 3, "cold_attrition_mult": 2.0, "snow_move_cost_extra": 1},
+		"spore_bloom": {"weight": 15, "grow_tiles": 2, "new_density": 1, "pressure_key": "spore_bloom"},
+		"supply_cache": {"weight": 20, "cash": 40, "capacity": 20, "cash_chance": 0.5}
+	}
+}

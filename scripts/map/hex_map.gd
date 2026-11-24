@@ -149,6 +149,9 @@ var terrain_types: Dictionary = {}
 ## SN1: terrain_config.json `snow` block (polar_rows, polar_chance, polar_from, salt,
 ## cold_attrition_org); empty disables polar snow and cold attrition.
 var snow_rules: Dictionary = {}
+## T2 Blizzard (PlanetEvents): cold attrition multiplier and extra move cost on snow while it lasts.
+var cold_event_mult := 1.0
+var snow_extra_move := 0
 
 
 ## Builds a map from the map config (width, height, seed, land_ratio, nation_count)
@@ -256,7 +259,7 @@ func can_host_fungus(cell: Vector2i) -> bool:
 func cold_scale(nation: int) -> float:
 	if snow_rules.is_empty() or nation == int(natives_config.get("native_nation", -2)):
 		return 0.0
-	return float(traits.mod(nation, "cold_attrition_mult", 1.0)) if traits != null else 1.0
+	return (float(traits.mod(nation, "cold_attrition_mult", 1.0)) if traits != null else 1.0) * cold_event_mult
 
 
 func _assign_elevation(cfg: Dictionary) -> void:
@@ -296,6 +299,8 @@ func can_step(from: Vector2i, to: Vector2i) -> bool:
 ## when it is one or more levels higher. Downhill and level steps cost the normal amount.
 func step_cost(from: Vector2i, to: Vector2i, nation := -1) -> int:
 	var cost := int(terrain_of(to).move_cost) + fungus_extra_cost(to, nation)
+	if snow_extra_move != 0 and terrain_name(to) == "snow":
+		cost += snow_extra_move  # T2 Blizzard
 	if elevation_of(to) > elevation_of(from):
 		var free: Array = traits.mod(nation, "no_uphill_penalty_terrain", []) if nation >= 0 else []
 		if not free.has(terrain_name(to)):
