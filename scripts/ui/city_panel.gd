@@ -126,6 +126,8 @@ func refresh(city: Dictionary) -> void:
 		label.text += "\nOutput/turn: cash +%.1f, capacity +%.1f" % [income.cash, income.capacity]
 		var per_level := economy.infra_labor_per_level(int(city.nation))
 		label.text += "\nInfra build %d/%d (+%d/turn)" % [int(city.get("infra_progress", 0)), per_level, economy.infra_points(city)]
+		if economy.pods.has(city.id):
+			label.text += "\nBuilding: " + NationEconomy.queue_text(economy.pods[city.id])
 		if economy.pending.has(city.id):
 			label.text += "\nRecruiting: " + NationEconomy.queue_text(economy.pending[city.id])
 			label.text += " (+%d/turn)" % economy.training_points(city)

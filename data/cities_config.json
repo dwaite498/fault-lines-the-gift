@@ -20,10 +20,10 @@
 	"fungus_adjacent_growth_mult": 0.95,
 	"fungus_growth_min_mult": 0.7,
 	"division_people_cost": 1000,
-	"pool_fill_rate": 0.005,
+	"pool_fill_rate": 0.01,
 	"pool_cap": 0.15,
-	"capital_start_pool": 1000,
-	"colony_start_pool": 0,
+	"capital_start_pool": 1500,
+	"colony_start_pool": 450,
 	"train_min_city_pop": 5000,
 	"siege_growth": 0.0,
 	"siege_pop_loss": 0.02,
@@ -38,7 +38,8 @@
 		"outpost_infrastructure": 10,
 		"min_city_distance": 3,
 		"ai_build_pods": true,
-		"ai_max_pods": 1
+		"ai_max_pods": 1,
+		"uses_training_slot": false
 	},
 	"capture": {
 		"order": ["annex", "occupy", "plunder", "reduce", "raze", "enslave"],

@@ -54,7 +54,7 @@ static func capture(hex_map: HexMap, roster: DivisionRoster, economy: NationEcon
 			"rng_seed": roster.rng.seed, "rng_state": roster.rng.state,
 		},
 		"economy": {
-			"stocks": economy.stocks.duplicate(true), "pending": economy.pending.duplicate(true),
+			"stocks": economy.stocks.duplicate(true), "pending": economy.pending.duplicate(true), "pods": economy.pods.duplicate(true),
 			"upkeep_paid": economy.upkeep_paid.duplicate(), "unpaid_divisions": economy.unpaid_divisions.duplicate(true),
 			"pows": economy.pows.duplicate(true), "reinforce_spent": economy.reinforce_spent.duplicate(),
 			"rush_spent": economy.rush_spent.duplicate(),
@@ -101,6 +101,7 @@ static func restore(state: Dictionary, hex_map: HexMap, roster: DivisionRoster, 
 	var e: Dictionary = state.economy
 	economy.stocks = e.stocks.duplicate(true)
 	economy.pending = e.pending.duplicate(true)
+	economy.pods = e.get("pods", {}).duplicate(true)
 	economy.upkeep_paid = e.upkeep_paid.duplicate()
 	economy.unpaid_divisions = e.unpaid_divisions.duplicate(true)
 	economy.pows = e.pows.duplicate(true)

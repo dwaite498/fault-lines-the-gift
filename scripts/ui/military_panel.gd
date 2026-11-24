@@ -52,6 +52,9 @@ func refresh(nation: int, roster: DivisionRoster, economy: NationEconomy, top: f
 				elif economy.recruit_stalled(queue_city):
 					note = "  STALLED: assign Training labor"
 			lines.append("city %d: %s%s" % [id, NationEconomy.queue_text(economy.pending[id]), note])
+	for id in economy.pods:
+		if economy.pods[id].nation == nation:
+			lines.append("city %d: %s" % [id, NationEconomy.queue_text(economy.pods[id])])
 	label.text = "\n".join(lines)
 	swatch.color = factions.color_of(nation)
 	panel.size = label.get_minimum_size() + Vector2(30, 12)
