@@ -493,7 +493,7 @@ func _try_recruit() -> void:
 		print("Recruiting at city %d; arrives in %d turns" % [_city.id, int(_economy.config.training_turns)])
 	else:
 		message.text = "Cannot recruit: " + reason
-		print(message.text)
+		print("recruit_block_reason: nation %d city %d: %s" % [PLAYER_NATION, int(_city.get("id", -1)), reason])
 
 
 ## S key and the city panel's Scout button.
