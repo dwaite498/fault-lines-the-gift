@@ -257,6 +257,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	elif key.keycode == KEY_TAB:
 		select_unit(next_idle_unit(_view.selected))
+		if _view.selected:
+			focus_camera_on(_view.selected)
 	elif key.keycode == KEY_R and not _city.is_empty() and _city.nation == PLAYER_NATION:
 		_try_recruit()
 	elif key.keycode == KEY_P and not _city.is_empty() and _city.nation == PLAYER_NATION:
@@ -412,6 +414,14 @@ func do_action(action: String) -> void:
 
 
 ## Next player division with no order after `after` in id order, wrapping; null if none.
+## P3: brings d's hex into view when it is off-screen or near the edge of the map area (the
+## screen minus the top bar and the side panel); a comfortably visible unit leaves the camera alone.
+func focus_camera_on(d: Division) -> bool:
+	var vs := _camera.view_size
+	var area := Rect2(0, TopBar.HEIGHT, maxf(vs.x - UnitPanel.WIDTH, 1.0), maxf(vs.y - TopBar.HEIGHT, 1.0))
+	return _camera.ensure_visible(_view.to_global(_view.hex_to_pixel(d.hex)), area)
+
+
 func next_idle_unit(after: Division) -> Division:
 	var idle: Array[Division] = []
 	for d in _view.roster.divisions:
