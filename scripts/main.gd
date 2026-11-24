@@ -23,6 +23,9 @@ var _capture_popup := CapturePopup.new()
 var _pause_menu := PauseMenu.new()
 ## Combat feedback juice (visual only).
 var _fx := CombatFx.new()
+## End-of-turn report panel.
+var _report := TurnReport.new()
+var _report_auto_hide := true
 var _fog: Fog
 var _game_over := GameOverScreen.new()
 ## Share of nation-owned cities that wins by domination (map_config.json "victory").
@@ -145,6 +148,13 @@ func _ready() -> void:
 	_pause_menu.quit_pressed.connect(func() -> void: get_tree().quit())
 	_pause_menu.reduce_motion_check.set_pressed_no_signal(_fx.reduce_motion)
 	_pause_menu.reduce_motion_toggled.connect(_on_reduce_motion_toggled)
+	_report_auto_hide = GameSettings.turn_report_auto_hide()
+	_pause_menu.report_auto_hide_check.set_pressed_no_signal(_report_auto_hide)
+	_pause_menu.report_auto_hide_toggled.connect(func(on: bool) -> void:
+			_report_auto_hide = on
+			GameSettings.set_turn_report_auto_hide(on))
+	_report.line_pressed.connect(func(cell: Vector2i) -> void: focus_camera_on_cell(cell))
+	add_child(_report)
 	add_child(_pause_menu)
 	_domination_share = float(map_cfg.get("victory", {}).get("domination_share", Victory.DEFAULT_SHARE))
 	_game_over.new_game_pressed.connect(_on_game_over_new_game)
@@ -260,6 +270,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if _game_over.is_open():
 		return  # only the end screen's buttons work
+	if key.keycode == KEY_ESCAPE and _report.is_open() and not _pause_menu.is_open():
+		_report.close()
+		return
 	if key.keycode == KEY_ESCAPE and not _capture_popup.is_open():
 		_escape()
 		return
@@ -351,14 +364,18 @@ func _finish_turn() -> void:
 			tier_log.append(line)
 	if not tier_log.is_empty():
 		message.text = ". ".join(tier_log)
+	var had := {}
+	for d in roster.divisions:
+		had[d.id] = true
 	_economy.end_turn(_view.hex_map, roster)
+	var new_divisions := roster.divisions.filter(func(d: Division) -> bool: return d.nation == PLAYER_NATION and not had.has(d.id))
 	turn += 1
 	_view.hex_map.current_turn = turn
 	var world_events := _view.hex_map.pressure.end_turn(_view.hex_map, turn)
 	if not world_events.is_empty():
 		message.text = ". ".join(world_events)
-	NativeSpawner.run(_view.hex_map, roster, turn)
-	NativeAI.raid_step(_view.hex_map, roster, turn)
+	var spawned := NativeSpawner.run(_view.hex_map, roster, turn)
+	var raided := NativeAI.raid_step(_view.hex_map, roster, turn)
 	var planet := _events.end_turn(_view.hex_map, roster, _economy, turn)
 	if not planet.is_empty():
 		message.text = ". ".join(planet)
@@ -367,6 +384,13 @@ func _finish_turn() -> void:
 		message.text = "Recruit stalled in city %s: assign Training labor" % ", ".join(stalled.map(func(i: int) -> String: return str(i)))
 	if _check_game_over():
 		return
+	var report := TurnReport.collect(_view.hex_map, PLAYER_NATION, new_divisions, raided, spawned,
+			func(cell: Vector2i) -> bool: return _fog.state(PLAYER_NATION, cell) == Fog.VISIBLE,
+			int(_view.hex_map.natives_config.get("sighting_report_radius", 3)), world_events, planet)
+	if TurnReport.should_show(report, _report_auto_hide):
+		_report.open(report)
+	else:
+		_report.close()
 	roster.run_ai(PLAYER_NATION, _view.hex_map)
 	SaveGame.write(SaveGame.AUTOSAVE_PATH, _capture_state())
 	print("Turn ended")
@@ -441,9 +465,14 @@ func do_action(action: String) -> void:
 ## P3: brings d's hex into view when it is off-screen or near the edge of the map area (the
 ## screen minus the top bar and the side panel); a comfortably visible unit leaves the camera alone.
 func focus_camera_on(d: Division) -> bool:
+	return focus_camera_on_cell(d.hex)
+
+
+## The same camera snap for any hex (turn report lines).
+func focus_camera_on_cell(cell: Vector2i) -> bool:
 	var vs := _camera.view_size
 	var area := Rect2(0, TopBar.HEIGHT, maxf(vs.x - UnitPanel.WIDTH, 1.0), maxf(vs.y - TopBar.HEIGHT, 1.0))
-	return _camera.ensure_visible(_view.to_global(_view.hex_to_pixel(d.hex)), area)
+	return _camera.ensure_visible(_view.to_global(_view.hex_to_pixel(cell)), area)
 
 
 func next_idle_unit(after: Division) -> Division:

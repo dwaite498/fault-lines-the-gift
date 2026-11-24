@@ -82,6 +82,10 @@ func _initialize() -> void:
 	test_t1b_recruit()
 	# --- end T1b ---
 
+	# --- Turn report panel (own block to avoid merge collisions) ---
+	test_turn_report()
+	# --- end turn report ---
+
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -4192,3 +4196,70 @@ func test_t1b_recruit() -> void:
 	var g2 := save_game_setup(5)
 	SaveGame.restore(state, g2.map, g2.roster, g2.eco)
 	ok(g2.eco.pods.has(gcap.id) and g2.eco.pods[gcap.id].kind == "colony_pod", "the pod queue is saved and restored")
+
+
+
+## Turn report panel (PM rulings, Nov 23): lines from existing turn data, clickable where they have a hex.
+func test_turn_report() -> void:
+	var cfg := NativeSpawner.load_config()
+	ok(int(cfg.sighting_report_radius) == 3, "natives.json sighting_report_radius is 3")
+	var w := nat_world()
+	var m: HexMap = w.map
+	var r: DivisionRoster = w.roster
+	m.tier_changes.assign([
+		{"city_id": 0, "nation": 0, "from": "outpost", "to": "base", "grew": true},
+		{"city_id": 1, "nation": 1, "from": "outpost", "to": "base", "grew": true},
+	])
+	var trained := r.spawn_division(0, Vector2i(1, 1), "infantry", 0)
+	var pod := r.spawn_division(0, Vector2i(2, 1), "colony_pod", 0)
+	var near := r.spawn_division(DivisionRoster.NATIVE_NATION, Vector2i(3, 2), "rust_strider")
+	var hidden := r.spawn_division(DivisionRoster.NATIVE_NATION, Vector2i(2, 3), "rust_strider")
+	var far := r.spawn_division(DivisionRoster.NATIVE_NATION, Vector2i(9, 5), "rust_strider")
+	var seen := func(cell: Vector2i) -> bool: return cell != hidden.hex
+	var lines := TurnReport.collect(m, 0, [trained, pod], [m.cities[0], m.cities[1]], [near, hidden, far], seen, 3,
+			["The planet stirs"], ["Supply Cache: +40 cash"])
+	var texts: Array = lines.map(func(l: Dictionary) -> String: return l.text)
+	ok(texts == ["City 0 grew to Base", "Infantry trained in City 0", "Colony pod ready in City 0", "Natives raided City 0",
+			"Natives sighted near City 0", "The planet stirs", "Supply Cache: +40 cash"], "the report lists the player's events in order (%s)" % str(texts))
+	ok(lines[0].cell == m.cities[0].cell and lines[1].cell == trained.hex and lines[2].cell == pod.hex and lines[3].cell == m.cities[0].cell and lines[4].cell == near.hex,
+			"city lines center on the city, unit lines on the unit, the sighting on the native")
+	ok(lines[5].cell == TurnReport.NO_CELL and lines[6].cell == TurnReport.NO_CELL, "Pressure and planet-event lines are plain text")
+	ok(not texts.any(func(s: String) -> bool: return s.contains("starved")), "no 'starved' wording")
+	m.tier_changes.assign([{"city_id": 0, "nation": 0, "from": "base", "to": "outpost", "grew": false}])
+	ok(TurnReport.collect(m, 0, [], [], [], seen, 3, [], [])[0].text == "City 0 shrank to Outpost", "a tier drop reads 'City 0 shrank to Outpost'")
+	m.tier_changes.clear()
+	ok(TurnReport.collect(m, 0, [], [m.cities[1]], [far], seen, 3, [], []).is_empty(), "other nations' raids and natives far from the player's cities are left out")
+	ok(TurnReport.should_show([], false) and not TurnReport.should_show([], true) and TurnReport.should_show(lines, true), "auto-hide skips only an empty report")
+	var panel := TurnReport.new()
+	root.add_child(panel)
+	panel.open(lines)
+	var buttons := panel.list.get_children().filter(func(n: Node) -> bool: return n is Button and n != panel.close_button)
+	var labels := panel.list.get_children().filter(func(n: Node) -> bool: return n is Label and n != panel.title)
+	var got: Array = []
+	panel.line_pressed.connect(func(cell: Vector2i) -> void: got.append(cell))
+	buttons[1].pressed.emit()
+	ok(panel.is_open() and buttons.size() == 5 and labels.size() == 2 and got == [trained.hex], "the panel shows 5 clickable lines and 2 plain ones; a click sends the line's hex")
+	panel.close_button.pressed.emit()
+	ok(not panel.is_open(), "Close dismisses the panel")
+	var long: Array = []
+	for i in 25:
+		long.append({"text": "Infantry trained in City %d" % i, "cell": Vector2i(1, 1)})
+	panel.open(long)
+	panel.fit(720.0)
+	var h := panel.height()
+	ok(h <= 0.6 * 720.0 + 1.0 and panel.panel.position.y + h <= 720.0 and 25.0 * panel.close_button.get_combined_minimum_size().y > panel.scroll.custom_minimum_size.y
+			and panel.close_button.get_parent() == panel.frame,
+			"25 lines at 1280x720: the panel is capped at 60%% of the height (%.0f px), the rows scroll and Close stays on screen" % h)
+	panel.open(lines.slice(0, 2))
+	panel.fit(720.0)
+	var two: float = 4.0 + panel.list.get_children().reduce(func(s: float, c: Control) -> float: return s + c.get_combined_minimum_size().y, 0.0)
+	ok(panel.list.get_child_count() == 2 and is_equal_approx(panel.scroll.custom_minimum_size.y, two), "a short report still sizes to its content")
+	panel.open([])
+	ok(panel.is_open() and panel.list.get_children().any(func(n: Node) -> bool: return n is Label and n.text == "Nothing new this turn."), "with auto-hide off an empty report says nothing new")
+	panel.free()
+	var path := "user://test_settings_report.cfg"
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	var default_on := GameSettings.turn_report_auto_hide(path)
+	GameSettings.set_turn_report_auto_hide(false, path)
+	ok(default_on and not GameSettings.turn_report_auto_hide(path), "Hide empty turn report defaults on and persists in user:// settings")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))

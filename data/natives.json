@@ -27,6 +27,7 @@
 		"strider": {"chance": 0.05, "min_city_distance": 4},
 		"harrier": {"chance": 0.015, "no_unit_radius": 2}
 	},
+	"sighting_report_radius": 3,
 	"raid": {"city_tiers": ["outpost", "base"], "pop_loss": 0.05, "min_population": 1000, "city_cooldown_turns": 5},
 	"fungus_attrition": {"org": 5, "strength": 2, "move_cost": 1, "min_strength": 1, "exempt_natives": true},
 	"fungus": {"patches": 4, "patch_radius": 2, "min_city_distance": 3, "max_density": 4},
