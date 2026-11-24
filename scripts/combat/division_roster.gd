@@ -410,10 +410,11 @@ func can_attack(attacker: Division, defender: Division, hex_map: HexMap) -> bool
 	return _can_attack_ignoring_frontage(attacker, defender, hex_map) and not frontage_blocked(attacker, defender.hex)
 
 
+## P2: no melee attack across a cliff or a ledge without a ramp (HexMap.attack_edge_blocked).
 func _can_attack_ignoring_frontage(attacker: Division, defender: Division, hex_map: HexMap) -> bool:
 	return (not is_unarmed(attacker) and attacker.moves_left > 0 and not attacker.has_moved and defender != null
 			and defender.nation != attacker.nation and not neutral_nations.has(defender.nation)
-			and defender.hex in hex_map.neighbors(attacker.hex))
+			and defender.hex in hex_map.neighbors(attacker.hex) and not hex_map.attack_edge_blocked(attacker.hex, defender.hex))
 
 
 ## Flank multiplier for a defender hit from hex_count distinct hexes this turn:
@@ -736,6 +737,33 @@ func turn_split(d: Division, path: Array[Vector2i], hex_map: HexMap) -> Array[in
 	return out
 
 
+## P1 move path preview (UI only, read-only; changes no order). For a move to dest:
+## "path" is the route set_order would store (plan_path), "costs" each step's move cost
+## (step_cost_for), "step_turns" the turn each step lands in (1 = the unit's next moving turn,
+## same counting as turns_to_arrive) and "turns" the turns to arrive. "blocked" is true when
+## dest is passable land next to d but can_step refuses the direct step (a ledge or a cliff) and
+## no detour exists; then path is empty (water and other impassable terrain show nothing). Returns {} when there is nothing to show.
+func path_preview(d: Division, dest: Vector2i, hex_map: HexMap) -> Dictionary:
+	if d == null or dest == d.hex or not hex_map.cells.has(dest):
+		return {}
+	var path := plan_path(d, dest, hex_map)
+	if path.is_empty():
+		if dest in hex_map.neighbors(d.hex) and hex_map.terrain_of(dest).passable and not hex_map.can_step(d.hex, dest):
+			return {"dest": dest, "blocked": true, "path": [], "costs": [], "step_turns": [], "turns": 0}
+		return {}
+	var costs: Array[int] = []
+	for i in path.size():
+		costs.append(step_cost_for(d, path[i - 1] if i > 0 else d.hex, path[i], hex_map))
+	var split := turn_split(d, path, hex_map)
+	if split.size() > 1 and split[0] == 0:
+		split.remove_at(0)
+	var step_turns: Array[int] = []
+	for t in split.size():
+		for s in split[t]:
+			step_turns.append(t + 1)
+	return {"dest": dest, "blocked": false, "path": path, "costs": costs, "step_turns": step_turns, "turns": split.size()}
+
+
 ## Steps of d's order it will take this turn (0 if none or an attack order counts as 1).
 func steps_this_turn(d: Division, hex_map: HexMap) -> int:
 	if d.order_path.is_empty():
@@ -895,7 +923,7 @@ func execute_orders(hex_map: HexMap) -> void:
 		var vacated: Vector2i = a.order_path[0]
 		if not divisions.has(a):
 			continue
-		if t != null and divisions.has(t) and t.hex in hex_map.neighbors(a.hex):
+		if t != null and divisions.has(t) and t.hex in hex_map.neighbors(a.hex) and not hex_map.attack_edge_blocked(a.hex, t.hex):
 			_log_attack(a, t, attack_unchecked(a, t, hex_map))
 		elif division_at(vacated) == null:
 			a.fortify_level = 0
@@ -1032,7 +1060,7 @@ func run_ai(player_nation: int, hex_map: HexMap) -> void:
 		for n in hex_map.neighbors(d.hex):
 			var other := division_at(n)
 			if other and other.nation != d.nation:
-				if not frontage_blocked(d, n):  # a full hex is not a target for the AI
+				if not frontage_blocked(d, n) and not hex_map.attack_edge_blocked(d.hex, n):  # a full hex, or one across a cliff/ledge (P2), is not a target
 					enemies.append(other)
 			elif can_move(d, n, hex_map):
 				free.append(n)
