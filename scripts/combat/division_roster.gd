@@ -15,6 +15,8 @@ var rng := RandomNumberGenerator.new()
 var economy: NationEconomy = null
 ## Clash/combat lines from the last execute_orders().
 var turn_log: Array[String] = []
+## T2: {"id", "by"} for each native destroyed in combat since PlanetEvents last read it.
+var destroyed_natives: Array = []
 ## The reason the last set_order refused a move order past a leash ("" if it did not); the UI shows it.
 var order_message := ""
 ## Nations treated as neutral: their hexes can be neither ordered into nor attacked.
@@ -554,6 +556,8 @@ func _damage(d: Division, raw: float, org_div := 1.0, org_only := false) -> Dict
 func _after_combat(d: Division, hex_map: HexMap, captor: int) -> String:
 	if d.strength <= 0.0 or (is_native(d) and d.org <= 0.0):
 		divisions.erase(d)  # a native at 0 org is removed: it never retreats or surrenders
+		if is_native(d):
+			destroyed_natives.append({"id": d.id, "by": captor})  # T2 migration bounty
 		return "destroyed"
 	if d.org > 0.0:
 		return "held"

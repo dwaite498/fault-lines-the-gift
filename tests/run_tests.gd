@@ -70,6 +70,7 @@ func _initialize() -> void:
 	test_cliff_attacks()
 	test_next_unit_camera()
 	test_t1_pacing()
+	test_planet_events()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -3855,3 +3856,188 @@ func test_t1_pacing() -> void:
 	ok(not fe.recruit_block_log.is_empty() and fe.recruit_block_log.all(func(l: String) -> bool: return l.begins_with("recruit_block_reason: nation "))
 			and fe.recruit_block_log.any(func(l: String) -> bool: return l.ends_with(": not enough capacity")),
 			"AI cities that cannot recruit log 'recruit_block_reason: nation N city C: <reason>' (%d lines)" % fe.recruit_block_log.size())
+
+## T2 planet events (PACING_TUNING_577a022.md section 3; PM rulings): one global seeded schedule,
+## data-driven effects, text only, saved in the save extras.
+func events_setup(seed_value: int) -> Dictionary:
+	var g := save_game_setup(seed_value)
+	g.map.load_natives_config(NativeSpawner.load_config())
+	g.map.place_fungus(g.roster.rng)
+	var ev := PlanetEvents.new()
+	ev.setup(PlanetEvents.load_config(), g.map.seed_value, 0)
+	g["ev"] = ev
+	return g
+
+
+func event_schedule(seed_value: int, turns: int) -> Array:
+	var ev := PlanetEvents.new()
+	ev.setup(PlanetEvents.load_config(), seed_value, 0)
+	var out: Array = []
+	for t in range(1, turns + 1):
+		if t >= ev.next_turn:
+			var k := ev.pick_event()
+			if k == "survivor_landing":
+				ev.survivor_count += 1
+			ev.last_event = k
+			out.append([t, k])
+			ev.next_turn = t + ev.rng.randi_range(int(ev.cfg.interval_min), int(ev.cfg.interval_max))
+	return out
+
+
+func test_planet_events() -> void:
+	var cfg := PlanetEvents.load_config()
+	var e: Dictionary = cfg.events
+	ok(int(cfg.first_turn) == 45 and int(cfg.interval_min) == 8 and int(cfg.interval_max) == 12, "planet_events.json: first event turn 45, then every 8-12 turns")
+	ok(int(e.survivor_landing.weight) == 25 and int(e.native_migration.weight) == 25 and int(e.blizzard.weight) == 15
+			and int(e.spore_bloom.weight) == 15 and int(e.supply_cache.weight) == 20, "weights: Survivor 25, Migration 25, Blizzard 15, Spore 15, Cache 20")
+	# Schedule: deterministic per seed, first on 45, gaps 8-12, no repeats, Survivor at most twice.
+	var a := event_schedule(11, 2000)
+	ok(a == event_schedule(11, 2000) and a != event_schedule(12, 2000), "the same seed gives the same event schedule; another seed differs")
+	var gaps_ok := int(a[0][0]) == 45
+	var repeat_ok := true
+	var survivors := 0
+	var counts := {}
+	for i in a.size():
+		counts[a[i][1]] = int(counts.get(a[i][1], 0)) + 1
+		if a[i][1] == "survivor_landing":
+			survivors += 1
+		if i > 0:
+			var gap := int(a[i][0]) - int(a[i - 1][0])
+			gaps_ok = gaps_ok and gap >= 8 and gap <= 12
+			repeat_ok = repeat_ok and a[i][1] != a[i - 1][1]
+	ok(gaps_ok, "the first event fires on turn 45 and the next ones 8-12 turns apart (%d events)" % a.size())
+	ok(repeat_ok, "the same event never fires twice in a row")
+	ok(survivors <= 2 and survivors > 0, "Survivor Landing fires at most twice per game (%d)" % survivors)
+	ok(counts.size() == 5 and int(counts.native_migration) > int(counts.blizzard), "every other event fires, weighted (%s)" % str(counts))
+	# end_turn: nothing before turn 45, an event on 45.
+	var g := events_setup(3)
+	var m: HexMap = g.map
+	var r: DivisionRoster = g.roster
+	var ev: PlanetEvents = g.ev
+	ok(ev.end_turn(m, r, g.eco, 44).is_empty() and ev.planet_event_log.is_empty(), "no planet event before turn 45")
+	var lines := ev.end_turn(m, r, g.eco, 45)
+	ok(lines.size() == 1 and ev.planet_event_log.size() == 1 and int(ev.planet_event_log[0].turn) == 45 and ev.next_turn >= 53 and ev.next_turn <= 57,
+			"an event fires on turn 45, is logged as text, and the next is due 8-12 turns later")
+	# Survivor Landing: a free colony pod beside the largest player city.
+	g = events_setup(3)
+	m = g.map
+	r = g.roster
+	ev = g.ev
+	var big: Dictionary = {}
+	for c in m.cities:
+		if int(c.nation) == 0 and (big.is_empty() or int(c.population) > int(big.population)):
+			big = c
+	var pods := r.divisions.filter(func(d: Division) -> bool: return d.unit_type == "colony_pod").size()
+	var cash0 := float(g.eco.stocks[0].cash)
+	ev.fire("survivor_landing", m, r, g.eco)
+	var new_pod: Division = r.divisions.back()
+	ok(new_pod.unit_type == "colony_pod" and new_pod.nation == 0 and HexMap.hex_distance(new_pod.hex, big.cell) == 1
+			and r.divisions.filter(func(d: Division) -> bool: return d.unit_type == "colony_pod").size() == pods + 1
+			and is_equal_approx(float(g.eco.stocks[0].cash), cash0) and ev.survivor_count == 1,
+			"Survivor Landing: a free colony pod lands beside the player's largest city")
+	# Supply Cache: +40 cash or +20 capacity, by a seeded roll.
+	var got_cash := false
+	var got_cap := false
+	for s in range(1, 9):
+		g = events_setup(s)
+		var c0 := float(g.eco.stocks[0].cash)
+		var k0 := float(g.eco.stocks[0].capacity)
+		var text: String = g.ev.fire("supply_cache", g.map, g.roster, g.eco)
+		var dc := float(g.eco.stocks[0].cash) - c0
+		var dk := float(g.eco.stocks[0].capacity) - k0
+		got_cash = got_cash or (is_equal_approx(dc, 40.0) and is_zero_approx(dk) and text.contains("cash"))
+		got_cap = got_cap or (is_equal_approx(dk, 20.0) and is_zero_approx(dc) and text.contains("capacity"))
+	ok(got_cash and got_cap, "Supply Cache: instant +40 cash or +20 capacity, a seeded 50/50 roll")
+	# Native Migration: 2 natives 3-4 hexes from a player city, the right type for the terrain.
+	g = events_setup(4)
+	m = g.map
+	r = g.roster
+	ev = g.ev
+	var before := r.divisions.size()
+	ev.fire("native_migration", m, r, g.eco)
+	var arrived: Array = r.divisions.slice(before)
+	var mig_ok := arrived.size() == 2 and ev.bounty_ids.size() == 2
+	for d in arrived:
+		var near := false
+		for c in m.cities:
+			var dist := HexMap.hex_distance(d.hex, c.cell)
+			near = near or (int(c.nation) == 0 and dist >= 3 and dist <= 4)
+		mig_ok = mig_ok and r.is_native(d) and near and d.unit_type == PlanetEvents.native_type_for(d.hex, m, e.native_migration.native_by_terrain)
+	ok(mig_ok, "Native Migration: 2 natives of the terrain's normal type, 3-4 hexes from a player border city")
+	# Bounty: +15 cash only when the player kills a tagged native.
+	var cash1 := float(g.eco.stocks[0].cash)
+	var cash_ai := float(g.eco.stocks[1].cash)
+	r.destroyed_natives = [{"id": arrived[0].id, "by": 1}]
+	ev.end_turn(m, r, g.eco, 2)
+	ok(is_equal_approx(float(g.eco.stocks[0].cash), cash1) and is_equal_approx(float(g.eco.stocks[1].cash), cash_ai), "no bounty when an AI kills a migration native")
+	r.destroyed_natives = [{"id": arrived[1].id, "by": 0}, {"id": 999, "by": 0}]
+	ev.end_turn(m, r, g.eco, 3)
+	ok(is_equal_approx(float(g.eco.stocks[0].cash), cash1 + 15.0) and ev.bounty_ids.is_empty(), "+15 cash to the player for a tagged migration native only")
+	var victim: Division = arrived[1]
+	victim.strength = 0.0
+	r._after_combat(victim, m, 0)
+	ok(r.destroyed_natives.size() == 1 and int(r.destroyed_natives[0].by) == 0, "a native destroyed in combat is recorded with its killer")
+	# Spore Bloom: the patch nearest the claim grows by 2 tiles; Pressure +1 when it touches the claim.
+	g = events_setup(5)
+	m = g.map
+	ev = g.ev
+	var tiles0 := m.fungus_tiles.size()
+	var p0 := m.pressure.score
+	var text2 := ev.fire("spore_bloom", m, g.roster, g.eco)
+	var grown_ok := m.fungus_tiles.size() == tiles0 + 2
+	for cell in m.fungus_tiles:
+		grown_ok = grown_ok and m.can_host_fungus(cell)
+	ok(grown_ok, "Spore Bloom: the patch grows by 2 tiles that can host fungus (%s)" % text2)
+	ok(text2.contains("Pressure") == (m.pressure.score > p0) and int(m.natives_config.pressure.events.spore_bloom) == 1, "Pressure +1 (spore_bloom) only when the bloom touches the player's claim")
+	g = events_setup(5)
+	m = g.map
+	for cell in m.cells:
+		if m.cells[cell] != HexMap.WATER and not m.is_fungus(cell):
+			m.cells[cell] = 0
+	p0 = m.pressure.score
+	var text3: String = g.ev.fire("spore_bloom", m, g.roster, g.eco)
+	ok(text3.contains("Pressure") and is_equal_approx(m.pressure.score - p0, m.pressure.mult("")), "a bloom touching the player's claim adds Pressure +1 under spore_bloom (%s, %.2f)" % [text3, m.pressure.score - p0])
+	# Blizzard: 3 turns of doubled cold attrition and snow +1 move, then it clears.
+	g = events_setup(6)
+	m = g.map
+	r = g.roster
+	ev = g.ev
+	var base_scale := m.cold_scale(0)
+	var snow_cell := Vector2i(-1, -1)
+	for cell in m.terrain:
+		if m.terrain[cell] == "snow":
+			snow_cell = cell
+			break
+	var base_cost := m.step_cost(m.neighbors(snow_cell)[0], snow_cell, 0)
+	ev.fire("blizzard", m, r, g.eco)
+	ok(is_equal_approx(m.cold_scale(0), base_scale * 2.0) and m.step_cost(m.neighbors(snow_cell)[0], snow_cell, 0) == base_cost + 1,
+			"Blizzard doubles cold attrition and snow costs +1 move")
+	ev.next_turn = 999
+	ev.end_turn(m, r, g.eco, 2)
+	ev.end_turn(m, r, g.eco, 3)
+	var still := is_equal_approx(m.cold_scale(0), base_scale * 2.0)
+	ev.end_turn(m, r, g.eco, 4)
+	ok(still and is_equal_approx(m.cold_scale(0), base_scale) and m.step_cost(m.neighbors(snow_cell)[0], snow_cell, 0) == base_cost,
+			"the blizzard lasts 3 end turns, then cold and snow return to normal")
+	# Save/load: the scheduler state round-trips and the next events match.
+	g = events_setup(7)
+	m = g.map
+	ev = g.ev
+	ev.next_turn = 1
+	ev.end_turn(m, g.roster, g.eco, 1)
+	ev.fire("blizzard", m, g.roster, g.eco)
+	var saved: Dictionary = JSON.parse_string(JSON.stringify(ev.capture()))
+	var ev2 := PlanetEvents.new()
+	ev2.setup(cfg, 12345, 0)
+	m.cold_event_mult = 1.0
+	ev2.restore(saved, m)
+	ok(ev2.next_turn == ev.next_turn and ev2.last_event == ev.last_event and ev2.blizzard_left == 3 and ev2.planet_event_log.size() == 1
+			and is_equal_approx(m.cold_event_mult, 2.0), "save/load restores the schedule, log, and an active blizzard")
+	var seq_a: Array = []
+	var seq_b: Array = []
+	for i in 6:
+		seq_a.append(ev.pick_event())
+		seq_b.append(ev2.pick_event())
+	ok(seq_a == seq_b, "after a load the event rolls continue exactly as before")
+	var cap := SaveGame.capture(m, g.roster, g.eco, 5, g.cfg, [], {"planet_events": ev.capture()})
+	ok(not cap.extras.get("planet_events", {}).is_empty(), "the scheduler state rides in the save extras")

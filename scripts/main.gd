@@ -35,6 +35,8 @@ var message := Label.new()
 var turn := 1
 ## Active target mode: "", "move", "attack" or "follow".
 var _mode := ""
+## T2 planet events.
+var _events := PlanetEvents.new()
 
 
 func _ready() -> void:
@@ -79,6 +81,7 @@ func _ready() -> void:
 	_economy = NationEconomy.new()
 	_economy.setup(_view.hex_map)
 	_view.roster.economy = _economy
+	_events.setup(PlanetEvents.load_config(), _view.hex_map.seed_value, PLAYER_NATION)
 	_panel = UnitPanel.new()
 	_panel.max_fortify = int(_view.roster.combat.max_fortify)
 	_panel.flank_per_hex = float(_view.roster.combat.flank_penalty_per_hex)
@@ -143,6 +146,7 @@ func _ready() -> void:
 		turn = SaveGame.restore(saved, _view.hex_map, _view.roster, _economy)
 		_fog.restore(saved.extras.get("fog", {}))
 		_view.hex_map.pressure.restore(saved.extras.get("pressure", {}))
+		_events.restore(saved.extras.get("planet_events", {}), _view.hex_map)
 		_loaded = true
 		print("Loaded the saved game at turn %d" % turn)
 	else:
@@ -158,7 +162,8 @@ func _capture_state() -> Dictionary:
 	var ids: Array = []
 	for i in _view.factions.assigned.size():
 		ids.append(_view.factions.id_of(i))
-	return SaveGame.capture(_view.hex_map, _view.roster, _economy, turn, _map_cfg, ids, {"fog": _fog.capture(), "pressure": _view.hex_map.pressure.capture()})
+	return SaveGame.capture(_view.hex_map, _view.roster, _economy, turn, _map_cfg, ids, {"fog": _fog.capture(), "pressure": _view.hex_map.pressure.capture(),
+			"planet_events": _events.capture()})
 
 
 func _on_save_pressed() -> void:
@@ -338,6 +343,9 @@ func _finish_turn() -> void:
 		message.text = ". ".join(world_events)
 	NativeSpawner.run(_view.hex_map, roster, turn)
 	NativeAI.raid_step(_view.hex_map, roster, turn)
+	var planet := _events.end_turn(_view.hex_map, roster, _economy, turn)
+	if not planet.is_empty():
+		message.text = ". ".join(planet)
 	var stalled := _economy.stalled_cities(PLAYER_NATION, _view.hex_map)
 	if not stalled.is_empty():
 		message.text = "Recruit stalled in city %s: assign Training labor" % ", ".join(stalled.map(func(i: int) -> String: return str(i)))
