@@ -67,6 +67,7 @@ func _initialize() -> void:
 	test_snow()
 	test_snowcap()
 	test_path_preview()
+	test_cliff_attacks()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -3326,7 +3327,7 @@ func test_ramps() -> void:
 	r.divisions.erase(hi)
 	ok(not r.can_move(lo, Vector2i(1, 0), w), "a unit cannot move up a ledge")
 	r.divisions.append(hi)
-	ok(r.can_attack(lo, hi, w), "a ledge does not block attacks (decision 1)")
+	ok(not r.can_attack(lo, hi, w), "P2: a ledge blocks attacks too (supersedes R1 decision 1)")
 	# Check 5: uphill on a ramp costs the target's move_cost + climb_cost; level edges stay open.
 	var rp := ramp_map(3, [1, 2, 2], 1.0)
 	ok(rp.can_step(Vector2i(0, 0), Vector2i(1, 0)) and rp.step_cost(Vector2i(0, 0), Vector2i(1, 0)) == int(rp.terrain_of(Vector2i(1, 0)).move_cost) + int(terrain_cfg.elevation.climb_cost), "uphill on a ramp costs move_cost + 1")
@@ -3451,14 +3452,14 @@ func test_ramp_uphill_attack() -> void:
 	var off := ramp_attack([1, 2], 1.0, false)
 	ok(is_equal_approx(float(off.ramp_mult), 1.0) and is_equal_approx(float(off.uphill_mult), float(off.expected_elev)), "with ramps off (hand-built map) only the per-level penalty applies")
 	var ledge := ramp_attack([1, 2], 0.0, true)
-	ok(not ledge.is_empty() and is_equal_approx(float(ledge.ramp_mult), 1.0), "an attack up a ledge is still allowed and gets no ramp penalty")
+	ok(not ledge.has("damage_to_defender"), "P2: an attack up a ledge is refused")
 	var sh := ramp_map(2, [0, 1], 0.0)
 	sh.cells[Vector2i(0, 0)] = HexMap.WATER
 	sh.terrain[Vector2i(0, 0)] = "water"
 	ok(sh.is_ramp(Vector2i(0, 0), Vector2i(1, 0)) and is_equal_approx(make_roster().ramp_attack_mult(Vector2i(0, 0), Vector2i(1, 0), sh), mult),
 			"an attack from shallows up onto land is across a ramp and gets x0.75")
 	var cliff := ramp_attack([1, 3], 1.0, true)
-	ok(not cliff.is_empty() and is_equal_approx(float(cliff.ramp_mult), 1.0), "an attack up a cliff is still allowed and gets no ramp penalty")
+	ok(not cliff.has("damage_to_defender"), "P2: an attack up a cliff is refused")
 
 
 ## M13 follow-up: the next_unit icon is bound to the Tab action; nation stays unused.
@@ -3679,3 +3680,56 @@ func test_path_preview() -> void:
 	var wd := r.spawn_division(0, Vector2i(0, 0))
 	ok(r.path_preview(wd, Vector2i(1, 0), wm).is_empty(), "adjacent water is not a ledge or cliff: no red X")
 
+
+## P2: no melee attack across an edge a unit could not step over (a cliff, or a ledge without a
+## ramp): player orders, the attack highlight, the AI and resolution. Ramps (x0.75 uphill), level
+## edges and water keep the old rules.
+func test_cliff_attacks() -> void:
+	var r := make_roster()
+	var cm := make_map(2, 1, {Vector2i(1, 0): 3})
+	var a := r.spawn_division(0, Vector2i(0, 0), "infantry")
+	var t := r.spawn_division(1, Vector2i(1, 0), "infantry")
+	ok(cm.attack_edge_blocked(a.hex, t.hex) and not r.can_attack(a, t, cm) and not r.can_attack(t, a, cm) and r.attack(a, t, cm).is_empty(),
+			"an attack across a cliff (2 levels) is blocked, uphill and downhill")
+	ok(r.action_targets(a, "attack", cm).is_empty() and r.frontage_blocked_targets(a, cm).is_empty() and r.attack_disabled_reason(a, cm) == ""
+			and not r.set_order(a, t.hex, cm), "a target across a cliff is not highlighted or offered, and the order is refused")
+	var lm := ramp_map(2, [1, 2], 0.0)
+	lm.ramps_on = true
+	ok(lm.is_ledge(a.hex, t.hex) and not r.can_attack(a, t, lm) and not r.action_targets(a, "attack", lm).has(t.hex) and not r.set_order(a, t.hex, lm),
+			"an attack across a ledge without a ramp is blocked")
+	var rm := ramp_map(2, [1, 2], 1.0)
+	rm.ramps_on = true
+	ok(rm.is_ramp(a.hex, t.hex) and r.can_attack(a, t, rm) and r.action_targets(a, "attack", rm).has(t.hex)
+			and is_equal_approx(r.elevation_attack_mult(a.hex, t.hex, rm), float(terrain_cfg.elevation.ramp_uphill_attack_mult)),
+			"an attack up across a ramp is allowed and still gets x0.75")
+	ok(r.can_attack(a, t, make_map(2, 1)) and r.can_attack(a, t, make_map(2, 1, {Vector2i(1, 0): 2})), "level and 1-level (ramps off) attacks are unchanged")
+	var wm := make_map(2, 1, {Vector2i(1, 0): -2})
+	wm.cells[Vector2i(1, 0)] = HexMap.WATER
+	wm.terrain[Vector2i(1, 0)] = "water"
+	ok(not wm.attack_edge_blocked(Vector2i(0, 0), Vector2i(1, 0)) and not wm.attack_edge_blocked(Vector2i(1, 0), Vector2i(0, 0)), "edges to or from water are never blocked by this rule")
+	# AI: the only adjacent enemy sits across a cliff, so the AI does not order an attack on it.
+	var w := nat_world()
+	var m: HexMap = w.map
+	var ro: DivisionRoster = w.roster
+	var ai := ro.spawn_division(1, Vector2i(7, 4), "infantry")
+	var me := ro.spawn_division(0, Vector2i(8, 4), "infantry")
+	ro.run_ai(0, m)
+	var level_attack := ai.order_attack and ai.order_path == [me.hex]
+	ro.clear_order(ai)
+	m.elevation[me.hex] = 3
+	ai.moves_left = ai.move
+	ai.has_moved = false
+	ro.run_ai(0, m)
+	var ai_moves := ai.moves_left > 0
+	ok(level_attack and ai_moves and not (ai.order_attack and ai.order_path.has(me.hex)), "the AI attacks the enemy on level ground but not across a cliff")
+	# Resolution: an attack order whose target ends up across a cliff does not fight.
+	m.elevation[me.hex] = 1
+	ro.clear_order(ai)
+	ai.moves_left = ai.move
+	ai.has_moved = false
+	ai.fortify_level = 0
+	ok(ro.set_order(ai, me.hex, m) and ai.order_attack, "attack order set on level ground")
+	m.elevation[me.hex] = 3
+	var hp := me.strength
+	ro.execute_orders(m)
+	ok(is_equal_approx(me.strength, hp), "an attack order across a cliff at resolution does not fight")
