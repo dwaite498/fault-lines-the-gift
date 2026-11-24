@@ -49,6 +49,8 @@ var city_rules := {
 	"division_people_cost": 1000, "pool_fill_rate": 0.005,
 	"pool_cap": 0.15, "capital_start_pool": 1000, "colony_start_pool": 0,
 	"train_min_city_pop": 5000,
+	# T1 (PACING_TUNING_577a022.md): 0 = off, so hand-built maps keep the old rules.
+	"min_enemy_start_distance": 0, "min_enemy_start_distance_fallback": 0, "early_capture_grace_turns": 0,
 	"siege_growth": 0.0, "siege_pop_loss": 0.02, "siege_labor_mult": 0.5,
 	"display_round": 100,
 	"rebuild_turns": 26,
@@ -638,8 +640,14 @@ func generate(map_width: int, map_height: int, map_seed: int,
 	seed_value = map_seed
 	# If some nation can't fit a spaced city, retry with a derived seed.
 	# The last attempt accepts a city that breaks spacing.
-	for attempt in MAX_MAP_ATTEMPTS:
-		var attempt_seed := map_seed if attempt == 0 else map_seed * 31 + attempt
+	# T1: with min_enemy_start_distance set, the first MAX_MAP_ATTEMPTS tries keep starting cities of
+	# different nations that far apart; if all fail, MAX_MAP_ATTEMPTS more use the fallback distance.
+	var enemy_far := int(city_rules.get("min_enemy_start_distance", 0))
+	var enemy_near := int(city_rules.get("min_enemy_start_distance_fallback", 0))
+	var rounds := 2 if enemy_far > 0 and enemy_near > 0 else 1
+	for attempt in MAX_MAP_ATTEMPTS * rounds:
+		var attempt_seed := map_seed if attempt == 0 else map_seed * 31 + attempt % MAX_MAP_ATTEMPTS
+		_enemy_spacing = enemy_far if attempt < MAX_MAP_ATTEMPTS else enemy_near
 		cells.clear()
 		cities.clear()
 		nations.clear()
@@ -648,12 +656,13 @@ func generate(map_width: int, map_height: int, map_seed: int,
 		_make_land(attempt_seed, land_ratio)
 		_make_nations(rng, nation_count)
 		territory = cells.duplicate()
-		var last_try := attempt == MAX_MAP_ATTEMPTS - 1
+		var last_try := attempt == MAX_MAP_ATTEMPTS * rounds - 1
 		if _place_cities(rng, maxi(cities_per_nation, 1), min_spacing, last_try):
 			break
 	for city in cities:
 		if not nations.has(city.nation):
 			nations.append(city.nation)
+	_enemy_spacing = 0
 	update_ownership()
 
 
@@ -1365,6 +1374,12 @@ func can_annex_occupied(city: Dictionary) -> bool:
 ## is chosen next). The city is flagged "capture_pending" with "capture_victim" until
 ## apply_capture picks the choice. Returns {"city_id", "captor", "victim", "eliminated"},
 ## or {} if there is no city there.
+## T1 early capture grace: true while current_turn is below city_rules.early_capture_grace_turns.
+## Cities cannot change hands then (no unit may enter an enemy city); fighting is unaffected.
+func capture_locked() -> bool:
+	return current_turn < int(city_rules.get("early_capture_grace_turns", 0))
+
+
 func take_city(cell: Vector2i, new_nation: int) -> Dictionary:
 	var city := city_at(cell)
 	if city.is_empty():
@@ -1511,6 +1526,11 @@ func eliminate_nations_without_cities() -> Array[int]:
 ## its first city before any gets a second. Cities keep min_spacing from all others.
 ## Returns false if a nation had no spaced hex for its first city and
 ## allow_fallback is off. With allow_fallback, places it anyway and warns.
+## T1: the minimum distance between starting cities of different nations while placing (0 = only
+## min_spacing); set by generate from city_rules.min_enemy_start_distance.
+var _enemy_spacing := 0
+
+
 func _place_cities(rng: RandomNumberGenerator, per_nation: int, min_spacing: int,
 		allow_fallback: bool) -> bool:
 	var land_by_nation := {}
@@ -1529,8 +1549,10 @@ func _place_cities(rng: RandomNumberGenerator, per_nation: int, min_spacing: int
 					return _coast_rank(a) < _coast_rank(b))
 	for pass_index in per_nation:
 		for nation in nation_ids:
-			var spot: Variant = _first_spaced_cell(land_by_nation[nation], min_spacing)
+			var spot: Variant = _first_spaced_cell(land_by_nation[nation], min_spacing, nation)
 			if spot == null:
+				if pass_index > 0 and _enemy_spacing > 0 and not allow_fallback:
+					return false  # T1: a starting colony that breaks the enemy distance retries the map too
 				if pass_index > 0:
 					continue
 				if not allow_fallback:
@@ -1557,9 +1579,10 @@ func _coast_rank(cell: Vector2i) -> int:
 	return 1 if ns.size() < 6 else 2
 
 
-func _first_spaced_cell(candidates: Array, min_spacing: int) -> Variant:
+func _first_spaced_cell(candidates: Array, min_spacing: int, nation := -1) -> Variant:
 	for cell in candidates:
-		if cities.all(func(city): return hex_distance(cell, city.cell) >= min_spacing):
+		if cities.all(func(city): return hex_distance(cell, city.cell) >= (
+				maxi(min_spacing, _enemy_spacing) if int(city.nation) != nation else min_spacing)):
 			return cell
 	return null
 

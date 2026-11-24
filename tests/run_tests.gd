@@ -69,6 +69,7 @@ func _initialize() -> void:
 	test_path_preview()
 	test_cliff_attacks()
 	test_next_unit_camera()
+	test_t1_pacing()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -1043,7 +1044,7 @@ func test_stalled_recruit() -> void:
 func test_pillars_rules() -> void:
 	var t := DivisionRoster.load_templates()
 	var inf: Dictionary = t.infantry
-	ok(inf.people_per_strength == 10 and inf.upkeep.size() == 1 and inf.upkeep.cash == 3, "config: infantry has 10 people per strength and 3 cash upkeep (divisions_config.json)")
+	ok(inf.people_per_strength == 10 and inf.upkeep.size() == 1 and inf.upkeep.cash == 2, "config: infantry has 10 people per strength and 2 cash upkeep (divisions_config.json; T1)")
 	ok(t.mechanized.future and t.mechanized.people_per_strength == 5 and t.mechanized.upkeep.cash == 6 and t.mechanized.upkeep.alloy == 1, "config: mechanized is a future entry (5 people/strength, 6 cash, 1 alloy)")
 	ok(t.robotic.future and t.robotic.people_per_strength == 2 and t.robotic.upkeep.cash == 10 and t.robotic.upkeep.alloy == 1 and t.robotic.upkeep.fuel == 1, "config: robotic is a future entry (2 people/strength, 10 cash, 1 alloy, 1 fuel)")
 	var r := make_roster()
@@ -1143,18 +1144,19 @@ func test_pillars_rules() -> void:
 		ok(a.eco.pending.has(acap.id), "the AI recruits there once it is not %s" % flag)
 	# Upkeep per division type, and the unpaid consequence.
 	var u := pool_setup()
+	u.eco.config.free_upkeep_divisions_per_city = 0  # the paid/unpaid rules; T1 free upkeep is tested in test_t1_pacing
 	var mine: Array = u.roster.divisions.filter(func(x: Division) -> bool: return x.nation == 0)
-	ok(u.eco.upkeep_due(0, u.roster) == {"cash": 3.0 * mine.size()}, "upkeep is 3 cash per infantry division (%d divisions)" % mine.size())
+	ok(u.eco.upkeep_due(0, u.roster) == {"cash": 2.0 * mine.size()}, "upkeep is 2 cash per infantry division (%d divisions)" % mine.size())
 	ok(not u.eco.config.has("upkeep_per_division"), "the global upkeep_per_division is gone (per-type upkeep)")
-	u.eco.stocks[0].cash = 3.0 * mine.size()
+	u.eco.stocks[0].cash = 2.0 * mine.size()
 	u.eco.stocks[0].capacity = 40.0
 	u.eco.pay_upkeep(u.map, u.roster)
 	ok(u.eco.stocks[0].cash == 0.0 and u.eco.stocks[0].capacity == 40.0 and u.eco.upkeep_paid[0] and not u.eco.unpaid_divisions.has(0), "upkeep paid in full takes only cash and leaves nothing unpaid")
-	u.eco.stocks[0].cash = 4.0
+	u.eco.stocks[0].cash = 3.0
 	for x in mine:
 		x.org = 30.0
 	u.eco.pay_upkeep(u.map, u.roster)
-	ok(u.eco.stocks[0].cash == 1.0 and u.eco.unpaid_divisions[0] == [mine[1].id] and mine[0].org == 30.0 and mine[1].org == 25.0 and not u.eco.upkeep_paid[0], "cash 4 pays one division (id order); the other is unpaid, loses 5 org (config unpaid_upkeep_org_loss) and cash stays >= 0")
+	ok(u.eco.stocks[0].cash == 1.0 and u.eco.unpaid_divisions[0] == [mine[1].id] and mine[0].org == 30.0 and mine[1].org == 25.0 and not u.eco.upkeep_paid[0], "cash 3 pays one division (id order); the other is unpaid, loses 5 org (config unpaid_upkeep_org_loss) and cash stays >= 0")
 	u.eco.stocks[0].cash = 0.0
 	for x in mine:
 		x.org = 3.0
@@ -1182,6 +1184,9 @@ func test_ai_upkeep_cap() -> void:
 	var eco: NationEconomy = a.eco
 	var roster: DivisionRoster = a.roster
 	eco.config.ai_recruit_chance = 1.0
+	eco.config.free_upkeep_divisions_per_city = 0  # the upkeep cap itself, with the pre-T1 numbers
+	roster.templates = roster.templates.duplicate(true)
+	roster.templates.infantry.upkeep.cash = 3
 	eco.city_rules.colonization.ai_build_pods = false  # these checks are about division recruiting
 	roster.templates.scout.recruit.ai_count = 0
 	var nation: int = m.nations.filter(func(n: int) -> bool: return n != 0)[0]
@@ -1642,6 +1647,7 @@ func save_state(g: Dictionary, turn: int) -> Dictionary:
 
 func test_save_load() -> void:
 	var g := save_game_setup(5)
+	g.map.current_turn = 20  # past T1's early capture grace and ai.min_attack_turn
 	g.map.load_natives_config(NativeSpawner.load_config())
 	g.map.pressure.set_score(30.0, 1)
 	g.map.pressure.add("syndicate", "raze")
@@ -2500,6 +2506,7 @@ func attitude_setup(cells: Dictionary) -> Dictionary:
 	m.load_attitude(rows, FactionRoster.load_global(), FactionRoster.load_ai())
 	var roster := make_roster()
 	roster.rng.seed = 1
+	m.current_turn = 99  # past T1's ai.min_attack_turn
 	return {"map": m, "roster": roster}
 
 
@@ -3764,3 +3771,84 @@ func test_next_unit_camera() -> void:
 	ok(src.contains("select_unit(next_idle_unit(_view.selected))\n\t\tif _view.selected:\n\t\t\tfocus_camera_on(_view.selected)"),
 			"the Tab path (also used by the next-unit button) focuses the camera after the unchanged selection")
 	cam.free()
+## T1 (PACING_TUNING_577a022.md sections 1-2, approved by David): safer starts and affordable armies.
+func test_t1_pacing() -> void:
+	var cc := city_rules()
+	var res: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://data/resources_config.json"))
+	var divs: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://data/divisions_config.json"))
+	ok(int(cc.min_enemy_start_distance) == 7 and int(cc.min_enemy_start_distance_fallback) == 6 and int(cc.early_capture_grace_turns) == 15
+			and int(FactionRoster.load_ai().min_attack_turn) == 12, "cities_config: enemy start distance 7 (fallback 6), capture grace 15; factions.json ai.min_attack_turn 12")
+	ok(int(res.free_upkeep_divisions_per_city) == 1 and float(res.start_stock.cash) == 30.0 and float(res.start_stock.capacity) == 15.0
+			and float(res.ai_recruit_chance) == 0.5 and float(divs.infantry.upkeep.cash) == 2.0,
+			"resources_config: 1 free-upkeep division per city, start cash 30 and capacity 15, ai_recruit_chance 0.5; infantry upkeep 2")
+	# 1. Starting cities of different nations are at least 7 apart (6 only after 20 failed tries); every nation keeps 2 cities.
+	var worst := 99
+	var at7 := 0
+	var full := true
+	for s in range(1, 7):
+		var cfg: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://data/map_config.json"))
+		cfg["seed"] = s
+		var gm := HexMap.from_config_file("res://data/map_config.json", "res://data/cities_config.json", "res://data/terrain_config.json", [], cfg)
+		var mind := 99
+		for a in gm.cities:
+			for b in gm.cities:
+				if a.nation != b.nation:
+					mind = mini(mind, HexMap.hex_distance(a.cell, b.cell))
+		worst = mini(worst, mind)
+		at7 += 1 if mind >= 7 else 0
+		full = full and gm.cities.size() == gm.nations.size() * int(cc.cities_per_nation)
+	ok(worst >= 6 and at7 >= 5 and full, "config maps (seeds 1-6): enemy starting cities >= 6 apart, >= 7 on %d of 6, every nation has its 2 cities" % at7)
+	ok(build(5).cities.size() == 8 and HexMap.new().city_rules.min_enemy_start_distance == 0, "hand-built and test maps without the key keep the old placement")
+	# 2. Early capture grace: no city changes hands before turn 15; fighting still works.
+	var m := make_map(5, 1)
+	m.city_rules["early_capture_grace_turns"] = 15
+	m.cities.append({"id": 0, "nation": 1, "cell": Vector2i(2, 0), "population": 10000, "infrastructure": 10.0, "radius": 1})
+	var r := make_roster()
+	var d := r.spawn_division(0, Vector2i(1, 0))
+	m.current_turn = 14
+	ok(m.capture_locked() and not r.can_move(d, Vector2i(2, 0), m) and r.plan_path(d, Vector2i(3, 0), m).is_empty()
+			and not r.action_targets(d, "move", m).has(Vector2i(2, 0)), "turn 14: an empty enemy city cannot be entered (or passed through)")
+	var guard := r.spawn_division(1, Vector2i(2, 0))
+	ok(r.can_attack(d, guard, m), "turn 14: its garrison can still be attacked")
+	r.divisions.erase(guard)
+	m.current_turn = 15
+	ok(not m.capture_locked() and r.try_move(d, Vector2i(2, 0), m) and int(m.cities[0].nation) == 0, "turn 15: the city can be taken")
+	# 3. The AI targets no city before turn 12.
+	var s := attitude_setup({0: Vector2i(7, 4), 1: Vector2i(3, 4), 2: Vector2i(11, 4), 3: Vector2i(7, 8)})
+	var am: HexMap = s.map
+	var me: Division = (s.roster as DivisionRoster).spawn_division(0, Vector2i(7, 4))
+	am.current_turn = 11
+	var early: bool = (s.roster as DivisionRoster).ai_targets(me, am).is_empty()
+	am.current_turn = 12
+	ok(early and not (s.roster as DivisionRoster).ai_targets(me, am).is_empty(), "AI city targets: none on turn 11, some on turn 12")
+	# 4. Free upkeep: the first division per owned city pays nothing.
+	var u := pool_setup()
+	var mine: Array = u.roster.divisions.filter(func(x: Division) -> bool: return x.nation == 0)
+	var owned := nation_cities(u.map, 0).size()
+	ok(owned == 2 and mine.size() == 2 and u.eco.upkeep_due(0, u.roster, u.map).is_empty(), "2 cities, 2 infantry: no upkeep due")
+	var extra: Division = u.roster.spawn_division(0, u.map.neighbors(mine[0].hex)[0])
+	var cash_before := float(u.eco.stocks[0].cash)
+	u.eco.pay_upkeep(u.map, u.roster)
+	ok(u.eco.upkeep_due(0, u.roster, u.map) == {"cash": 2.0} and is_equal_approx(float(u.eco.stocks[0].cash), cash_before - 2.0)
+			and u.eco.free_upkeep_ids(0, u.roster, u.map).size() == 2 and not u.eco.free_upkeep_ids(0, u.roster, u.map).has(extra.id),
+			"a 3rd division pays 2 cash; the 2 oldest ride free")
+	u.roster.divisions.erase(extra)
+	u.roster.divisions.erase(mine[1])
+	ok(u.eco.projected_cash_upkeep(0, u.roster, 1, u.map) == 0.0 and u.eco.projected_cash_upkeep(0, u.roster, 2, u.map) == 2.0,
+			"AI upkeep forecast: a new division fills a free slot first")
+	# 5. Start stock: 30 cash, 15 capacity, enough for one recruit on turn 1.
+	var fm := build(5)
+	var fe := NationEconomy.new()
+	fe.setup(fm)
+	var fr := make_roster()
+	ok(fm.nations.all(func(n: int) -> bool: return float(fe.stocks[n].cash) == 30.0 and float(fe.stocks[n].capacity) == 15.0)
+			and fe.recruit_block_reason(fm.capital_of(0), 0, fr) == "", "every nation starts with 30 cash and 15 capacity: a turn-1 recruit is possible")
+	# 6. QA's recruit_block_reason log.
+	for n in fm.nations:
+		fe.stocks[n].capacity = 0.0
+	fe.city_rules.colonization.ai_build_pods = false
+	fr.templates.scout.recruit.ai_count = 0
+	fe.run_ai(0, fm, fr)
+	ok(not fe.recruit_block_log.is_empty() and fe.recruit_block_log.all(func(l: String) -> bool: return l.begins_with("recruit_block_reason: nation "))
+			and fe.recruit_block_log.any(func(l: String) -> bool: return l.ends_with(": not enough capacity")),
+			"AI cities that cannot recruit log 'recruit_block_reason: nation N city C: <reason>' (%d lines)" % fe.recruit_block_log.size())

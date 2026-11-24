@@ -1,6 +1,9 @@
 {
 	"cities_per_nation": 2,
 	"min_spacing": 3,
+	"min_enemy_start_distance": 7,
+	"min_enemy_start_distance_fallback": 6,
+	"early_capture_grace_turns": 15,
 	"claim_radius": 1,
 	"tiers": [
 		{"key": "outpost", "min_pop": 0, "sprite_scale": 0.6},

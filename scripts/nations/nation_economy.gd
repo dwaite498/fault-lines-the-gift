@@ -24,6 +24,8 @@ var stocks: Dictionary = {}
 var pending: Dictionary = {}
 ## nation index -> true if that nation paid its upkeep on the last end_turn.
 var upkeep_paid: Dictionary = {}
+## T1: "recruit_block_reason: nation N city C: reason" lines from the last run_ai.
+var recruit_block_log: Array[String] = []
 ## nation index -> ids of divisions whose upkeep could not be paid on the last end_turn.
 var unpaid_divisions: Dictionary = {}
 ## POWs: captor nation -> {owner nation -> count (float)}. Kept after elimination.
@@ -249,11 +251,28 @@ func collect_income(hex_map: HexMap) -> void:
 				stocks[city.nation][r] += income[r]
 
 
+## T1: ids of the nation's divisions whose upkeep is free: the first (lowest id) divisions that
+## have any upkeep, free_upkeep_divisions_per_city per owned city. Empty without hex_map.
+func free_upkeep_ids(nation: int, roster: DivisionRoster, hex_map: HexMap) -> Dictionary:
+	var out := {}
+	if hex_map == null:
+		return out
+	var slots := int(config.get("free_upkeep_divisions_per_city", 0)) * hex_map.cities.filter(
+			func(c: Dictionary) -> bool: return int(c.nation) == nation).size()
+	var order := roster.divisions.filter(func(d: Division) -> bool: return d.nation == nation and not roster.upkeep_of(d).is_empty())
+	order.sort_custom(func(a, b): return a.id < b.id)
+	for i in mini(slots, order.size()):
+		out[order[i].id] = true
+	return out
+
+
 ## Total upkeep a nation owes this turn, summed over its divisions' types, e.g. {"cash": 6}.
-func upkeep_due(nation: int, roster: DivisionRoster) -> Dictionary:
+## With hex_map, divisions on free upkeep (T1, free_upkeep_ids) owe nothing.
+func upkeep_due(nation: int, roster: DivisionRoster, hex_map: HexMap = null) -> Dictionary:
 	var due := {}
+	var free := free_upkeep_ids(nation, roster, hex_map)
 	for d in roster.divisions:
-		if d.nation == nation:
+		if d.nation == nation and not free.has(d.id):
 			var each := roster.upkeep_of(d)
 			for r in each:
 				due[r] = float(due.get(r, 0.0)) + float(each[r])
@@ -273,8 +292,9 @@ func pay_upkeep(hex_map: HexMap, roster: DivisionRoster) -> void:
 	for nation in hex_map.nations:
 		var s: Dictionary = stocks[nation]
 		var unpaid: Array[int] = []
+		var free := free_upkeep_ids(nation, roster, hex_map)
 		for d in order:
-			if d.nation != nation:
+			if d.nation != nation or free.has(d.id):
 				continue
 			var cost := roster.upkeep_of(d)
 			var can_pay := true
@@ -588,9 +608,15 @@ func cash_income(nation: int, hex_map: HexMap) -> float:
 
 
 ## Cash upkeep per turn of the nation's fielded divisions plus its queued recruits (each at
-## the recruit template's upkeep), plus `extra_recruits` more of them.
-func projected_cash_upkeep(nation: int, roster: DivisionRoster, extra_recruits := 0) -> float:
-	var total: float = float(upkeep_due(nation, roster).get("cash", 0.0))
+## the recruit template's upkeep), plus `extra_recruits` more of them. With hex_map, free upkeep
+## slots (T1) not used by fielded divisions are filled by queued and extra recruits first.
+func projected_cash_upkeep(nation: int, roster: DivisionRoster, extra_recruits := 0, hex_map: HexMap = null) -> float:
+	var total: float = float(upkeep_due(nation, roster, hex_map).get("cash", 0.0))
+	var spare := 0
+	if hex_map != null:
+		var paying := roster.divisions.filter(func(d: Division) -> bool: return d.nation == nation and not roster.upkeep_of(d).is_empty()).size()
+		spare = maxi(int(config.get("free_upkeep_divisions_per_city", 0)) * hex_map.cities.filter(
+				func(c: Dictionary) -> bool: return int(c.nation) == nation).size() - paying, 0)
 	var each := float(roster.templates.get(config.recruit_template, {}).get("upkeep", {}).get("cash", 0.0))
 	var queued := 0.0
 	for id in pending:
@@ -601,7 +627,7 @@ func projected_cash_upkeep(nation: int, roster: DivisionRoster, extra_recruits :
 			queued += float(roster.templates.scout.get("upkeep", {}).get("cash", 0.0)) / each if each > 0.0 else 0.0
 		elif kind != POD_KIND:
 			queued += 1.0
-	return total + each * (queued + extra_recruits)
+	return total + each * maxf(queued + extra_recruits - spare, 0.0)
 
 
 ## Each AI city that can recruit does so with ai_recruit_chance, using roster.rng,
@@ -609,6 +635,7 @@ func projected_cash_upkeep(nation: int, roster: DivisionRoster, extra_recruits :
 ## upkeep after the new division (fielded, queued and the new one) would not exceed
 ## its per-turn cash income.
 func run_ai(player_nation: int, hex_map: HexMap, roster: DivisionRoster) -> void:
+	recruit_block_log.clear()
 	for city in hex_map.cities.duplicate():
 		if city.nation == player_nation:
 			continue
@@ -619,14 +646,24 @@ func run_ai(player_nation: int, hex_map: HexMap, roster: DivisionRoster) -> void
 		if ai_wants_pod(city, hex_map, roster):
 			queue_colony_pod(city, city.nation)
 			continue
-		if recruit_block_reason(city, city.nation, roster) != "":
-			continue
-		if division_count(city.nation, roster) >= int(config.ai_max_divisions):
-			continue
-		if projected_cash_upkeep(city.nation, roster, 1) > cash_income(city.nation, hex_map):
+		var reason := recruit_block_reason(city, city.nation, roster)
+		if reason == "" and division_count(city.nation, roster) >= int(config.ai_max_divisions):
+			reason = "at ai_max_divisions"
+		if reason == "" and projected_cash_upkeep(city.nation, roster, 1, hex_map) > cash_income(city.nation, hex_map):
+			reason = "upkeep would exceed cash income"
+		if reason != "":
+			_log_recruit_block(city, reason)
 			continue
 		if roster.rng.randf() < float(config.ai_recruit_chance):
 			recruit(city, city.nation, roster)
+
+
+## QA's recruit_block_reason log (T1): one line per AI city that could not recruit this turn,
+## kept in recruit_block_log (cleared each run_ai) and printed.
+func _log_recruit_block(city: Dictionary, reason: String) -> void:
+	var line := "recruit_block_reason: nation %d city %d: %s" % [int(city.nation), int(city.id), reason]
+	recruit_block_log.append(line)
+	print(line)
 
 
 ## End-of-turn economy step: income, upkeep, reinforcement, then training ticks

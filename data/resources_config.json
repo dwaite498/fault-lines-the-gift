@@ -1,5 +1,6 @@
 {
-	"start_stock": {"cash": 0, "influence": 0, "operations": 0, "capacity": 0},
+	"start_stock": {"cash": 30, "influence": 0, "operations": 0, "capacity": 15},
+	"free_upkeep_divisions_per_city": 1,
 	"cash_per_unassigned_labor": 1,
 	"labor": {
 		"default_growth_share": 0.5,
@@ -17,6 +18,6 @@
 	"unpaid_upkeep_org_loss": 5,
 	"reinforce_cap_per_turn": 10,
 	"reinforce_mult": {"own": 1.0, "in_combat": 0.5, "neutral": 0.25, "enemy": 0.1},
-	"ai_recruit_chance": 0.3,
+	"ai_recruit_chance": 0.5,
 	"ai_max_divisions": 6
 }
