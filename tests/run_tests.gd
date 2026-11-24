@@ -90,6 +90,10 @@ func _initialize() -> void:
 	test_c1_charter()
 	# --- end C1 ---
 
+	# --- C2 charter top bar tracker (own block to avoid merge collisions) ---
+	test_c2_charter_tracker()
+	# --- end C2 ---
+
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -4492,3 +4496,55 @@ func test_c1_charter() -> void:
 			"debug_complete_all pays no rewards")
 
 # --- end C1 ---
+
+
+# --- C2 charter top bar tracker (own block to avoid merge collisions) ---
+## C2 (COLONY_CHARTER.md): a code-drawn "Charter n/6" label on the M14 top bar, just right
+## of the emblem, with a built-in tooltip of each milestone (window, reward, done). No new PNGs.
+func test_c2_charter_tracker() -> void:
+	var ch := ColonyCharter.new()
+	ch.setup(ColonyCharter.load_config(), 0)
+	var bar := TopBar.new()
+	root.add_child(bar)
+	bar.refresh("Aurora", 7, Color.RED, ch)
+	ok(bar.week.text == "WEEK 7" and bar.tracker.visible and bar.tracker.text == "Charter 0/6",
+			"a new game shows Charter 0/6 just right of the emblem")
+	ok(bar.tracker.position.x >= bar.emblem.size.x + 8.0 - 0.5 and str(bar.tracker.theme_type_variation) == "TopBarTitle",
+			"the tracker sits to the right of the emblem and uses the existing TopBarTitle style (x=%.0f, emblem=%.0f, style=%s)"
+			% [bar.tracker.position.x, bar.emblem.size.x, str(bar.tracker.theme_type_variation)])
+	var tip: String = bar.tracker.tooltip_text
+	ok(tip.contains("Field 3 divisions (weeks 5-15, +15 cash)") and tip.contains("Own 3 cities (weeks 10-30, +15 capacity)")
+			and tip.contains("Defeat 3 natives (weeks 15-45, +25 cash)") and tip.contains("Survive a planet event (weeks 45-60, +20 cash)")
+			and tip.contains("Reach City tier (weeks 40-70, +20 capacity)") and tip.contains("Own 4 cities (weeks 55-90, +30 cash)")
+			and not tip.contains("✓"),
+			"the hover tooltip lists every milestone with its turn window and reward, none checked at 0/6")
+	ch.completed = ["field_army"]
+	bar.refresh("Aurora", 8, Color.RED, ch)
+	ok(bar.tracker.text == "Charter 1/6" and bar.week.text == "WEEK 8" and bar.tracker.tooltip_text.contains("✓ Field 3 divisions")
+			and not bar.tracker.tooltip_text.contains("✓ Own 3 cities"),
+			"after one completion the tracker reads 1/6 and the tooltip checks only that milestone")
+	# Restore after save: completed ids refill the tracker.
+	var saved: Dictionary = ch.capture()
+	var ch2 := ColonyCharter.new()
+	ch2.setup(ColonyCharter.load_config(), 0)
+	ch2.restore(saved)
+	bar.refresh("Aurora", 8, Color.RED, ch2)
+	ok(bar.tracker.text == "Charter 1/6" and ch2.completed == ["field_army"], "after load the tracker matches the saved completed count")
+	# debug_complete_all fills the tracker without being a new PNG or a second label style.
+	var debug_cfg: Dictionary = ColonyCharter.load_config().duplicate(true)
+	debug_cfg.debug_complete_all = true
+	var ch3 := ColonyCharter.new()
+	ch3.setup(debug_cfg, 0)
+	bar.refresh("Aurora", 9, Color.RED, ch3)
+	ok(bar.tracker.text == "Charter complete" and bar.tracker.tooltip_text.contains("✓ Own 4 cities")
+			and bar.tracker.tooltip_text.split("\n").size() == 6 and bar.tracker.tooltip_text.count("✓") == 6,
+			"when all six are done the tracker reads 'Charter complete' and every tooltip line is checked")
+	bar.refresh("Aurora", 9, Color.RED, ch3, false)
+	ok(not bar.tracker.visible and bar.tracker.text == "" and bar.week.text == "WEEK 9",
+			"the tracker is hidden in an AI-only view; WEEK N stays")
+	bar.refresh("Aurora", 9, Color.RED)
+	ok(not bar.tracker.visible, "with no charter passed the tracker stays hidden")
+	ok(not ResourceLoader.exists("res://assets/ui/icons/icon_charter.png"), "C2 adds no new PNG")
+	bar.free()
+
+# --- end C2 ---
