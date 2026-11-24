@@ -3,6 +3,8 @@ extends CanvasLayer
 
 ## 32px top bar (Mockup M14): the player's faction emblem on the left, one centered amber
 ## "WEEK N" title, and framed M13 icon buttons (save, pause menu) on the right.
+## C2: a compact "Charter n/6" (or "Charter complete") label just right of the emblem;
+## hover shows a built-in tooltip of each milestone (window, reward, done). Player only.
 
 ## An icon button on the right was clicked (id is a key of ICON_BUTTONS; main.gd runs it
 ## through the same handler as the panel's M13 buttons).
@@ -16,6 +18,8 @@ var panel := Panel.new()
 ## Procedural faction emblem: a framed slanted plate with a chevron mark in the faction color.
 var emblem := Emblem.new()
 var week := Label.new()
+## C2 charter tracker, just right of the emblem (hidden when there is no player charter).
+var tracker := Label.new()
 var icon_row := HBoxContainer.new()
 var icon_buttons := {}
 
@@ -49,6 +53,12 @@ func _init() -> void:
 	emblem.size = Vector2(52, HEIGHT)
 	emblem.mouse_filter = Control.MOUSE_FILTER_STOP
 	panel.add_child(emblem)
+	tracker.theme_type_variation = &"TopBarTitle"
+	tracker.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	tracker.mouse_filter = Control.MOUSE_FILTER_STOP
+	tracker.visible = false
+	tracker.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	panel.add_child(tracker)
 	week.theme_type_variation = &"TopBarTitle"
 	week.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	week.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -85,17 +95,70 @@ func _ready() -> void:
 	_layout()
 	get_viewport().size_changed.connect(_layout)
 
+func _place_tracker() -> void:
+	tracker.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	var track_w := maxf(tracker.get_minimum_size().x, 1.0)
+	tracker.position = Vector2(52.0 + 8.0, 0)
+	tracker.size = Vector2(track_w, HEIGHT)
+
+
 func _layout() -> void:
-	var viewport_width := get_viewport().get_visible_rect().size.x
+	var viewport_width := 1280.0
+	if is_inside_tree() and get_viewport() != null:
+		var w := get_viewport().get_visible_rect().size.x
+		if w > 0.0:
+			viewport_width = w
 	panel.size = Vector2(viewport_width, HEIGHT)
+	emblem.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	emblem.position = Vector2.ZERO
+	emblem.size = Vector2(52, HEIGHT)
 	week.position = Vector2.ZERO
 	week.size = Vector2(viewport_width, HEIGHT)
+	_place_tracker()
 	var row_w := ICON_BUTTONS.size() * BUTTON_SIZE + (ICON_BUTTONS.size() - 1) * 4.0
 	icon_row.position = Vector2(viewport_width - row_w - 4.0, (HEIGHT - BUTTON_SIZE) / 2.0)
 
-func refresh(faction_name: String, turn: int, faction_color := Color.WHITE) -> void:
+func refresh(faction_name: String, turn: int, faction_color := Color.WHITE, charter: ColonyCharter = null, show_charter := true) -> void:
 	emblem.tooltip_text = faction_name
 	if emblem.color != faction_color:
 		emblem.color = faction_color
 		emblem.queue_redraw()
 	week.text = "WEEK %d" % turn
+	_refresh_tracker(charter, show_charter)
+
+
+## Updates the C2 tracker from the player's ColonyCharter. Hidden when `show_charter` is
+## false (AI-only views) or when there is no charter.
+func _refresh_tracker(charter: ColonyCharter, show_charter: bool) -> void:
+	var show := show_charter and charter != null
+	tracker.visible = show
+	if not show:
+		tracker.text = ""
+		tracker.tooltip_text = ""
+		return
+	var total: int = charter.cfg.milestones.size() if charter.cfg.get("milestones") else 0
+	var n: int = charter.completed.size()
+	tracker.text = "Charter complete" if total > 0 and n >= total else "Charter %d/%d" % [n, total]
+	tracker.tooltip_text = _charter_tooltip(charter)
+	# Place it even when the bar is not yet in a viewport (tests construct it off-tree).
+	_place_tracker()
+	if is_inside_tree() and get_viewport() != null:
+		_layout()
+
+
+func _charter_tooltip(charter: ColonyCharter) -> String:
+	var lines: Array[String] = []
+	for milestone in charter.cfg.get("milestones", []):
+		var mark := "✓ " if charter.completed.has(str(milestone.id)) else "  "
+		lines.append("%s%s (weeks %d-%d, %s)" % [mark, str(milestone.label),
+				int(milestone.window_min), int(milestone.window_max), _reward_text(milestone.get("reward", {}))])
+	return "\n".join(lines)
+
+
+func _reward_text(reward: Dictionary) -> String:
+	var parts: Array[String] = []
+	if reward.has("cash"):
+		parts.append("+%d cash" % int(reward.cash))
+	if reward.has("capacity"):
+		parts.append("+%d capacity" % int(reward.capacity))
+	return ", ".join(parts)

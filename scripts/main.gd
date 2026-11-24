@@ -508,7 +508,7 @@ func _refresh_panels(refill_labor := true) -> void:
 			off["attack"] = why
 	_panel.refresh(_view.selected, _view.hex_map, acts, _mode, off)
 	_city_panel.refresh(_city)
-	_top_bar.refresh(_view.factions.name_of(PLAYER_NATION), turn, _view.factions.color_of(PLAYER_NATION))
+	_top_bar.refresh(_view.factions.name_of(PLAYER_NATION), turn, _view.factions.color_of(PLAYER_NATION), _charter)
 	_nation_panel.refresh(PLAYER_NATION, turn, _view.hex_map, _economy)
 	var np := _nation_panel.panel
 	_military_panel.refresh(PLAYER_NATION, _view.roster, _economy, np.position.y + np.size.y + 8, _view.hex_map)
