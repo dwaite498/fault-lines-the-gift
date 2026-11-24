@@ -66,6 +66,7 @@ func _initialize() -> void:
 	test_top_bar_m14()
 	test_snow()
 	test_snowcap()
+	test_next_unit_camera()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -3625,3 +3626,35 @@ func test_snowcap() -> void:
 		fm.terrain[cell] = "plains"
 	rng.seed = 5
 	ok(none == 0 and fm.fungus_tiles.is_empty() and fm.place_fungus(rng) > 0, "initial fungus placement skips snow tiles")
+
+
+## P3: next unit (Tab and the side-panel button share the Tab path) snaps the camera to a unit
+## that is off-screen or near the edge of the map area; a comfortably visible one leaves it alone.
+func test_next_unit_camera() -> void:
+	var cam := make_camera()
+	cam.bounds = Rect2(0, 0, 4000, 3000)
+	cam.zoom = Vector2.ONE
+	cam.position = Vector2(640, 360)
+	cam.clamp_position()
+	var area := Rect2(0, TopBar.HEIGHT, cam.view_size.x - UnitPanel.WIDTH, cam.view_size.y - TopBar.HEIGHT)
+	var start := cam.position
+	ok(not cam.ensure_visible(Vector2(500, 400), area) and cam.position == start, "an on-screen unit leaves the camera unchanged")
+	ok(cam.ensure_visible(Vector2(3000, 2000), area) and cam.world_to_screen(Vector2(3000, 2000)).is_equal_approx(area.get_center()),
+			"an off-screen unit is centered in the map area (left of the side panel, below the top bar)")
+	cam.position = start
+	ok(cam.ensure_visible(Vector2(start.x + 380, 400), area), "a unit under the side panel / near the edge also moves the camera")
+	cam.position = start
+	cam.ensure_visible(Vector2(3990, 2990), area)
+	var half := cam.view_size * 0.5 / cam.zoom.x
+	ok(is_equal_approx(cam.position.x, 4000 - half.x) and is_equal_approx(cam.position.y, 3000 - half.y)
+			and Rect2(Vector2.ZERO, cam.view_size).has_point(cam.world_to_screen(Vector2(3990, 2990))),
+			"centering near the map corner stays within the clamp and the unit is on screen")
+	cam.zoom = Vector2.ONE * 2.0
+	cam.position = Vector2(2000, 1500)
+	var z_before := cam.zoom
+	ok(cam.ensure_visible(Vector2(100, 100)) and cam.zoom == z_before and cam.position.is_equal_approx(cam.view_size * 0.25),
+			"zoom is kept and the snap clamps at the map's top-left corner (default area: the whole view)")
+	var src := FileAccess.get_file_as_string("res://scripts/main.gd")
+	ok(src.contains("select_unit(next_idle_unit(_view.selected))\n\t\tif _view.selected:\n\t\t\tfocus_camera_on(_view.selected)"),
+			"the Tab path (also used by the next-unit button) focuses the camera after the unchanged selection")
+	cam.free()

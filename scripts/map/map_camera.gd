@@ -96,6 +96,23 @@ func pan_world(delta: Vector2) -> void:
 	clamp_position()
 
 
+## P3 (next unit): if `world` is not comfortably inside the screen rect `area` (shrunk by
+## margin_frac of its size on each side; default the whole view), snaps the camera so the point
+## sits at the center of `area`, then clamps to the bounds. Zoom is unchanged. Returns true if the
+## camera moved.
+func ensure_visible(world: Vector2, area := Rect2(), margin_frac := 0.15) -> bool:
+	if area.size == Vector2.ZERO:
+		area = Rect2(Vector2.ZERO, view_size)
+	var mx := area.size.x * margin_frac
+	var my := area.size.y * margin_frac
+	if area.grow_individual(-mx, -my, -mx, -my).has_point(world_to_screen(world)):
+		return false
+	var before := position
+	position = world - (area.get_center() - view_size * 0.5) / zoom.x
+	clamp_position()
+	return position != before
+
+
 ## Keeps the visible area inside the bounds; an axis where the view is larger than the
 ## bounds is centered on them.
 func clamp_position() -> void:
