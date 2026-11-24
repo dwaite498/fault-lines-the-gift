@@ -227,6 +227,10 @@ func _escape() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	var motion := event as InputEventMouseMotion
+	if motion:
+		_update_preview(_view.pixel_to_hex(_camera.screen_to_world(motion.position)))
+		return
 	var click := event as InputEventMouseButton
 	if click and click.pressed and click.button_index == MOUSE_BUTTON_LEFT:
 		_on_hex_clicked(_view.pixel_to_hex(_camera.screen_to_world(click.position)))
@@ -362,12 +366,26 @@ func select_unit(d: Division) -> void:
 
 func _set_mode(mode: String) -> void:
 	_mode = mode
+	_view.preview = {}
 	_view.highlights.clear()
 	_view.blocked_highlights.clear()
 	if mode != "" and _view.selected:
 		_view.highlights = _view.roster.action_targets(_view.selected, mode, _view.hex_map)
 		if mode == "attack":
 			_view.blocked_highlights = _view.roster.frontage_blocked_targets(_view.selected, _view.hex_map)
+
+
+## P1: in move mode, the hovered hex previews its route, step costs and turns (highlighted hexes
+## only) or a red X when the unit's direct step there is an impassable ledge or cliff. UI only.
+func _update_preview(hex: Vector2i) -> void:
+	var p := {}
+	if _mode == "move" and _view.selected and hex != Vector2i(-1, -1):
+		p = _view.roster.path_preview(_view.selected, hex, _view.hex_map)
+		if not p.is_empty() and not bool(p.blocked) and not _view.highlights.has(hex):
+			p = {}
+	if p != _view.preview:
+		_view.preview = p
+		_view.queue_redraw()
 
 
 ## Button or hotkey for one of the selected unit's actions. Move/Attack/Follow
