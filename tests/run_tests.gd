@@ -1684,7 +1684,9 @@ func test_save_load() -> void:
 	marked.attacked_from.append(m.neighbors(marked.hex)[1])
 	for t in 6:
 		save_play_turn(g)
-	var turn_n := 11
+	# Must match map.current_turn (20) so restore leaves T1 grace / min_attack_turn off;
+	# a lower saved turn would re-lock captures and the two games would diverge.
+	var turn_n := 20
 	var state := save_state(g, turn_n)
 	var h1 := SaveGame.state_hash(state)
 	ok(state.map.reputation.size() >= 1 and state.economy.stocks.size() == m.nations.size() and state.roster.divisions.size() > 0, "the state holds reputation events, stocks and divisions")
