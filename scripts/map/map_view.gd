@@ -32,6 +32,8 @@ var selected: Division
 var highlights: Array[Vector2i] = []
 ## Attack targets blocked by the frontage cap (Task 46), drawn greyed and not clickable.
 var blocked_highlights: Array[Vector2i] = []
+## P1: DivisionRoster.path_preview for the hovered hex in move mode ({} = none), drawn on top.
+var preview := {}
 var player_nation := 0
 ## City sprites by CityArt key (M12), kept referenced so the canvas can draw them.
 var _city_textures := {}
@@ -206,6 +208,7 @@ func _draw() -> void:
 		draw_polyline(bc, blocked_color, float(hl.width))
 	if roster:
 		_draw_orders()
+	_draw_path_preview()
 
 
 ## Skirts on the two front-facing edges of a pointy-top hex (SW and SE), down to the
@@ -517,6 +520,47 @@ func _draw_orders() -> void:
 		var dir := (tip - points[points.size() - 2]).normalized()
 		var side := Vector2(-dir.y, dir.x)
 		draw_colored_polygon(PackedVector2Array([tip, tip - dir * 10 + side * 6, tip - dir * 10 - side * 6]), color)
+
+
+## P1 move path preview: the route from the selected unit in the highlight color (steps in later
+## turns dimmer), a move-cost chip on each step and a turns-to-arrive chip at the destination; a
+## red X (highlight.blocked) on a hex the unit cannot step to. Code-drawn, palette colors only.
+func _draw_path_preview() -> void:
+	if preview.is_empty() or selected == null:
+		return
+	var hl: Dictionary = palette.highlight
+	var ui: Dictionary = palette.ui
+	if bool(preview.blocked):
+		var c := hex_to_pixel(preview.dest)
+		var r := _h * 0.22
+		var red := Color.html(hl.blocked)
+		for dir: Vector2 in [Vector2(1, 1), Vector2(1, -1)]:
+			draw_line(c - dir * r * Vector2(1.6, 1.0), c + dir * r * Vector2(1.6, 1.0), Color.html(ui.frame), 7.0, true)
+			draw_line(c - dir * r * Vector2(1.6, 1.0), c + dir * r * Vector2(1.6, 1.0), red, 4.0, true)
+		return
+	var reach := Color.html(hl.reach)
+	var centers := PackedVector2Array([hex_to_pixel(selected.hex)])
+	for cell: Vector2i in preview.path:
+		centers.append(hex_to_pixel(cell))
+	for i in range(1, centers.size()):
+		var later := int(preview.step_turns[i - 1]) > 1
+		draw_line(centers[i - 1], centers[i], Color(reach, 0.45 if later else 0.95), 2.0 if later else 3.0, true)
+		draw_circle(centers[i], 3.0, Color(reach, 0.45 if later else 0.95))
+	for i in preview.path.size():
+		_path_chip(centers[i + 1] + Vector2(0, -_h * 0.18), str(preview.costs[i]), ui, int(preview.step_turns[i]) > 1)
+	var turns := int(preview.turns)
+	_path_chip(centers[centers.size() - 1] + Vector2(0, _h * 0.16), "%d turn%s" % [turns, "" if turns == 1 else "s"], ui, false)
+
+
+func _path_chip(center: Vector2, text: String, ui: Dictionary, dim: bool) -> void:
+	var font := ThemeDB.fallback_font
+	var fs := 13
+	var size := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs)
+	var box := Rect2(center - Vector2(size.x / 2 + 4, font.get_height(fs) / 2 + 1), Vector2(size.x + 8, font.get_height(fs) + 2))
+	draw_rect(box, Color(Color.html(ui.frame), 0.85))
+	draw_rect(box, Color(Color.html(ui.accent), 0.6), false, 1.0)
+	draw_string(font, Vector2(box.position.x + 4, box.position.y + 1 + font.get_ascent(fs)), text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs,
+			Color.html(ui.dim if dim else ui.text))
 
 
 ## Spec sizes are for a 64px-wide hex; scale to ours.

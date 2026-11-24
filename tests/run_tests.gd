@@ -66,6 +66,7 @@ func _initialize() -> void:
 	test_top_bar_m14()
 	test_snow()
 	test_snowcap()
+	test_path_preview()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -3625,3 +3626,56 @@ func test_snowcap() -> void:
 		fm.terrain[cell] = "plains"
 	rng.seed = 5
 	ok(none == 0 and fm.fungus_tiles.is_empty() and fm.place_fungus(rng) > 0, "initial fungus placement skips snow tiles")
+
+
+## P1 move path preview (UI only): the hover data is the route set_order takes, each step's
+## move cost, the turn each step lands in and turns to arrive; a ledge forces a visible detour;
+## a ledge or cliff with no way round is "blocked" (red X). Previewing changes no order.
+func test_path_preview() -> void:
+	var r := make_roster()
+	var m := make_map(6, 1)
+	m.terrain[Vector2i(2, 0)] = "hills"
+	var d := r.spawn_division(0, Vector2i(0, 0))
+	d.move = 2
+	d.moves_left = 2
+	var p := r.path_preview(d, Vector2i(4, 0), m)
+	var path: Array[Vector2i] = [Vector2i(1, 0), Vector2i(2, 0), Vector2i(3, 0), Vector2i(4, 0)]
+	ok(not p.blocked and p.path == path and p.costs == [1, 2, 1, 1] and p.step_turns == [1, 2, 3, 3] and p.turns == 3,
+			"preview: route, per-step costs (hills 2), landing turns and 3 turns to arrive (%s)" % [p])
+	ok(p.turns == r.turn_split(d, path, m).size() and d.order_path.is_empty(), "preview turns match turn_split and set no order")
+	d.moves_left = 0
+	d.has_moved = true
+	var spent := r.path_preview(d, Vector2i(1, 0), m)
+	ok(spent.step_turns == [1] and spent.turns == 1, "a unit with no moves left counts from its next moving turn, like turns_to_arrive")
+	ok(r.path_preview(d, d.hex, m).is_empty() and r.path_preview(d, Vector2i(9, 9), m).is_empty(), "no preview on the unit's own hex or off the map")
+	# Ledge detour: (0,0) -> (1,0) is a ledge, but (0,1) -> (1,0) is a repaired ramp.
+	var lm := make_map(3, 3)
+	lm.elevation_rules = terrain_cfg.elevation.duplicate()
+	lm.elevation_rules["ramp_chance"] = 0.0
+	lm.ramps_on = true
+	var top := Vector2i(1, 0)
+	lm.elevation[top] = 2
+	lm.ramp_edges[HexMap.edge_key(Vector2i(0, 1), top)] = true
+	var ld := r.spawn_division(0, Vector2i(0, 0))
+	ld.moves_left = ld.move
+	var lp := r.path_preview(ld, top, lm)
+	var detour: Array[Vector2i] = [Vector2i(0, 1), top]
+	ok(lm.is_ledge(Vector2i(0, 0), top) and top in lm.neighbors(Vector2i(0, 0)) and not lp.blocked and lp.path == detour
+			and lp.costs == [1, 2], "a hex next door behind a ledge previews the real 2-step detour via the ramp, climb cost included (%s)" % [lp])
+	ok(r.set_order(ld, top, lm) and ld.order_path == lp.path, "the previewed route is the one the move order takes")
+	r.clear_order(ld)
+	# No ramp: the ledge walls the hex off -> blocked (red X); same for a 2-level cliff with ramps off.
+	lm.ramp_edges.clear()
+	var bp := r.path_preview(ld, top, lm)
+	ok(bp.blocked and bp.path.is_empty() and bp.dest == top, "an adjacent hex behind a ledge with no detour is blocked")
+	var cm := make_map(3, 1, {Vector2i(1, 0): 3})
+	var cd := r.spawn_division(0, Vector2i(0, 0))
+	cd.moves_left = cd.move
+	ok(r.path_preview(cd, Vector2i(1, 0), cm).blocked, "an adjacent cliff (2+ levels) is blocked")
+	ok(r.path_preview(cd, Vector2i(2, 0), cm).is_empty(), "an unreachable hex that is not next door shows nothing")
+	var wm := make_map(2, 1)
+	wm.cells[Vector2i(1, 0)] = HexMap.WATER
+	wm.terrain[Vector2i(1, 0)] = "water"
+	var wd := r.spawn_division(0, Vector2i(0, 0))
+	ok(r.path_preview(wd, Vector2i(1, 0), wm).is_empty(), "adjacent water is not a ledge or cliff: no red X")
+
