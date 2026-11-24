@@ -198,6 +198,8 @@ func can_move(d: Division, hex: Vector2i, hex_map: HexMap) -> bool:
 		return false  # a pod or scout cannot capture a city
 	if is_native(d) and (not hex_map.city_at(hex).is_empty() or not native_habitat_ok(d, hex, hex_map)):
 		return false  # natives never enter a city and stay in their habitat
+	if hex_map.capture_locked() and not hex_map.city_at(hex).is_empty() and hex_map.city_at(hex).nation != d.nation:
+		return false  # T1: no city changes hands during the early capture grace
 	if not hex_map.can_step(d.hex, hex):
 		return false
 	return d.moves_left >= step_cost_for(d, d.hex, hex, hex_map) or not d.has_moved
@@ -695,6 +697,8 @@ func plan_path(d: Division, dest: Vector2i, hex_map: HexMap) -> Array[Vector2i]:
 		for n in hex_map.neighbors(cell):
 			if came.has(n) or not hex_map.can_step(cell, n):
 				continue
+			if hex_map.capture_locked() and not hex_map.city_at(n).is_empty() and hex_map.city_at(n).nation != d.nation:
+				continue  # T1: enemy cities cannot be entered during the early capture grace
 			var occ := division_at(n)
 			# Only a friendly that is moving out may be followed into its hex.
 			if occ != null and not (occ.nation == d.nation and is_leaving(occ)):
@@ -1115,12 +1119,14 @@ func _local_strength(nation: int, center: Vector2i, radius: int) -> float:
 
 
 ## The enemy cities in range ordered by AI score (best first), only those above
-## ai.min_attack_score. Empty without attitude data.
+## ai.min_attack_score. Empty without attitude data, or before ai.min_attack_turn (T1).
 func ai_targets(d: Division, hex_map: HexMap) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	if not hex_map.attitude.enabled() or is_unarmed(d):
 		return out
 	var rules: Dictionary = hex_map.attitude.rules
+	if hex_map.current_turn < int(rules.get("min_attack_turn", 0)):
+		return out  # T1: the AI targets no city before ai.min_attack_turn (units and natives still fight)
 	var scores := {}
 	for city in hex_map.cities:
 		if city.nation == d.nation or neutral_nations.has(city.nation):

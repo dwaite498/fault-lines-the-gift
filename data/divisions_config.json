@@ -7,7 +7,7 @@
 		"defense": 12,
 		"move": 2,
 		"people_per_strength": 10,
-		"upkeep": {"cash": 3}
+		"upkeep": {"cash": 2}
 	},
 	"mechanized": {
 		"future": true,
