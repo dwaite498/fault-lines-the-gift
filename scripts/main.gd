@@ -42,6 +42,8 @@ var turn := 1
 var _mode := ""
 ## T2 planet events.
 var _events := PlanetEvents.new()
+## C1 colony charter (player-only milestones).
+var _charter := ColonyCharter.new()
 
 
 func _ready() -> void:
@@ -91,6 +93,7 @@ func _ready() -> void:
 	_economy.setup(_view.hex_map)
 	_view.roster.economy = _economy
 	_events.setup(PlanetEvents.load_config(), _view.hex_map.seed_value, PLAYER_NATION)
+	_charter.setup(ColonyCharter.load_config(), PLAYER_NATION)
 	_panel = UnitPanel.new()
 	_panel.max_fortify = int(_view.roster.combat.max_fortify)
 	_panel.flank_per_hex = float(_view.roster.combat.flank_penalty_per_hex)
@@ -165,6 +168,7 @@ func _ready() -> void:
 		_fog.restore(saved.extras.get("fog", {}))
 		_view.hex_map.pressure.restore(saved.extras.get("pressure", {}))
 		_events.restore(saved.extras.get("planet_events", {}), _view.hex_map)
+		_charter.restore(saved.extras.get("charter", {}), _view.hex_map)
 		_loaded = true
 		print("Loaded the saved game at turn %d" % turn)
 	else:
@@ -181,7 +185,7 @@ func _capture_state() -> Dictionary:
 	for i in _view.factions.assigned.size():
 		ids.append(_view.factions.id_of(i))
 	return SaveGame.capture(_view.hex_map, _view.roster, _economy, turn, _map_cfg, ids, {"fog": _fog.capture(), "pressure": _view.hex_map.pressure.capture(),
-			"planet_events": _events.capture()})
+			"planet_events": _events.capture(), "charter": _charter.capture()})
 
 
 func _on_reduce_motion_toggled(on: bool) -> void:
@@ -376,6 +380,7 @@ func _finish_turn() -> void:
 		message.text = ". ".join(world_events)
 	var spawned := NativeSpawner.run(_view.hex_map, roster, turn)
 	var raided := NativeAI.raid_step(_view.hex_map, roster, turn)
+	_charter.tally_kills(roster)
 	var planet := _events.end_turn(_view.hex_map, roster, _economy, turn)
 	if not planet.is_empty():
 		message.text = ". ".join(planet)
@@ -384,9 +389,10 @@ func _finish_turn() -> void:
 		message.text = "Recruit stalled in city %s: assign Training labor" % ", ".join(stalled.map(func(i: int) -> String: return str(i)))
 	if _check_game_over():
 		return
+	var charter_lines := _charter.end_turn(_view.hex_map, roster, _economy, _events)
 	var report := TurnReport.collect(_view.hex_map, PLAYER_NATION, new_divisions, raided, spawned,
 			func(cell: Vector2i) -> bool: return _fog.state(PLAYER_NATION, cell) == Fog.VISIBLE,
-			int(_view.hex_map.natives_config.get("sighting_report_radius", 3)), world_events, planet)
+			int(_view.hex_map.natives_config.get("sighting_report_radius", 3)), world_events, planet, charter_lines)
 	if TurnReport.should_show(report, _report_auto_hide):
 		_report.open(report)
 	else:

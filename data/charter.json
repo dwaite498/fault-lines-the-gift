@@ -1,0 +1,18 @@
+{
+	"player_only": true,
+	"debug_complete_all": false,
+	"milestones": [
+		{"id": "field_army", "label": "Field 3 divisions", "type": "divisions", "count": 3,
+		 "window_min": 5, "window_max": 15, "reward": {"cash": 15}},
+		{"id": "third_city", "label": "Own 3 cities", "type": "cities", "count": 3,
+		 "window_min": 10, "window_max": 30, "reward": {"capacity": 15}},
+		{"id": "natives_3", "label": "Defeat 3 natives", "type": "natives_killed", "count": 3,
+		 "window_min": 15, "window_max": 45, "reward": {"cash": 25}},
+		{"id": "survive_event", "label": "Survive a planet event", "type": "survive_planet_event",
+		 "window_min": 45, "window_max": 60, "reward": {"cash": 20}},
+		{"id": "city_tier", "label": "Reach City tier", "type": "tier", "tier": "city",
+		 "window_min": 40, "window_max": 70, "reward": {"capacity": 20}},
+		{"id": "four_cities", "label": "Own 4 cities", "type": "cities", "count": 4,
+		 "window_min": 55, "window_max": 90, "reward": {"cash": 30}}
+	]
+}

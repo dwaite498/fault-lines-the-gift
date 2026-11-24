@@ -86,6 +86,10 @@ func _initialize() -> void:
 	test_turn_report()
 	# --- end turn report ---
 
+	# --- C1 colony charter (own block to avoid merge collisions) ---
+	test_c1_charter()
+	# --- end C1 ---
+
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -4263,3 +4267,228 @@ func test_turn_report() -> void:
 	GameSettings.set_turn_report_auto_hide(false, path)
 	ok(default_on and not GameSettings.turn_report_auto_hide(path), "Hide empty turn report defaults on and persists in user:// settings")
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+
+
+# --- C1 colony charter (own block to avoid merge collisions) ---
+## C1 (COLONY_CHARTER.md, PM scope): data-driven player-only milestones, cash/capacity
+## rewards, a TurnReport line, and save/load. The top-bar tracker is C2 and is not tested here.
+func charter_add_city(m: HexMap, nation := 0, population := 3000) -> Dictionary:
+	var used := {}
+	var max_id := 0
+	for c in m.cities:
+		used[c.cell] = true
+		max_id = maxi(max_id, int(c.id))
+	var cell := Vector2i(-1, -1)
+	for y in m.height:
+		for x in m.width:
+			var c := Vector2i(x, y)
+			if used.has(c) or m.cells.get(c, HexMap.WATER) == HexMap.WATER or not m.city_at(c).is_empty():
+				continue
+			cell = c
+			break
+		if cell.x >= 0:
+			break
+	var city := {"id": max_id + 1, "nation": nation, "cell": cell, "population": population,
+			"infrastructure": 10.0, "radius": 1, "name": "City %d" % (max_id + 1)}
+	m.cities.append(city)
+	m.cells[cell] = nation
+	return city
+
+
+func test_c1_charter() -> void:
+	var cfg: Dictionary = ColonyCharter.load_config()
+	var ms: Array = cfg.milestones
+	ok(bool(cfg.player_only) and not bool(cfg.debug_complete_all) and ms.size() == 6, "charter.json: player_only, debug_complete_all off, 6 milestones")
+	ok(ms[0].id == "field_army" and ms[0].type == "divisions" and int(ms[0].count) == 3 and int(ms[0].window_min) == 5 and int(ms[0].window_max) == 15 and int(ms[0].reward.cash) == 15 and ms[0].label == "Field 3 divisions", "field_army: 3 non-colonizer divisions, window 5-15, +15 cash")
+	ok(ms[1].id == "third_city" and ms[1].type == "cities" and int(ms[1].count) == 3 and int(ms[1].window_min) == 10 and int(ms[1].window_max) == 30 and int(ms[1].reward.capacity) == 15, "third_city: 3 cities, window 10-30, +15 capacity")
+	ok(ms[2].id == "natives_3" and ms[2].type == "natives_killed" and int(ms[2].count) == 3 and int(ms[2].window_min) == 15 and int(ms[2].window_max) == 45 and int(ms[2].reward.cash) == 25, "natives_3: 3 player kills, window 15-45, +25 cash")
+	ok(ms[3].id == "survive_event" and ms[3].type == "survive_planet_event" and int(ms[3].window_min) == 45 and int(ms[3].window_max) == 60 and int(ms[3].reward.cash) == 20, "survive_event: window 45-60, +20 cash")
+	ok(ms[4].id == "city_tier" and ms[4].type == "tier" and ms[4].tier == "city" and int(ms[4].window_min) == 40 and int(ms[4].window_max) == 70 and int(ms[4].reward.capacity) == 20, "city_tier: City tier, window 40-70, +20 capacity")
+	ok(ms[5].id == "four_cities" and ms[5].type == "cities" and int(ms[5].count) == 4 and int(ms[5].window_min) == 55 and int(ms[5].window_max) == 90 and int(ms[5].reward.cash) == 30, "four_cities: 4 cities, window 55-90, +30 cash")
+
+	var g := events_setup(5)
+	var ch := ColonyCharter.new()
+	ch.setup(cfg, 0)
+	var ev: PlanetEvents = g.ev
+	var m: HexMap = g.map
+	var r: DivisionRoster = g.roster
+	var eco: NationEconomy = g.eco
+	var cash0 := float(eco.stocks[0].cash)
+	var cap0 := float(eco.stocks[0].capacity)
+	var ai_cash := float(eco.stocks[1].cash)
+	var ai_cap := float(eco.stocks[1].capacity)
+	var fielded := r.divisions.filter(func(d: Division) -> bool: return d.nation == 0 and not r.is_colonizer(d)).size()
+	var owned := m.cities.filter(func(c: Dictionary) -> bool: return int(c.nation) == 0)
+	ok(fielded == 2 and owned.size() == 2 and m.tier(m.capital_of(0)) == "base" and int(m.capital_of(0).population) == 10000, "a new game starts with 2 infantry, 2 cities and a Base capital")
+	var lines: Array = ch.end_turn(m, r, eco, ev)
+	ok(lines.is_empty() and ch.completed.is_empty() and is_equal_approx(float(eco.stocks[0].cash), cash0) and is_equal_approx(float(eco.stocks[0].capacity), cap0), "the starting position completes nothing and pays no reward")
+
+	# Pending recruits and pods do not count; a scout does; AI divisions never do.
+	# Pending is set directly: spawn_at_cities leaves a division on the capital hex, so recruit() is blocked.
+	var cap: Dictionary = m.capital_of(0)
+	eco.pending[cap.id] = {"nation": 0, "turns_left": 3, "labor": 0, "cost": 15}
+	ok(eco.pending.has(cap.id) and eco.division_count(0, r) == ch._fielded(r) + 1 and ch._fielded(r) == 2
+			and ch.end_turn(m, r, eco, ev).is_empty(),
+			"a queued but unspawned recruit is in division_count but does not complete field_army")
+	eco.pending.erase(cap.id)
+	r.spawn_division(0, Vector2i(0, 0), "colony_pod", 0)
+	ok(ch._fielded(r) == 2 and ch.end_turn(m, r, eco, ev).is_empty(), "a colony pod does not count toward field_army")
+	r.spawn_division(1, Vector2i(1, 0), "infantry", 0)
+	r.spawn_division(1, Vector2i(2, 0), "infantry", 0)
+	ok(ch.end_turn(m, r, eco, ev).is_empty() and is_equal_approx(float(eco.stocks[1].cash), ai_cash), "AI divisions do not complete the player's field_army")
+	var scout := r.spawn_division(0, Vector2i(3, 0), "scout", 0)
+	lines = ch.end_turn(m, r, eco, ev)
+	ok(ch.completed == ["field_army"] and lines.size() == 1 and lines[0].text == "Charter: Field 3 divisions (+15 cash)" and lines[0].cell == TurnReport.NO_CELL
+			and is_equal_approx(float(eco.stocks[0].cash), cash0 + 15.0) and is_equal_approx(float(eco.stocks[1].cash), ai_cash),
+			"a third non-colonizer (a scout) completes field_army: +15 cash, one report line, AI stocks unchanged")
+	var cash1 := float(eco.stocks[0].cash)
+	ok(ch.end_turn(m, r, eco, ev).is_empty() and is_equal_approx(float(eco.stocks[0].cash), cash1), "field_army pays only once")
+
+	# Cities: founding a third, then a fourth (or annex). Cells point at the new city.
+	var third: Dictionary = charter_add_city(m, 0)
+	lines = ch.end_turn(m, r, eco, ev)
+	ok(ch.completed == ["field_army", "third_city"] and lines.size() == 1 and lines[0].text == "Charter: Own 3 cities (+15 capacity)" and lines[0].cell == third.cell
+			and is_equal_approx(float(eco.stocks[0].capacity), cap0 + 15.0) and is_equal_approx(float(eco.stocks[1].capacity), ai_cap),
+			"founding a third city completes third_city once: +15 capacity, the line centers on the new city")
+	var cap1 := float(eco.stocks[0].capacity)
+	# Annex: flip an AI city to the player.
+	var ai_city: Dictionary = {}
+	for c in m.cities:
+		if int(c.nation) != 0:
+			ai_city = c
+			break
+	ai_city.nation = 0
+	m.cells[ai_city.cell] = 0
+	lines = ch.end_turn(m, r, eco, ev)
+	ok(ch.completed == ["field_army", "third_city", "four_cities"] and lines.size() == 1 and lines[0].text == "Charter: Own 4 cities (+30 cash)" and lines[0].cell == ai_city.cell
+			and is_equal_approx(float(eco.stocks[0].cash), cash1 + 30.0) and is_equal_approx(float(eco.stocks[0].capacity), cap1),
+			"annexing a fourth city completes four_cities separately: +30 cash, the line centers on that city")
+	var cash2 := float(eco.stocks[0].cash)
+
+	# Native kills: tally before PlanetEvents.end_turn clears the array; other nations do not count.
+	r.destroyed_natives = [{"id": 11, "by": 0}, {"id": 12, "by": 1}, {"id": 13, "by": 0}]
+	ch.tally_kills(r)
+	ok(ch.natives_killed == 2, "two player kills are tallied; an AI kill is ignored")
+	ev.end_turn(m, r, eco, 2)
+	ok(r.destroyed_natives.is_empty() and ch.natives_killed == 2, "the total is kept after PlanetEvents.end_turn clears the array")
+	r.destroyed_natives = [{"id": 14, "by": 0}]
+	ch.tally_kills(r)
+	r.destroyed_natives.clear()  # as if someone only looked at the array after it was cleared
+	lines = ch.end_turn(m, r, eco, ev)
+	ok(ch.natives_killed == 3 and ch.completed.has("natives_3") and lines.size() == 1 and lines[0].text == "Charter: Defeat 3 natives (+25 cash)" and lines[0].cell == TurnReport.NO_CELL
+			and is_equal_approx(float(eco.stocks[0].cash), cash2 + 25.0),
+			"the third player kill completes natives_3 from the running total, not the cleared array")
+	var cash3 := float(eco.stocks[0].cash)
+
+	# Survive a planet event: instant on the fire turn; blizzard only when it has passed; need a city.
+	ev.planet_event_log = [{"turn": 45, "event": "supply_cache", "text": "Supply Cache: +40 cash"}]
+	ev.blizzard_left = 0
+	lines = ch.end_turn(m, r, eco, ev)
+	ok(ch.completed.has("survive_event") and not ch.awaiting_event and lines.size() == 1 and lines[0].text == "Charter: Survive a planet event (+20 cash)" and lines[0].cell == TurnReport.NO_CELL
+			and is_equal_approx(float(eco.stocks[0].cash), cash3 + 20.0),
+			"an instant first event completes survive_event the turn it fires if the player still has a city")
+	ok(ch.end_turn(m, r, eco, ev).is_empty(), "survive_event pays only once")
+
+	var g2 := events_setup(6)
+	var ch2 := ColonyCharter.new()
+	ch2.setup(cfg, 0)
+	g2.ev.planet_event_log = [{"turn": 45, "event": "blizzard", "text": "Blizzard"}]
+	g2.ev.blizzard_left = 2
+	ok(ch2.end_turn(g2.map, g2.roster, g2.eco, g2.ev).is_empty() and ch2.awaiting_event and not ch2.completed.has("survive_event"),
+			"a Blizzard does not complete survive_event until blizzard_left hits 0")
+	g2.ev.blizzard_left = 0
+	lines = ch2.end_turn(g2.map, g2.roster, g2.eco, g2.ev)
+	ok(not ch2.awaiting_event and ch2.completed.has("survive_event") and lines.size() == 1 and lines[0].text == "Charter: Survive a planet event (+20 cash)",
+			"survive_event completes on the blizzard-passed turn")
+	# No city: the first event resolves but the milestone does not complete, then or later.
+	var g3 := events_setup(7)
+	var ch3 := ColonyCharter.new()
+	ch3.setup(cfg, 0)
+	for c in g3.map.cities:
+		if int(c.nation) == 0:
+			c.nation = 1
+	g3.ev.planet_event_log = [{"turn": 45, "event": "supply_cache", "text": "Supply Cache: +40 cash"}]
+	ok(ch3.end_turn(g3.map, g3.roster, g3.eco, g3.ev).is_empty() and not ch3.awaiting_event and not ch3.completed.has("survive_event"),
+			"survive_event does not complete if the player has no city when the first event resolves")
+	charter_add_city(g3.map, 0)
+	ok(ch3.end_turn(g3.map, g3.roster, g3.eco, g3.ev).filter(func(l: Dictionary) -> bool: return str(l.text).begins_with("Charter: Survive")).is_empty()
+			and not ch3.completed.has("survive_event"),
+			"a later city does not complete a missed survive_event")
+
+	# City tier: a 10,000 Base capital does not count; 15,000 (City) does.
+	var g4 := events_setup(8)
+	var ch4 := ColonyCharter.new()
+	ch4.setup(cfg, 0)
+	var capital: Dictionary = g4.map.capital_of(0)
+	ok(int(capital.population) == 10000 and g4.map.tier(capital) == "base", "the capital starts at 10,000 people (Base)")
+	capital.population = 15000
+	g4.map.tier_changes.assign([{"city_id": int(capital.id), "nation": 0, "from": "base", "to": "city", "grew": true}])
+	ok(g4.map.tier(capital) == "city", "15,000 people is City tier")
+	var cap4 := float(g4.eco.stocks[0].capacity)
+	var ai_cap4 := float(g4.eco.stocks[1].capacity)
+	lines = ch4.end_turn(g4.map, g4.roster, g4.eco, g4.ev)
+	var tier_line: Dictionary = {}
+	for l in lines:
+		if str(l.text).begins_with("Charter: Reach City tier"):
+			tier_line = l
+	ok(ch4.completed.has("city_tier") and not tier_line.is_empty() and tier_line.text == "Charter: Reach City tier (+20 capacity)" and tier_line.cell == capital.cell
+			and is_equal_approx(float(g4.eco.stocks[0].capacity), cap4 + 20.0) and is_equal_approx(float(g4.eco.stocks[1].capacity), ai_cap4),
+			"a player city at City tier completes city_tier: +20 capacity, the line centers on that city")
+
+	# Windows never block a reward (field_army completed on the first check, before window_min 5).
+	ok(ch.completed.has("field_army"), "completing before window_min still pays (field_army on the first end_turn)")
+
+	# Rewards touch only cash and capacity; a both-keys line uses the combined format.
+	var both := ColonyCharter.new()
+	var both_cfg: Dictionary = cfg.duplicate(true)
+	both_cfg.milestones = [{"id": "both", "label": "Both rewards", "type": "cities", "count": 1, "reward": {"cash": 15, "capacity": 15}}]
+	both.setup(both_cfg, 0)
+	var dummy := events_setup(9)
+	var both_lines: Array = both.end_turn(dummy.map, dummy.roster, dummy.eco, dummy.ev)
+	ok(both_lines.size() == 1 and both_lines[0].text == "Charter: Both rewards (+15 cash, +15 capacity)", "if both reward keys pay, the line is '(+15 cash, +15 capacity)'")
+
+	# TurnReport.collect appends charter_lines after planet events.
+	var seen := func(_cell: Vector2i) -> bool: return true
+	var report := TurnReport.collect(m, 0, [], [], [], seen, 3, [], ["Supply Cache: +40 cash"],
+			[{"text": "Charter: Field 3 divisions (+15 cash)", "cell": TurnReport.NO_CELL}])
+	ok(report.size() == 2 and report[0].text == "Supply Cache: +40 cash" and report[1].text == "Charter: Field 3 divisions (+15 cash)" and report[1].cell == TurnReport.NO_CELL,
+			"collect appends charter_lines after planet events; a NO_CELL charter line is plain text")
+
+	# Save/load: completed ids, kill total, and a pending blizzard-survive.
+	var g5 := events_setup(10)
+	var ch5 := ColonyCharter.new()
+	ch5.setup(cfg, 0)
+	ch5.completed = ["field_army"]
+	ch5.natives_killed = 2
+	ch5.awaiting_event = true
+	g5.ev.planet_event_log = [{"turn": 45, "event": "blizzard", "text": "Blizzard"}]
+	g5.ev.blizzard_left = 2
+	var state: Dictionary = SaveGame.capture(g5.map, g5.roster, g5.eco, 46, g5.cfg, [],
+			{"planet_events": g5.ev.capture(), "charter": ch5.capture()})
+	ok(state.extras.has("charter") and state.extras.charter.completed == ["field_army"] and int(state.extras.charter.natives_killed) == 2 and bool(state.extras.charter.awaiting_event),
+			"the charter extras key stores completed ids, the kill total and awaiting_event")
+	var g6 := events_setup(10)
+	g6.ev.restore(state.extras.planet_events, g6.map)
+	var ch6 := ColonyCharter.new()
+	ch6.setup(cfg, 0)
+	ch6.restore(state.extras.charter, g6.map)
+	ok(ch6.completed == ["field_army"] and ch6.natives_killed == 2 and ch6.awaiting_event and int(g6.ev.blizzard_left) == 2,
+			"save/load restores completed ids, the kill total and a pending blizzard-survive")
+	g6.ev.blizzard_left = 0
+	var after: Array = ch6.end_turn(g6.map, g6.roster, g6.eco, g6.ev)
+	ok(ch6.completed.has("survive_event") and after.any(func(l: Dictionary) -> bool: return l.text == "Charter: Survive a planet event (+20 cash)"),
+			"after load, survive_event still completes when the restored blizzard ends")
+
+	# debug_complete_all marks every id complete and pays no rewards.
+	var g7 := events_setup(11)
+	var cash7 := float(g7.eco.stocks[0].cash)
+	var cap7 := float(g7.eco.stocks[0].capacity)
+	var debug_cfg: Dictionary = cfg.duplicate(true)
+	debug_cfg.debug_complete_all = true
+	var ch7 := ColonyCharter.new()
+	ch7.setup(debug_cfg, 0)
+	ok(ch7.completed == ["field_army", "third_city", "natives_3", "survive_event", "city_tier", "four_cities"], "debug_complete_all marks all six ids complete")
+	ok(ch7.end_turn(g7.map, g7.roster, g7.eco, g7.ev).is_empty() and is_equal_approx(float(g7.eco.stocks[0].cash), cash7) and is_equal_approx(float(g7.eco.stocks[0].capacity), cap7),
+			"debug_complete_all pays no rewards")
+
+# --- end C1 ---
