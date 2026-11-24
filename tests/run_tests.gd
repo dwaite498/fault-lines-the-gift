@@ -4241,6 +4241,19 @@ func test_turn_report() -> void:
 	ok(panel.is_open() and buttons.size() == 5 and labels.size() == 2 and got == [trained.hex], "the panel shows 5 clickable lines and 2 plain ones; a click sends the line's hex")
 	panel.close_button.pressed.emit()
 	ok(not panel.is_open(), "Close dismisses the panel")
+	var long: Array = []
+	for i in 25:
+		long.append({"text": "Infantry trained in City %d" % i, "cell": Vector2i(1, 1)})
+	panel.open(long)
+	panel.fit(720.0)
+	var h := panel.height()
+	ok(h <= 0.6 * 720.0 + 1.0 and panel.panel.position.y + h <= 720.0 and 25.0 * panel.close_button.get_combined_minimum_size().y > panel.scroll.custom_minimum_size.y
+			and panel.close_button.get_parent() == panel.frame,
+			"25 lines at 1280x720: the panel is capped at 60%% of the height (%.0f px), the rows scroll and Close stays on screen" % h)
+	panel.open(lines.slice(0, 2))
+	panel.fit(720.0)
+	var two: float = 4.0 + panel.list.get_children().reduce(func(s: float, c: Control) -> float: return s + c.get_combined_minimum_size().y, 0.0)
+	ok(panel.list.get_child_count() == 2 and is_equal_approx(panel.scroll.custom_minimum_size.y, two), "a short report still sizes to its content")
 	panel.open([])
 	ok(panel.is_open() and panel.list.get_children().any(func(n: Node) -> bool: return n is Label and n.text == "Nothing new this turn."), "with auto-hide off an empty report says nothing new")
 	panel.free()
