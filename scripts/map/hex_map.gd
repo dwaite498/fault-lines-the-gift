@@ -294,6 +294,17 @@ func can_step(from: Vector2i, to: Vector2i) -> bool:
 	return absi(elevation_of(to) - elevation_of(from)) < int(elevation_rules.get("cliff_diff", 1 << 20))
 
 
+## P2: true if the elevation edge between land hexes a and b stops a melee attack the same way
+## it stops a step (can_step): a ledge (R1) or a cliff (cliff_diff or more levels). Water hexes are
+## never blocked here (attacks to or from water keep the old rules), nor are ramps or level edges.
+func attack_edge_blocked(a: Vector2i, b: Vector2i) -> bool:
+	if cells.get(a, WATER) == WATER or cells.get(b, WATER) == WATER:
+		return false
+	if is_ledge(a, b):
+		return true
+	return absi(elevation_of(b) - elevation_of(a)) >= int(elevation_rules.get("cliff_diff", 1 << 20))
+
+
 ## Move points to step from `from` into `to`: the target's move_cost, plus climb_cost
 ## when it is one or more levels higher. Downhill and level steps cost the normal amount.
 func step_cost(from: Vector2i, to: Vector2i, nation := -1) -> int:

@@ -412,10 +412,11 @@ func can_attack(attacker: Division, defender: Division, hex_map: HexMap) -> bool
 	return _can_attack_ignoring_frontage(attacker, defender, hex_map) and not frontage_blocked(attacker, defender.hex)
 
 
+## P2: no melee attack across a cliff or a ledge without a ramp (HexMap.attack_edge_blocked).
 func _can_attack_ignoring_frontage(attacker: Division, defender: Division, hex_map: HexMap) -> bool:
 	return (not is_unarmed(attacker) and attacker.moves_left > 0 and not attacker.has_moved and defender != null
 			and defender.nation != attacker.nation and not neutral_nations.has(defender.nation)
-			and defender.hex in hex_map.neighbors(attacker.hex))
+			and defender.hex in hex_map.neighbors(attacker.hex) and not hex_map.attack_edge_blocked(attacker.hex, defender.hex))
 
 
 ## Flank multiplier for a defender hit from hex_count distinct hexes this turn:
@@ -926,7 +927,7 @@ func execute_orders(hex_map: HexMap) -> void:
 		var vacated: Vector2i = a.order_path[0]
 		if not divisions.has(a):
 			continue
-		if t != null and divisions.has(t) and t.hex in hex_map.neighbors(a.hex):
+		if t != null and divisions.has(t) and t.hex in hex_map.neighbors(a.hex) and not hex_map.attack_edge_blocked(a.hex, t.hex):
 			_log_attack(a, t, attack_unchecked(a, t, hex_map))
 		elif division_at(vacated) == null:
 			a.fortify_level = 0
@@ -1063,7 +1064,7 @@ func run_ai(player_nation: int, hex_map: HexMap) -> void:
 		for n in hex_map.neighbors(d.hex):
 			var other := division_at(n)
 			if other and other.nation != d.nation:
-				if not frontage_blocked(d, n):  # a full hex is not a target for the AI
+				if not frontage_blocked(d, n) and not hex_map.attack_edge_blocked(d.hex, n):  # a full hex, or one across a cliff/ledge (P2), is not a target
 					enemies.append(other)
 			elif can_move(d, n, hex_map):
 				free.append(n)
