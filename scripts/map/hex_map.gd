@@ -46,8 +46,8 @@ var city_rules := {
 	"terrain_growth_mult": {"plains": 1.0, "coast": 1.1, "forest": 0.9, "hills": 0.9,
 			"mountains": 0.7, "snow": 0.7, "shallow_ocean": 1.0},
 	"fungus_adjacent_growth_mult": 0.95, "fungus_growth_min_mult": 0.7,
-	"division_people_cost": 1000, "pool_fill_rate": 0.005,
-	"pool_cap": 0.15, "capital_start_pool": 1000, "colony_start_pool": 0,
+	"division_people_cost": 1000, "pool_fill_rate": 0.01,
+	"pool_cap": 0.15, "capital_start_pool": 1500, "colony_start_pool": 450,
 	"train_min_city_pop": 5000,
 	# T1 (PACING_TUNING_577a022.md): 0 = off, so hand-built maps keep the old rules.
 	"min_enemy_start_distance": 0, "min_enemy_start_distance_fallback": 0, "early_capture_grace_turns": 0,
@@ -57,7 +57,7 @@ var city_rules := {
 	"colonization": {
 		"labor_turns": 15, "population_cost": 3000, "min_remaining_population": 5000,
 		"outpost_population": 3000, "outpost_infrastructure": 10, "min_city_distance": 3,
-		"ai_build_pods": true, "ai_max_pods": 1,
+		"ai_build_pods": true, "ai_max_pods": 1, "uses_training_slot": false,
 	},
 	"capture": {
 		"order": ["annex", "occupy", "plunder", "reduce", "raze", "enslave"],

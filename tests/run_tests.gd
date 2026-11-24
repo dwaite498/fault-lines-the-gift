@@ -77,6 +77,11 @@ func _initialize() -> void:
 	# --- end T2 snowcap tweak ---
 
 	test_combat_fx()
+
+	# --- T1b recruit friction (own block to avoid merge collisions) ---
+	test_t1b_recruit()
+	# --- end T1b ---
+
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -611,7 +616,7 @@ func test_labor_sinks() -> void:
 	ok(turns_to_division(0) == -1, "0 Training points: the queue never finishes")
 	var s := sink_setup(4, 0)
 	var eco: NationEconomy = s.eco
-	ok(eco.recruit(s.city, 0, s.roster) and eco.stocks[0].capacity == 85.0 and s.city.pool == 0 and s.city.population == 9000, "recruiting pays 15 capacity and draws 1,000 people from the city pool (and its population)")
+	ok(eco.recruit(s.city, 0, s.roster) and eco.stocks[0].capacity == 85.0 and s.city.pool == 500 and s.city.population == 9000, "recruiting pays 15 capacity and draws 1,000 people from the city pool (1,500 -> 500) and its population")
 	eco.spawn_pending(s.map, s.roster)
 	ok(eco.pending[s.city.id].labor == 4 and eco.pending[s.city.id].turns_left == 2, "one turn adds 4 labor and ticks the timer")
 	ok(NationEconomy.queue_text(eco.pending[s.city.id]) == "Division 4/15 labor, 2 turns left", "queue text shows labor progress and turns")
@@ -726,8 +731,8 @@ func test_growth_tuning() -> void:
 	var m := pop_map()
 	var r := m.city_rules
 	ok(is_equal_approx(r.base_growth, 0.005) and is_equal_approx(r.growth_labor_max_bonus, 0.01) and is_equal_approx(r.min_growth, 0.001), "config: base_growth 0.005, growth_labor_max_bonus 0.010, min_growth 0.001")
-	ok(r.division_people_cost == 1000 and not r.has("people_per_strength") and is_equal_approx(r.pool_fill_rate, 0.005) and is_equal_approx(r.pool_cap, 0.15), "config: division 1,000 people, fill 0.5%, cap 15% (people_per_strength moved to the division type)")
-	ok(r.capital_start_pool == 1000 and r.colony_start_pool == 0 and r.train_min_city_pop == 5000, "config: capital pool 1,000, colony pool 0, training floor 5,000")
+	ok(r.division_people_cost == 1000 and not r.has("people_per_strength") and is_equal_approx(r.pool_fill_rate, 0.01) and is_equal_approx(r.pool_cap, 0.15), "config: division 1,000 people, fill 1% (T1b), cap 15% (people_per_strength moved to the division type)")
+	ok(r.capital_start_pool == 1500 and r.colony_start_pool == 450 and r.train_min_city_pop == 5000, "config: capital pool 1,500, colony pool 450 (T1b), training floor 5,000")
 	ok(not r.has("growth_rate_per_labor_point") and not r.has("growth_base_rate"), "growth_per_labor_point is removed")
 	# Turn counts from POPULATION_TUNING.md (floor rounding makes them a turn or two slower).
 	var table := [
@@ -815,11 +820,11 @@ func test_recruit_pool() -> void:
 	# Starting pools: the capital (a nation's first city) has 1,000, a colony 0.
 	var cap := m.capital_of(0)
 	var colony := nation_cities(m, 0)[1]
-	ok(cap.pool == 1000 and colony.pool == 0, "acceptance 6: a capital starts with a pool of 1,000, a colony with 0")
-	ok(m.cities.all(func(c: Dictionary) -> bool: return m.pool_of(c) == (1000 if c == m.capital_of(c.nation) else 0)), "every nation's first city is its capital with the starting pool")
+	ok(cap.pool == 1500 and colony.pool == 450, "acceptance 6 (T1b): a capital starts with a pool of 1,500, a colony with 450")
+	ok(m.cities.all(func(c: Dictionary) -> bool: return m.pool_of(c) == (1500 if c == m.capital_of(c.nation) else 450)), "every nation's first city is its capital with the starting pool")
 	# Fill and cap.
 	var c10 := {"id": 0, "nation": 0, "population": 10000, "infrastructure": 10, "pool": 1000}
-	ok(m.pool_fill(c10) == 50 and m.pool_cap(c10) == 1500, "a 10k city fills 50 a turn and caps at 1,500 (0.5% / 15%)")
+	ok(m.pool_fill(c10) == 100 and m.pool_cap(c10) == 1500, "a 10k city fills 100 a turn and caps at 1,500 (1% / 15%)")
 	ok(m.advance_preview(c10).pool > 1000, "the pool grows each end turn")
 	var c3 := {"id": 1, "nation": 0, "population": 3000, "infrastructure": 10, "pool": 0}
 	var top := 0
@@ -838,8 +843,8 @@ func test_recruit_pool() -> void:
 	ok(eco.recruit_block_reason(cap, 0, roster) == "city hex occupied", "(a division stands on the city hex)")
 	roster.divisions.assign(roster.divisions.filter(func(d: Division) -> bool: return d.hex != cap.cell))
 	eco.stocks[0].capacity = 100.0
-	ok(eco.recruit_block_reason(cap, 0, roster) == "", "the capital's starting pool allows exactly one recruit")
-	ok(eco.recruit(cap, 0, roster) and cap.pool == 0 and cap.population == 9000, "acceptance 5: recruiting removes 1,000 people (pool 1,000 -> 0, population 10,000 -> 9,000)")
+	ok(eco.recruit_block_reason(cap, 0, roster) == "", "the capital's starting pool allows a recruit")
+	ok(eco.recruit(cap, 0, roster) and cap.pool == 500 and cap.population == 9000, "acceptance 5: recruiting removes 1,000 people (pool 1,500 -> 500, population 10,000 -> 9,000)")
 	eco.pending.clear()
 	cap.pool = 999
 	ok(eco.recruit_block_reason(cap, 0, roster) == "recruit pool too small", "a pool under 1,000 cannot recruit")
@@ -899,14 +904,14 @@ func test_recruit_pool() -> void:
 	d4.strength = 50.0
 	var pop4 := int(home4.population)
 	s4.eco.reinforce(s4.roster, s4.map)
-	ok(d4.strength == 60.0 and home4.pool == 900 and home4.population == pop4 - 100 and s4.eco.reinforce_spent[0] == 100.0, "acceptance 5: reinforcing 10 strength costs 100 people (home pool 1,000 -> 900, population -100)")
+	ok(d4.strength == 60.0 and home4.pool == 1400 and home4.population == pop4 - 100 and s4.eco.reinforce_spent[0] == 100.0, "acceptance 5: reinforcing 10 strength costs 100 people (home pool 1,500 -> 1,400, population -100)")
 	ok(not s4.eco.stocks[0].has("manpower"), "reinforcement no longer touches a nation manpower stock")
 	# Preview matches the real thing.
 	var s5 := pool_setup()
 	var d5: Division = s5.roster.divisions.filter(func(d: Division) -> bool: return d.nation == 0)[0]
 	d5.strength = 50.0
 	var plan: Dictionary = s5.eco.reinforce_plan(s5.roster, s5.map, s5.eco.current_pools(s5.map), 0)
-	ok(plan.gains[d5.id] == 10.0 and s5.map.pool_of(s5.map.city_by_id(d5.home_city_id)) == 1000, "reinforce_plan previews without changing anything")
+	ok(plan.gains[d5.id] == 10.0 and s5.map.pool_of(s5.map.city_by_id(d5.home_city_id)) == 1500, "reinforce_plan previews without changing anything")
 	# Empty home pool: fall back to the nearest owned city's pool, and partial pools are combined.
 	var s6 := pool_setup()
 	var d6: Division = s6.roster.divisions.filter(func(d: Division) -> bool: return d.nation == 0)[0]
@@ -1819,19 +1824,19 @@ func test_colonizers() -> void:
 	var cap_before := float(eco.stocks[0].capacity)
 	ok(eco.colony_block_reason(city, 0) == "", "a 10,000-person city can queue a colony pod")
 	ok(eco.queue_colony_pod(city, 0), "the pod is queued")
-	var entry: Dictionary = eco.pending[city.id]
+	var entry: Dictionary = eco.pods[city.id]
 	ok(city.population == 7000 and entry.kind == "colony_pod" and entry.cost == 15 and entry.turns_left == 0, "3,000 people drawn at queue time; a 15 labor-turn pod entry")
 	ok(float(eco.stocks[0].cash) == cash_before and float(eco.stocks[0].capacity) == cap_before, "a pod costs no cash or capacity")
 	ok(city.pool <= int(floor(7000 * 0.15)), "the recruit pool is held under the smaller city's cap")
-	ok(eco.colony_block_reason(city, 0) == "already recruiting" and not eco.recruit(city, 0, roster), "one queue per city: a pod blocks a second pod and a division")
+	ok(eco.colony_block_reason(city, 0) == "already building a pod" and not eco.pending.has(city.id), "one pod at a time per city; the pod has its own queue (T1b)")
 	ok(NationEconomy.queue_text(entry).begins_with("Colony pod 0/15 labor"), "the queue text names the pod")
 	# Labor gating: 5 Training points per turn needs 3 turns.
 	city.labor.training = 5
 	eco.spawn_pending(m, roster)
 	eco.spawn_pending(m, roster)
-	ok(roster.divisions.is_empty() and eco.pending[city.id].labor == 10, "after 2 turns of 5 labor the pod is not ready (10/15)")
+	ok(roster.divisions.is_empty() and eco.pods[city.id].labor == 10, "after 2 turns of 5 labor the pod is not ready (10/15)")
 	eco.spawn_pending(m, roster)
-	ok(roster.divisions.size() == 1 and not eco.pending.has(city.id), "after 3 turns (15 labor-turns) the pod appears on the city hex")
+	ok(roster.divisions.size() == 1 and not eco.pods.has(city.id), "after 3 turns (15 labor-turns) the pod appears on the city hex")
 	var pod: Division = roster.divisions[0]
 	ok(pod.unit_type == "colony_pod" and pod.hex == city.cell and pod.move == 2 and roster.is_colonizer(pod) and roster.upkeep_of(pod).is_empty(), "the pod stands on the city hex, moves 2, no upkeep")
 	# The 5,000 floor: 7,999 is blocked, 8,000 is allowed.
@@ -1910,9 +1915,9 @@ func test_colonizers() -> void:
 	groster.templates.scout.recruit.ai_count = 0  # the scout would take the capital's one queue first
 	geco.run_ai(0, gm, groster)
 	var queued := {}
-	for id in geco.pending:
-		if geco.pending[id].kind == "colony_pod":
-			queued[geco.pending[id].nation] = int(queued.get(geco.pending[id].nation, 0)) + 1
+	for id in geco.pods:
+		if geco.pods[id].kind == "colony_pod":
+			queued[geco.pods[id].nation] = int(queued.get(geco.pods[id].nation, 0)) + 1
 	ok(not queued.is_empty() and queued.values().all(func(n: int) -> bool: return n == 1) and not queued.has(0), "each AI nation with a valid site queues one pod; the player's nations do not")
 	var no_site := pool_setup()
 	no_site.map.city_rules.colonization.min_city_distance = 99
@@ -4149,3 +4154,39 @@ func test_combat_fx() -> void:
 		n.view.free()
 		n.camera.free()
 		n.free()
+
+
+## T1b recruit friction (Designer, approved by PM): pods have their own queue, bigger and faster pools.
+func test_t1b_recruit() -> void:
+	var cc: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://data/cities_config.json"))
+	ok(cc.colonization.uses_training_slot == false and cc.capital_start_pool == 1500 and cc.colony_start_pool == 450 and is_equal_approx(cc.pool_fill_rate, 0.01),
+			"cities_config: colonization.uses_training_slot false, capital pool 1,500, colony pool 450, fill 1%")
+	ok(is_equal_approx(cc.pool_cap, 0.15) and cc.division_people_cost == 1000 and cc.train_min_city_pop == 5000, "unchanged: pool cap 15%, 1,000 people a division, 5,000 training floor")
+	var s := pool_setup()
+	var m: HexMap = s.map
+	var eco: NationEconomy = s.eco
+	var roster: DivisionRoster = s.roster
+	var cap := m.capital_of(0)
+	ok(cap.pool == 1500 and nation_cities(m, 0)[1].pool == 450 and m.pool_fill({"nation": 0, "population": 10000}) == 100, "pools start at 1,500 (capital) and 450 (colony) and fill 1% a turn")
+	roster.divisions.assign(roster.divisions.filter(func(d: Division) -> bool: return d.hex != cap.cell))
+	eco.stocks[0].capacity = 100.0
+	ok(eco.queue_colony_pod(cap, 0) and eco.pods.has(cap.id) and not eco.pending.has(cap.id), "a queued pod goes in its own queue, not the training slot")
+	ok(eco.recruit_block_reason(cap, 0, roster) == "" and eco.recruit(cap, 0, roster) and eco.pending.has(cap.id),
+			"a city with a pod queued can still train a division the same turn")
+	cap.labor.training = 15
+	eco.spawn_pending(m, roster)
+	var pod := roster.division_at(cap.cell)
+	ok(pod != null and pod.unit_type == "colony_pod" and eco.pods.is_empty() and eco.pending.has(cap.id) and int(eco.pending[cap.id].labor) == 15,
+			"both queues take the city's Training labor; the pod (no turn timer) appears first while the division keeps training")
+	roster.divisions.erase(pod)
+	eco.spawn_pending(m, roster)
+	eco.spawn_pending(m, roster)
+	ok(roster.division_at(cap.cell) != null and roster.division_at(cap.cell).unit_type == "infantry" and eco.pending.is_empty(), "the division appears after its 3 training turns")
+	# Save/load keeps the pod queue.
+	var g := save_game_setup(5)
+	var gcap: Dictionary = g.map.capital_of(1)
+	g.eco.queue_colony_pod(gcap, 1)
+	var state: Dictionary = save_state(g, 3)
+	var g2 := save_game_setup(5)
+	SaveGame.restore(state, g2.map, g2.roster, g2.eco)
+	ok(g2.eco.pods.has(gcap.id) and g2.eco.pods[gcap.id].kind == "colony_pod", "the pod queue is saved and restored")
