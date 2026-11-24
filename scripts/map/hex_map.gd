@@ -312,8 +312,8 @@ func attack_edge_blocked(a: Vector2i, b: Vector2i) -> bool:
 ## when it is one or more levels higher. Downhill and level steps cost the normal amount.
 func step_cost(from: Vector2i, to: Vector2i, nation := -1) -> int:
 	var cost := int(terrain_of(to).move_cost) + fungus_extra_cost(to, nation)
-	if snow_extra_move != 0 and terrain_name(to) == "snow":
-		cost += snow_extra_move  # T2 Blizzard
+	if snow_extra_move != 0 and is_cold(to):
+		cost += snow_extra_move  # T2 Blizzard: snow and snowcaps (same set as cold attrition)
 	if elevation_of(to) > elevation_of(from):
 		var free: Array = traits.mod(nation, "no_uphill_penalty_terrain", []) if nation >= 0 else []
 		if not free.has(terrain_name(to)):

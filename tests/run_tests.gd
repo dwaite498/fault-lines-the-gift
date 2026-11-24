@@ -71,6 +71,11 @@ func _initialize() -> void:
 	test_next_unit_camera()
 	test_t1_pacing()
 	test_planet_events()
+
+	# --- T2 follow-up: blizzard +1 move on snowcaps (own block to avoid merge collisions) ---
+	test_blizzard_snowcap_move()
+	# --- end T2 snowcap tweak ---
+
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -4041,3 +4046,26 @@ func test_planet_events() -> void:
 	ok(seq_a == seq_b, "after a load the event rolls continue exactly as before")
 	var cap := SaveGame.capture(m, g.roster, g.eco, 5, g.cfg, [], {"planet_events": ev.capture()})
 	ok(not cap.extras.get("planet_events", {}).is_empty(), "the scheduler state rides in the save extras")
+
+## T2 follow-up (PM): the Blizzard +1 move cost applies on snowcaps as well as snow,
+## matching HexMap.is_cold / cold attrition.
+func test_blizzard_snowcap_move() -> void:
+	var m := make_map(3, 3)
+	m.snow_rules = {"polar_rows": 1}
+	var cap := Vector2i(1, 0)
+	var snow := Vector2i(2, 0)
+	var plains := Vector2i(1, 1)
+	m.terrain[cap] = "mountains"
+	m.terrain[snow] = "snow"
+	ok(m.is_snowcap(cap) and m.is_cold(cap) and m.is_cold(snow) and not m.is_snowcap(snow) and not m.is_cold(plains),
+			"a polar mountain is a snowcap; snow is cold; plains are not")
+	var base_cap := m.step_cost(m.neighbors(cap)[0], cap, 0)
+	var base_snow := m.step_cost(m.neighbors(snow)[0], snow, 0)
+	var base_plains := m.step_cost(m.neighbors(plains)[0], plains, 0)
+	m.snow_extra_move = 1
+	ok(m.step_cost(m.neighbors(cap)[0], cap, 0) == base_cap + 1, "blizzard +1 move applies on a snowcap")
+	ok(m.step_cost(m.neighbors(snow)[0], snow, 0) == base_snow + 1, "blizzard +1 move still applies on snow")
+	ok(m.step_cost(m.neighbors(plains)[0], plains, 0) == base_plains, "blizzard does not add move on plains")
+	m.snow_extra_move = 0
+	ok(m.step_cost(m.neighbors(cap)[0], cap, 0) == base_cap and m.step_cost(m.neighbors(snow)[0], snow, 0) == base_snow,
+			"clearing the blizzard extra returns snowcap and snow to their normal costs")
