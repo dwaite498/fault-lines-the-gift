@@ -34,6 +34,10 @@ const NATIVES_PATH := "res://data/natives.json"
 var pending_captures: Array[Dictionary] = []
 var _defer_after_combat := false
 var _pending_captor := {}
+## Combat FX (visual only): what happened in the last execute_orders, for CombatFx to animate.
+## {"kind": "hit", "attacker", "defender", "from", "to", "to_attacker", "to_defender"} per exchange and
+## {"kind": "outcome", "id", "outcome", "hex", "nation", "unit_type"} per retreat or removal. Nothing reads it for rules.
+var fx_events: Array = []
 
 
 static func load_templates(path := CONFIG_PATH) -> Dictionary:
@@ -502,6 +506,7 @@ func attack(attacker: Division, defender: Division, hex_map: HexMap) -> Dictiona
 	var org_only: bool = templates.get(attacker.unit_type, {}).get("city_org_only", false) and not own_city.is_empty()
 	var taken_by_defender := _damage(defender, dmg_to_defender, org_div, org_only)
 	var taken_by_attacker := _damage(attacker, dmg_to_attacker)
+	_fx_hit(attacker, defender, taken_by_attacker, taken_by_defender)
 	attacker.moves_left = 0
 	attacker.fortify_level = 0
 	attacker.in_combat = true
@@ -530,7 +535,22 @@ func _after_combat_or_defer(d: Division, hex_map: HexMap, captor: int) -> String
 	if _defer_after_combat:
 		_pending_captor[d] = captor
 		return "pending"
-	return _after_combat(d, hex_map, captor)
+	return _after_combat_fx(d, hex_map, captor)
+
+
+## _after_combat plus a Combat FX record of a retreat or removal (visual only).
+func _after_combat_fx(d: Division, hex_map: HexMap, captor: int) -> String:
+	var at := d.hex
+	var outcome := _after_combat(d, hex_map, captor)
+	if outcome != "held":
+		fx_events.append({"kind": "outcome", "id": d.id, "outcome": outcome, "hex": at, "nation": d.nation, "unit_type": d.unit_type})
+	return outcome
+
+
+func _fx_hit(a: Division, b: Division, to_a: Dictionary, to_b: Dictionary) -> void:
+	fx_events.append({"kind": "hit", "attacker": a.id, "defender": b.id, "from": a.hex, "to": b.hex,
+			"to_attacker": float(to_a.get("org", 0.0)) + float(to_a.get("strength", 0.0)),
+			"to_defender": float(to_b.get("org", 0.0)) + float(to_b.get("strength", 0.0))})
 
 
 ## Applies raw damage scaled by morale (* (morale_offset - morale)), split between
@@ -792,6 +812,7 @@ func turns_to_arrive(d: Division, hex_map: HexMap) -> int:
 ## bounce. Clashes go to turn_log. All orders are cleared afterwards.
 func execute_orders(hex_map: HexMap) -> void:
 	turn_log.clear()
+	fx_events.clear()
 	_defer_after_combat = true
 	_pending_captor.clear()
 	var by_id := func(a, b): return a.nation < b.nation or (a.nation == b.nation and a.id < b.id)
@@ -935,7 +956,7 @@ func execute_orders(hex_map: HexMap) -> void:
 	hit.sort_custom(by_id)
 	for d in hit:
 		if divisions.has(d):
-			var outcome := _after_combat(d, hex_map, _pending_captor[d])
+			var outcome := _after_combat_fx(d, hex_map, _pending_captor[d])
 			if outcome != "held":
 				turn_log.append("Div %d (n%d) %s" % [d.id, d.nation, outcome])
 	_pending_captor.clear()
@@ -995,8 +1016,9 @@ func _meeting(a: Division, b: Division, terrain_a: Vector2i, terrain_b: Vector2i
 	var tb: float = hex_map.terrain_of(terrain_b).defense_mult
 	var to_b := roll_damage(attack_of(a), b.defense * tb)
 	var to_a := roll_damage(attack_of(b), a.defense * ta)
-	_damage(b, to_b)
-	_damage(a, to_a)
+	var hit_b := _damage(b, to_b)
+	var hit_a := _damage(a, to_a)
+	_fx_hit(a, b, hit_a, hit_b)
 	a.in_combat = true
 	b.in_combat = true
 	a.fortify_level = 0

@@ -34,6 +34,9 @@ var highlights: Array[Vector2i] = []
 var blocked_highlights: Array[Vector2i] = []
 ## P1: DivisionRoster.path_preview for the hovered hex in move mode ({} = none), drawn on top.
 var preview := {}
+## Combat FX (CombatFx): division id -> pixel offset (lunge, shake), and id -> last frame to draw it white.
+var unit_offset := {}
+var flash_until := {}
 var player_nation := 0
 ## City sprites by CityArt key (M12), kept referenced so the canvas can draw them.
 var _city_textures := {}
@@ -597,8 +600,10 @@ func _draw_native(d: Division) -> void:
 	var k := _k()
 	var c: Dictionary = palette.counter
 	var outline := Color.html(str(hex_map.natives_config.get("render", {}).get("outline", "#FF00FF")))
-	var center := hex_to_pixel(d.hex) + Vector2(0, -2 * k)
+	var center: Vector2 = hex_to_pixel(d.hex) + Vector2(0, -2 * k) + unit_offset.get(d.id, Vector2.ZERO)
 	var body := Color.html(c.neutral_fill).lightened(0.2)
+	if is_flashing(d):
+		body = Color.WHITE
 	if d.unit_type == "tendril_worm":
 		var pts := PackedVector2Array()
 		for i in 9:
@@ -640,7 +645,7 @@ func _draw_counter(d: Division) -> void:
 	var c: Dictionary = palette.counter
 	var gold := Color.html(c.badge_symbol)
 	var size := Vector2(40, 34) * k
-	var center := hex_to_pixel(d.hex) + Vector2(0, -6 * k)
+	var center: Vector2 = hex_to_pixel(d.hex) + Vector2(0, -6 * k) + unit_offset.get(d.id, Vector2.ZERO)
 	var rect := Rect2(center - size / 2, size)
 	var shoulder := rect.position.y + size.y * 0.72
 	var shield := PackedVector2Array([rect.position, Vector2(rect.end.x, rect.position.y),
@@ -652,6 +657,8 @@ func _draw_counter(d: Division) -> void:
 	if d.moves_left <= 0:
 		fill.a = spent_alpha()
 		stripe_color.a = spent_alpha()
+	if is_flashing(d):
+		fill = Color.WHITE  # Combat FX hit flash, one frame
 	draw_colored_polygon(shield, fill)
 	var sh := float(c.badge_stripe) * k
 	draw_rect(Rect2(rect.position, Vector2(size.x, sh)), stripe_color)
@@ -690,6 +697,11 @@ func _draw_counter(d: Division) -> void:
 		y += bar.y + 1 * k
 	if d == selected:
 		draw_rect(rect.grow(3.0), Color.html(c.selected), false, 2.0)
+
+
+## Combat FX: true on the frame(s) a hit flashes this division white.
+func is_flashing(d: Division) -> bool:
+	return Engine.get_process_frames() <= int(flash_until.get(d.id, -1))
 
 
 ## Capital: the lowest-id city of each nation (no capital flag exists yet).

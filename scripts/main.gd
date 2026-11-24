@@ -21,6 +21,8 @@ var _nation_panel: NationPanel
 var _military_panel: MilitaryPanel
 var _capture_popup := CapturePopup.new()
 var _pause_menu := PauseMenu.new()
+## Combat feedback juice (visual only).
+var _fx := CombatFx.new()
 var _fog: Fog
 var _game_over := GameOverScreen.new()
 ## Share of nation-owned cities that wins by domination (map_config.json "victory").
@@ -72,6 +74,10 @@ func _ready() -> void:
 	_view.fog = _fog
 	_view.player_nation = PLAYER_NATION
 	add_child(_view)
+	_fx.view = _view
+	_fx.camera = _camera
+	_fx.reduce_motion = GameSettings.reduce_motion()
+	_view.add_child(_fx)
 	_camera.configure(map_cfg.get("camera", {}))
 	add_child(_camera)
 	_camera.fit_to(_view.world_bounds())
@@ -134,6 +140,8 @@ func _ready() -> void:
 	_pause_menu.save_pressed.connect(_on_save_pressed)
 	_pause_menu.main_menu_pressed.connect(_on_main_menu_pressed)
 	_pause_menu.quit_pressed.connect(func() -> void: get_tree().quit())
+	_pause_menu.reduce_motion_check.set_pressed_no_signal(_fx.reduce_motion)
+	_pause_menu.reduce_motion_toggled.connect(_on_reduce_motion_toggled)
 	add_child(_pause_menu)
 	_domination_share = float(map_cfg.get("victory", {}).get("domination_share", Victory.DEFAULT_SHARE))
 	_game_over.new_game_pressed.connect(_on_game_over_new_game)
@@ -159,6 +167,13 @@ func _capture_state() -> Dictionary:
 	for i in _view.factions.assigned.size():
 		ids.append(_view.factions.id_of(i))
 	return SaveGame.capture(_view.hex_map, _view.roster, _economy, turn, _map_cfg, ids, {"fog": _fog.capture(), "pressure": _view.hex_map.pressure.capture()})
+
+
+func _on_reduce_motion_toggled(on: bool) -> void:
+	_fx.reduce_motion = on
+	if on:
+		_fx.clear()
+	GameSettings.set_reduce_motion(on)
 
 
 func _on_save_pressed() -> void:
@@ -251,6 +266,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		_set_mode("")
 		_economy.run_ai(PLAYER_NATION, _view.hex_map, roster)
 		roster.execute_orders(_view.hex_map)
+		_fx.play(roster.fx_events, roster.pending_captures)
 		_resolve_captures()
 	elif ACTION_KEYS.has(key.keycode):
 		do_action(ACTION_KEYS[key.keycode])
