@@ -1,11 +1,12 @@
 class_name PauseMenu
 extends CanvasLayer
-## The in-game Esc menu: Resume, Save Game, Main Menu and Quit. Modal while open.
+## The in-game Esc menu: Resume, Save Game, Main Menu, Quit and a Reduce motion toggle. Modal while open.
 
 signal resume_pressed
 signal save_pressed
 signal main_menu_pressed
 signal quit_pressed
+signal reduce_motion_toggled(on: bool)
 
 var root := Control.new()
 var status := Label.new()
@@ -13,6 +14,8 @@ var resume_button := Button.new()
 var save_button := Button.new()
 var menu_button := Button.new()
 var quit_button := Button.new()
+## Combat FX off switch (saved by main through GameSettings).
+var reduce_motion_check := CheckButton.new()
 
 
 func _init() -> void:
@@ -33,6 +36,9 @@ func _init() -> void:
 		pair[0].custom_minimum_size = Vector2(200, 36)
 		pair[0].focus_mode = Control.FOCUS_NONE
 		box.add_child(pair[0])
+	reduce_motion_check.text = "Reduce motion"
+	reduce_motion_check.focus_mode = Control.FOCUS_NONE
+	box.add_child(reduce_motion_check)
 	box.add_child(status)
 	panel.add_child(box)
 	center.add_child(panel)
@@ -43,6 +49,7 @@ func _init() -> void:
 	save_button.pressed.connect(func() -> void: save_pressed.emit())
 	menu_button.pressed.connect(func() -> void: main_menu_pressed.emit())
 	quit_button.pressed.connect(func() -> void: quit_pressed.emit())
+	reduce_motion_check.toggled.connect(func(on: bool) -> void: reduce_motion_toggled.emit(on))
 
 
 func is_open() -> bool:

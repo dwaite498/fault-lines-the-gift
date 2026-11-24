@@ -76,6 +76,7 @@ func _initialize() -> void:
 	test_blizzard_snowcap_move()
 	# --- end T2 snowcap tweak ---
 
+	test_combat_fx()
 	print("%d checks, %d failed" % [checks, fails])
 	quit(1 if fails > 0 else 0)
 
@@ -4069,3 +4070,82 @@ func test_blizzard_snowcap_move() -> void:
 	m.snow_extra_move = 0
 	ok(m.step_cost(m.neighbors(cap)[0], cap, 0) == base_cap and m.step_cost(m.neighbors(snow)[0], snow, 0) == base_snow,
 			"clearing the blizzard extra returns snowcap and snow to their normal costs")
+
+
+## Combat FX (Art Director spec via PM, Nov 23): visual only, fire-and-forget, all off with reduce motion.
+func fx_battle() -> Dictionary:
+	var w := nat_world()
+	var m: HexMap = w.map
+	var r: DivisionRoster = w.roster
+	var a := r.spawn_division(0, Vector2i(5, 4), "infantry")
+	var weak := r.spawn_division(DivisionRoster.NATIVE_NATION, Vector2i(6, 4), "rust_strider")
+	weak.strength = 0.5
+	var b := r.spawn_division(0, Vector2i(5, 6), "infantry")
+	var foe := r.spawn_division(1, Vector2i(6, 6), "infantry")
+	r.set_order(a, weak.hex, m)
+	r.set_order(b, foe.hex, m)
+	r.execute_orders(m)
+	return {"map": m, "roster": r, "weak": weak}
+
+
+func fx_state(r: DivisionRoster) -> Array:
+	return r.divisions.map(func(d: Division) -> Array: return [d.id, d.nation, d.hex, snappedf(d.strength, 0.0001), snappedf(d.org, 0.0001)])
+
+
+func fx_node(g: Dictionary, reduce: bool) -> CombatFx:
+	var view := MapView.new()
+	view.hex_map = g.map
+	view.roster = g.roster
+	var fx := CombatFx.new()
+	fx.view = view
+	fx.camera = Camera2D.new()
+	fx.reduce_motion = reduce
+	root.add_child(fx)
+	return fx
+
+
+func test_combat_fx() -> void:
+	ok(CombatFx.LUNGE_PX == 6.0 and CombatFx.LUNGE_TIME == 0.15 and CombatFx.SHAKE_PX == 3.0 and CombatFx.FLASH_FRAMES == 1,
+			"FX helper: lunge 6px out and back in 0.15s, shake 3px, white flash 1 frame")
+	ok(CombatFx.FLOAT_TIME == 0.8 and CombatFx.DAMAGE_COLOR == Color("#E0583A") and CombatFx.OUTCOME_COLOR == Color("#E6B85C"),
+			"floating numbers rise and fade over 0.8s: damage #E0583A, routed/captured #E6B85C")
+	var on := fx_battle()
+	var r: DivisionRoster = on.roster
+	var hits: Array = r.fx_events.filter(func(e: Dictionary) -> bool: return e.kind == "hit")
+	var deaths: Array = r.fx_events.filter(func(e: Dictionary) -> bool: return e.kind == "outcome" and e.outcome == "destroyed")
+	ok(hits.size() == 2 and float(hits[0].to_defender) > 0.0 and deaths.size() == 1 and int(deaths[0].id) == on.weak.id and deaths[0].hex == Vector2i(6, 4),
+			"execute_orders records each exchange and the destroyed native for the FX (%s)" % str(r.fx_events))
+	ok(not r.divisions.has(on.weak), "the destroyed unit is still removed from the roster at once (the FX only draws a ghost)")
+	var fx := fx_node(on, false)
+	fx.play(r.fx_events)
+	var ghosts := fx.get_children().filter(func(n: Node) -> bool: return n is CombatFx.Ghost)
+	var texts := fx.get_children().filter(func(n: Node) -> bool: return n is CombatFx.FloatText)
+	ok(fx.tweens_created > 0 and ghosts.size() == 1 and texts.size() == 4 and texts.all(func(n: Node) -> bool: return n.color == CombatFx.DAMAGE_COLOR),
+			"FX on: lunges, shakes, 4 damage numbers and a fading ghost for the destroyed unit (%d tweens, %d texts)" % [fx.tweens_created, texts.size()])
+	var outcome := fx_node(on, false)
+	outcome.play([{"kind": "outcome", "id": 99, "outcome": "retreated", "hex": Vector2i(3, 3), "nation": 1, "unit_type": "infantry"}],
+			[{"city_id": 1}])
+	var amber := outcome.get_children().filter(func(n: Node) -> bool: return n is CombatFx.FloatText and n.color == CombatFx.OUTCOME_COLOR)
+	ok(amber.size() == 2 and amber[0].text == "Routed" and amber[1].text == "Captured" and outcome.tweens_created == 3,
+			"routed and captured show amber words; a city capture adds the screen shake")
+	var off := fx_battle()
+	var fx_off := fx_node(off, true)
+	fx_off.play(off.roster.fx_events, [{"city_id": 1}])
+	ok(fx_off.tweens_created == 0 and fx_off.get_child_count() == 0 and fx_off.view.unit_offset.is_empty() and fx_off.view.flash_until.is_empty(),
+			"reduce motion turns every effect off: no tweens, no nodes, no offsets")
+	ok(fx_state(on.roster) == fx_state(off.roster), "combat results are identical with FX on and off")
+	fx.view.unit_offset[1] = Vector2(3, 0)
+	fx.camera.offset = Vector2(2, 0)
+	fx.clear()
+	ok(fx.view.unit_offset.is_empty() and fx.camera.offset == Vector2.ZERO, "switching reduce motion on mid-animation clears the effects")
+	var path := "user://test_settings.cfg"
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	var was := GameSettings.reduce_motion(path)
+	GameSettings.set_reduce_motion(true, path)
+	ok(not was and GameSettings.reduce_motion(path), "the Reduce motion setting defaults off and persists in a user:// settings file")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	for n in [fx, outcome, fx_off]:
+		n.clear()
+		n.view.free()
+		n.camera.free()
+		n.free()
